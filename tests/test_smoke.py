@@ -1,7 +1,5 @@
 """Smoke tests for smallaxe package."""
 
-import pytest
-
 
 def test_import_smallaxe():
     """Test that smallaxe can be imported."""
@@ -21,15 +19,17 @@ def test_version():
 
 def test_import_submodules():
     """Test that all submodules can be imported."""
-    from smallaxe import training
-    from smallaxe import preprocessing
-    from smallaxe import pipeline
-    from smallaxe import metrics
-    from smallaxe import search
-    from smallaxe import auto
-    from smallaxe import viz
-    from smallaxe import exceptions
-    from smallaxe import datasets
+    from smallaxe import (
+        auto,
+        datasets,
+        exceptions,
+        metrics,
+        pipeline,
+        preprocessing,
+        search,
+        training,
+        viz,
+    )
 
     assert training is not None
     assert preprocessing is not None
