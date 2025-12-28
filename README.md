@@ -1,5 +1,7 @@
 # smallaxe
 
+[![CI](https://github.com/henokyemam/smallaxe/actions/workflows/ci.yml/badge.svg)](https://github.com/henokyemam/smallaxe/actions/workflows/ci.yml)
+
 A PySpark MLOps library that simplifies model training, evaluation, and optimization for PySpark DataFrames.
 
 ## Why smallaxe?
