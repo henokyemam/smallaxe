@@ -11,8 +11,7 @@ def spark_session():
     Session-scoped to avoid the overhead of creating a new session for each test.
     """
     spark = (
-        SparkSession.builder
-        .master("local[2]")
+        SparkSession.builder.master("local[2]")
         .appName("smallaxe-tests")
         .config("spark.sql.shuffle.partitions", "2")
         .config("spark.default.parallelism", "2")
