@@ -146,8 +146,8 @@ predictions = auto.predict(new_df)
 
 ## Requirements
 
-- Python 3.8, 3.9, or 3.10
-- PySpark 3.3, 3.4, or 3.5
+- Python 3.8 - 3.12
+- PySpark 3.3+
 
 ## License
 

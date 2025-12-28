@@ -1,0 +1,100 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "smallaxe"
+version = "0.1.0"
+description = "A PySpark MLOps library for simplified model training and optimization"
+readme = "README.md"
+license = {text = "MIT"}
+requires-python = ">=3.8,<3.13"
+authors = [
+    {name = "Henok Yemam"}
+]
+keywords = ["pyspark", "mlops", "machine-learning", "spark", "xgboost", "lightgbm", "catboost"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+]
+
+dependencies = [
+    "pyspark>=3.3,<4.0",
+    "hyperopt>=0.2.7",
+    "plotly>=5.0.0",
+]
+
+[project.optional-dependencies]
+xgboost = [
+    "xgboost>=1.7.0",
+]
+lightgbm = [
+    "lightgbm>=3.3.0",
+    "synapse-ml-lightgbm>=1.0.0",
+]
+catboost = [
+    "catboost>=1.1.0",
+]
+all = [
+    "smallaxe[xgboost]",
+    "smallaxe[lightgbm]",
+    "smallaxe[catboost]",
+]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-spark>=0.6.0",
+    "black>=23.0.0",
+    "ruff>=0.1.0",
+    "mypy>=1.0.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/henokyemam/smallaxe"
+Repository = "https://github.com/henokyemam/smallaxe"
+Issues = "https://github.com/henokyemam/smallaxe/issues"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["smallaxe*"]
+
+[tool.black]
+line-length = 100
+target-version = ["py38", "py39", "py310", "py311", "py312"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py38"
+select = [
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings
+    "F",   # pyflakes
+    "I",   # isort
+    "B",   # flake8-bugbear
+    "UP",  # pyupgrade
+]
+ignore = [
+    "E501",  # line too long (handled by black)
+]
+
+[tool.mypy]
+python_version = "3.8"
+warn_return_any = true
+warn_unused_configs = true
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_functions = ["test_*"]
+addopts = "-v"
