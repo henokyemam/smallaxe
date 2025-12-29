@@ -10,6 +10,8 @@ Exception Hierarchy:
     └── ConfigurationError
 """
 
+from typing import List, Optional
+
 __all__ = [
     "SmallaxeError",
     "ValidationError",
@@ -42,8 +44,8 @@ class PreprocessingError(SmallaxeError):
     def __init__(
         self,
         message: str = "Missing required preprocessing steps.",
-        algorithm: str | None = None,
-        missing_step: str | None = None,
+        algorithm: Optional[str] = None,
+        missing_step: Optional[str] = None,
     ):
         if algorithm and missing_step:
             message = (
@@ -68,8 +70,8 @@ class ColumnNotFoundError(SmallaxeError):
     def __init__(
         self,
         message: str = "Required column not found in DataFrame.",
-        column: str | None = None,
-        available_columns: list[str] | None = None,
+        column: Optional[str] = None,
+        available_columns: Optional[List[str]] = None,
     ):
         if column:
             message = f"Column '{column}' not found in DataFrame."
@@ -86,8 +88,8 @@ class DependencyError(SmallaxeError):
     def __init__(
         self,
         message: str = "Missing optional dependency.",
-        package: str | None = None,
-        install_command: str | None = None,
+        package: Optional[str] = None,
+        install_command: Optional[str] = None,
     ):
         if package:
             message = f"{package} is not installed."
@@ -104,9 +106,9 @@ class ConfigurationError(SmallaxeError):
     def __init__(
         self,
         message: str = "Invalid configuration settings.",
-        setting: str | None = None,
-        value: str | None = None,
-        allowed_values: list[str] | None = None,
+        setting: Optional[str] = None,
+        value: Optional[str] = None,
+        allowed_values: Optional[List[str]] = None,
     ):
         if setting and value:
             message = f"Invalid value '{value}' for setting '{setting}'."
