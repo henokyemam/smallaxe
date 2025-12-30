@@ -1,7 +1,6 @@
 """Tests for the Encoder preprocessing component."""
 
 import pytest
-from pyspark.sql import functions as F
 
 from smallaxe.exceptions import (
     ColumnNotFoundError,

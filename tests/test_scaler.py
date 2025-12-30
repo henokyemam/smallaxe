@@ -281,12 +281,8 @@ class TestScalerFitTransform:
         scaler2.fit(df_for_scaling, numerical_cols=["value1"])
         result2 = scaler2.transform(df_for_scaling)
 
-        # Results should be the same
-        values1 = [row["value1"] for row in result1.orderBy("id").collect()]
-        values2 = [row["value2"] for row in result2.orderBy("id").collect()]
-
-        # Note: The values might differ slightly due to floating point
-        # but the overall transformation should be consistent
+        # Results should have the same schema
+        assert result1.columns == result2.columns
 
 
 class TestScalerEdgeCases:

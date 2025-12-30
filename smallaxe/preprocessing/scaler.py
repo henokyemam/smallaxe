@@ -1,14 +1,19 @@
 """Scaler for numerical feature scaling in PySpark DataFrames."""
 
-from typing import Dict, List, Optional
+from typing import List
 
 from pyspark.ml.feature import (
     MaxAbsScaler as SparkMaxAbsScaler,
+)
+from pyspark.ml.feature import (
     MinMaxScaler as SparkMinMaxScaler,
+)
+from pyspark.ml.feature import (
     StandardScaler as SparkStandardScaler,
+)
+from pyspark.ml.feature import (
     VectorAssembler,
 )
-from pyspark.ml.linalg import DenseVector
 from pyspark.sql import DataFrame
 from pyspark.sql import functions as F
 from pyspark.sql.types import DoubleType
