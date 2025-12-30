@@ -99,20 +99,20 @@ def get_spark_session() -> Optional[Any]:
     return _config._spark_session
 
 
-def set_seed(seed: int) -> None:
+def set_seed(seed: Optional[int]) -> None:
     """Set the global random seed for reproducibility.
 
     This affects all random operations including train/test splits,
     k-fold cross-validation, and hyperopt sampling.
 
     Args:
-        seed: Integer seed value.
+        seed: Integer seed value, or None to reset to no seed.
 
     Raises:
-        ConfigurationError: If seed is not an integer.
+        ConfigurationError: If seed is not an integer or None.
     """
-    if not isinstance(seed, int):
-        raise ConfigurationError(message=f"Seed must be an integer, got {type(seed).__name__}.")
+    if seed is not None and not isinstance(seed, int):
+        raise ConfigurationError(message=f"Seed must be an integer or None, got {type(seed).__name__}.")
     _config._seed = seed
 
 
