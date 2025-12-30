@@ -2,17 +2,6 @@
 
 ### Phase 7: Training Module - Random Forest (v0.6.0)
 
-#### Step 7.4: Random Forest Classifier
-- [ ] Add `RandomForestClassifier(task='binary')` to `random_forest.py`
-- [ ] Implement stratified sampling for classification
-- [ ] Implement probability output for classification
-- [ ] Update `tests/test_random_forest.py`:
-  - Test classifier on sample classification data
-  - Test stratified kfold
-  - Test probability column output
-- [ ] Commit: "Add RandomForestClassifier"
-- [ ] PR → main
-
 #### Step 7.5: Regressors/Classifiers Factory
 - [ ] Create `smallaxe/training/regressors.py`:
   ```python

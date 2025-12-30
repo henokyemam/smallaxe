@@ -1,4 +1,4 @@
-"""Tests for RandomForestRegressor."""
+"""Tests for RandomForestRegressor and RandomForestClassifier."""
 
 import os
 import tempfile
@@ -6,7 +6,7 @@ import tempfile
 import pytest
 
 from smallaxe.exceptions import ModelNotFittedError, ValidationError
-from smallaxe.training import RandomForestRegressor
+from smallaxe.training import RandomForestClassifier, RandomForestRegressor
 
 
 @pytest.fixture
@@ -517,3 +517,492 @@ class TestRandomForestRegressorCacheStrategy:
             cache_strategy="disk",
         )
         assert model._is_fitted
+
+
+# =============================================================================
+# RandomForestClassifier Tests
+# =============================================================================
+
+
+@pytest.fixture
+def classification_df(spark_session):
+    """Create a sample DataFrame for binary classification testing."""
+    data = [(i, 20.0 + (i % 30), 40000.0 + (i * 1000), i % 2) for i in range(1, 101)]
+    columns = ["id", "age", "income", "label"]
+    return spark_session.createDataFrame(data, columns)
+
+
+@pytest.fixture
+def multiclass_df(spark_session):
+    """Create a sample DataFrame for multiclass classification testing."""
+    data = [(i, 20.0 + (i % 30), 40000.0 + (i * 1000), i % 3) for i in range(1, 101)]
+    columns = ["id", "age", "income", "label"]
+    return spark_session.createDataFrame(data, columns)
+
+
+class TestRandomForestClassifierInit:
+    """Tests for RandomForestClassifier initialization."""
+
+    def test_default_task(self):
+        """Test that default task is 'binary'."""
+        model = RandomForestClassifier()
+        assert model.task == "binary"
+        assert model.task_type == "classification"
+
+    def test_explicit_binary_task(self):
+        """Test that explicit binary task is set correctly."""
+        model = RandomForestClassifier(task="binary")
+        assert model.task == "binary"
+
+    def test_explicit_multiclass_task(self):
+        """Test that explicit multiclass task is set correctly."""
+        model = RandomForestClassifier(task="multiclass")
+        assert model.task == "multiclass"
+
+    def test_invalid_task_raises_error(self):
+        """Test that invalid task raises ValidationError."""
+        with pytest.raises(ValidationError, match="Invalid classification task"):
+            RandomForestClassifier(task="simple_regression")
+
+
+class TestRandomForestClassifierParams:
+    """Tests for params and default_params."""
+
+    def test_params_dict(self):
+        """Test that params returns parameter descriptions."""
+        model = RandomForestClassifier()
+        params = model.params
+
+        assert "n_estimators" in params
+        assert "max_depth" in params
+        assert "max_bins" in params
+        assert "min_instances_per_node" in params
+        assert "min_info_gain" in params
+        assert "subsampling_rate" in params
+        assert "feature_subset_strategy" in params
+        assert "seed" in params
+
+        # Check descriptions are strings
+        for _key, value in params.items():
+            assert isinstance(value, str)
+            assert len(value) > 0
+
+    def test_default_params_dict(self):
+        """Test that default_params returns default values."""
+        model = RandomForestClassifier()
+        defaults = model.default_params
+
+        assert defaults["n_estimators"] == 20
+        assert defaults["max_depth"] == 5
+        assert defaults["max_bins"] == 32
+        assert defaults["min_instances_per_node"] == 1
+        assert defaults["min_info_gain"] == 0.0
+        assert defaults["subsampling_rate"] == 1.0
+        assert defaults["feature_subset_strategy"] == "auto"
+        assert defaults["seed"] is None
+
+
+class TestRandomForestClassifierFit:
+    """Tests for fit method."""
+
+    def test_fit_returns_self(self, classification_df):
+        """Test that fit returns self for method chaining."""
+        model = RandomForestClassifier()
+        result = model.fit(
+            classification_df,
+            label_col="label",
+            feature_cols=["age", "income"],
+        )
+        assert result is model
+
+    def test_fit_marks_model_as_fitted(self, classification_df):
+        """Test that fit marks the model as fitted."""
+        model = RandomForestClassifier()
+        assert not model._is_fitted
+        model.fit(
+            classification_df,
+            label_col="label",
+            feature_cols=["age", "income"],
+        )
+        assert model._is_fitted
+
+    def test_fit_multiclass(self, multiclass_df):
+        """Test fitting on multiclass data."""
+        model = RandomForestClassifier(task="multiclass")
+        model.fit(
+            multiclass_df,
+            label_col="label",
+            feature_cols=["age", "income"],
+        )
+        assert model._is_fitted
+
+
+class TestRandomForestClassifierPredict:
+    """Tests for predict method."""
+
+    def test_predict_before_fit_raises_error(self, classification_df):
+        """Test that predict before fit raises ModelNotFittedError."""
+        model = RandomForestClassifier()
+        with pytest.raises(ModelNotFittedError, match="Model has not been fitted"):
+            model.predict(classification_df)
+
+    def test_predict_returns_dataframe(self, classification_df):
+        """Test that predict returns a DataFrame."""
+        model = RandomForestClassifier()
+        model.fit(
+            classification_df,
+            label_col="label",
+            feature_cols=["age", "income"],
+        )
+        result = model.predict(classification_df)
+        assert result is not None
+        assert result.count() == classification_df.count()
+
+    def test_predict_adds_default_column(self, classification_df):
+        """Test that predict adds default prediction column."""
+        model = RandomForestClassifier()
+        model.fit(
+            classification_df,
+            label_col="label",
+            feature_cols=["age", "income"],
+        )
+        result = model.predict(classification_df)
+        assert "predict_label" in result.columns
+
+    def test_predict_values_are_class_labels(self, classification_df):
+        """Test that predictions are valid class labels."""
+        model = RandomForestClassifier()
+        model.fit(
+            classification_df,
+            label_col="label",
+            feature_cols=["age", "income"],
+        )
+        result = model.predict(classification_df)
+        predictions = [row.predict_label for row in result.collect()]
+        # All predictions should be 0 or 1 for binary classification
+        assert all(p in [0.0, 1.0] for p in predictions)
+
+
+class TestRandomForestClassifierPredictProba:
+    """Tests for predict_proba method."""
+
+    def test_predict_proba_before_fit_raises_error(self, classification_df):
+        """Test that predict_proba before fit raises ModelNotFittedError."""
+        model = RandomForestClassifier()
+        with pytest.raises(ModelNotFittedError, match="Model has not been fitted"):
+            model.predict_proba(classification_df)
+
+    def test_predict_proba_returns_dataframe(self, classification_df):
+        """Test that predict_proba returns a DataFrame."""
+        model = RandomForestClassifier()
+        model.fit(
+            classification_df,
+            label_col="label",
+            feature_cols=["age", "income"],
+        )
+        result = model.predict_proba(classification_df)
+        assert result is not None
+        assert result.count() == classification_df.count()
+
+    def test_predict_proba_adds_probability_column(self, classification_df):
+        """Test that predict_proba adds probability column."""
+        model = RandomForestClassifier()
+        model.fit(
+            classification_df,
+            label_col="label",
+            feature_cols=["age", "income"],
+        )
+        result = model.predict_proba(classification_df)
+        assert "probability" in result.columns
+
+    def test_predict_proba_custom_output_col(self, classification_df):
+        """Test that predict_proba uses custom output column name."""
+        model = RandomForestClassifier()
+        model.fit(
+            classification_df,
+            label_col="label",
+            feature_cols=["age", "income"],
+        )
+        result = model.predict_proba(classification_df, output_col="my_proba")
+        assert "my_proba" in result.columns
+        assert "probability" not in result.columns
+
+    def test_predict_proba_is_vector(self, classification_df):
+        """Test that probability output is a DenseVector."""
+        from pyspark.ml.linalg import DenseVector
+
+        model = RandomForestClassifier()
+        model.fit(
+            classification_df,
+            label_col="label",
+            feature_cols=["age", "income"],
+        )
+        result = model.predict_proba(classification_df)
+        first_row = result.first()
+        assert isinstance(first_row.probability, DenseVector)
+        # Binary classification should have 2 probability values
+        assert len(first_row.probability) == 2
+
+    def test_predict_proba_sums_to_one(self, classification_df):
+        """Test that probability values sum to approximately 1."""
+        model = RandomForestClassifier()
+        model.fit(
+            classification_df,
+            label_col="label",
+            feature_cols=["age", "income"],
+        )
+        result = model.predict_proba(classification_df)
+        rows = result.collect()
+        for row in rows:
+            prob_sum = sum(row.probability)
+            assert abs(prob_sum - 1.0) < 0.01
+
+
+class TestRandomForestClassifierStratifiedValidation:
+    """Tests for stratified validation strategies."""
+
+    def test_validation_train_test_stratified(self, classification_df):
+        """Test validation='train_test' with stratified=True (default for classifiers)."""
+        model = RandomForestClassifier()
+        model.fit(
+            classification_df,
+            label_col="label",
+            feature_cols=["age", "income"],
+            validation="train_test",
+            test_size=0.3,
+        )
+
+        scores = model.validation_scores
+        assert scores is not None
+        assert scores["validation_type"] == "train_test"
+        assert "accuracy" in scores
+        assert "precision" in scores
+        assert "recall" in scores
+        assert "f1_score" in scores
+
+    def test_validation_kfold_stratified(self, classification_df):
+        """Test validation='kfold' with stratified splits."""
+        model = RandomForestClassifier()
+        model.fit(
+            classification_df,
+            label_col="label",
+            feature_cols=["age", "income"],
+            validation="kfold",
+            n_folds=3,
+        )
+
+        scores = model.validation_scores
+        assert scores is not None
+        assert scores["validation_type"] == "kfold"
+        assert scores["n_folds"] == 3
+        assert "mean_accuracy" in scores
+        assert "mean_precision" in scores
+        assert "mean_recall" in scores
+        assert "mean_f1_score" in scores
+        assert "fold_scores" in scores
+        assert len(scores["fold_scores"]) == 3
+
+    def test_kfold_fold_scores_have_classification_metrics(self, classification_df):
+        """Test that k-fold individual fold scores have classification metrics."""
+        model = RandomForestClassifier()
+        model.fit(
+            classification_df,
+            label_col="label",
+            feature_cols=["age", "income"],
+            validation="kfold",
+            n_folds=3,
+        )
+
+        fold_scores = model.validation_scores["fold_scores"]
+        for fold in fold_scores:
+            assert "fold" in fold
+            assert "accuracy" in fold
+            assert "precision" in fold
+            assert "recall" in fold
+            assert "f1_score" in fold
+
+    def test_binary_validation_includes_auc_metrics(self, classification_df):
+        """Test that binary classification includes AUC metrics."""
+        model = RandomForestClassifier(task="binary")
+        model.fit(
+            classification_df,
+            label_col="label",
+            feature_cols=["age", "income"],
+            validation="train_test",
+            test_size=0.3,
+        )
+
+        scores = model.validation_scores
+        # AUC metrics should be present for binary classification
+        assert "auc_roc" in scores
+        assert "auc_pr" in scores
+
+
+class TestRandomForestClassifierMetadata:
+    """Tests for metadata after fit."""
+
+    def test_metadata_populated_after_fit(self, classification_df):
+        """Test that metadata is populated after fit."""
+        model = RandomForestClassifier()
+        model.fit(
+            classification_df,
+            label_col="label",
+            feature_cols=["age", "income"],
+        )
+
+        metadata = model.metadata
+        assert "training_timestamp" in metadata
+        assert metadata["label_col"] == "label"
+        assert metadata["feature_cols"] == ["age", "income"]
+        assert metadata["n_samples"] == 100
+        assert metadata["n_features"] == 2
+        assert metadata["task"] == "binary"
+        assert metadata["task_type"] == "classification"
+
+    def test_metadata_contains_class_distribution(self, classification_df):
+        """Test that metadata contains class distribution for classification."""
+        model = RandomForestClassifier()
+        model.fit(
+            classification_df,
+            label_col="label",
+            feature_cols=["age", "income"],
+        )
+
+        metadata = model.metadata
+        assert "class_counts" in metadata
+
+
+class TestRandomForestClassifierFeatureImportance:
+    """Tests for feature importance."""
+
+    def test_feature_importances_after_fit(self, classification_df):
+        """Test that feature_importances is available after fit."""
+        model = RandomForestClassifier()
+        model.fit(
+            classification_df,
+            label_col="label",
+            feature_cols=["age", "income"],
+        )
+
+        importances = model.feature_importances
+        assert importances is not None
+        assert isinstance(importances, dict)
+        assert "age" in importances
+        assert "income" in importances
+
+    def test_feature_importances_sum_to_one(self, classification_df):
+        """Test that feature importances sum to approximately 1."""
+        model = RandomForestClassifier()
+        model.fit(
+            classification_df,
+            label_col="label",
+            feature_cols=["age", "income"],
+        )
+
+        importances = model.feature_importances
+        total = sum(importances.values())
+        assert abs(total - 1.0) < 0.01
+
+
+class TestRandomForestClassifierSaveLoad:
+    """Tests for save/load roundtrip."""
+
+    def test_save_load_roundtrip(self, classification_df):
+        """Test saving and loading a classifier."""
+        model = RandomForestClassifier()
+        model.set_param({"n_estimators": 30, "max_depth": 8})
+        model.fit(
+            classification_df,
+            label_col="label",
+            feature_cols=["age", "income"],
+        )
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            save_path = os.path.join(tmpdir, "model")
+            model.save(save_path)
+
+            loaded_model = RandomForestClassifier.load(save_path)
+
+            assert loaded_model._is_fitted
+            assert loaded_model.get_param("n_estimators") == 30
+            assert loaded_model.get_param("max_depth") == 8
+            assert loaded_model._feature_cols == ["age", "income"]
+            assert loaded_model._label_col == "label"
+
+    def test_loaded_model_can_predict(self, classification_df):
+        """Test that loaded model can make predictions."""
+        model = RandomForestClassifier()
+        model.fit(
+            classification_df,
+            label_col="label",
+            feature_cols=["age", "income"],
+        )
+
+        original_predictions = model.predict(classification_df).collect()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            save_path = os.path.join(tmpdir, "model")
+            model.save(save_path)
+
+            loaded_model = RandomForestClassifier.load(save_path)
+            loaded_predictions = loaded_model.predict(classification_df).collect()
+
+        assert len(loaded_predictions) == len(original_predictions)
+
+    def test_loaded_model_can_predict_proba(self, classification_df):
+        """Test that loaded model can make probability predictions."""
+        model = RandomForestClassifier()
+        model.fit(
+            classification_df,
+            label_col="label",
+            feature_cols=["age", "income"],
+        )
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            save_path = os.path.join(tmpdir, "model")
+            model.save(save_path)
+
+            loaded_model = RandomForestClassifier.load(save_path)
+            proba_result = loaded_model.predict_proba(classification_df)
+
+        assert "probability" in proba_result.columns
+        assert proba_result.count() == classification_df.count()
+
+    def test_loaded_model_has_feature_importances(self, classification_df):
+        """Test that loaded model has feature importances."""
+        model = RandomForestClassifier()
+        model.fit(
+            classification_df,
+            label_col="label",
+            feature_cols=["age", "income"],
+        )
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            save_path = os.path.join(tmpdir, "model")
+            model.save(save_path)
+
+            loaded_model = RandomForestClassifier.load(save_path)
+            importances = loaded_model.feature_importances
+
+        assert importances is not None
+        assert "age" in importances
+        assert "income" in importances
+
+    def test_loaded_model_preserves_validation_scores(self, classification_df):
+        """Test that loaded model preserves validation scores."""
+        model = RandomForestClassifier()
+        model.fit(
+            classification_df,
+            label_col="label",
+            feature_cols=["age", "income"],
+            validation="train_test",
+        )
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            save_path = os.path.join(tmpdir, "model")
+            model.save(save_path)
+
+            loaded_model = RandomForestClassifier.load(save_path)
+
+        assert loaded_model.validation_scores is not None
+        assert loaded_model.validation_scores["validation_type"] == "train_test"
