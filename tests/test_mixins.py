@@ -107,18 +107,8 @@ class ConcreteSparkClassifierMixin(SparkModelMixin):
 @pytest.fixture
 def regression_df(spark_session):
     """Create a sample DataFrame for regression testing."""
-    data = [
-        (1, 25.0, 50000.0, 100.0),
-        (2, 30.0, 60000.0, 150.0),
-        (3, 35.0, 70000.0, 200.0),
-        (4, 40.0, 80000.0, 250.0),
-        (5, 45.0, 90000.0, 300.0),
-        (6, 28.0, 55000.0, 125.0),
-        (7, 33.0, 65000.0, 175.0),
-        (8, 38.0, 75000.0, 225.0),
-        (9, 42.0, 85000.0, 275.0),
-        (10, 48.0, 95000.0, 325.0),
-    ]
+    # Generate 50 rows for more reliable randomSplit behavior in tests
+    data = [(i, 20.0 + (i % 30), 40000.0 + (i * 1000), 50.0 + (i * 5)) for i in range(1, 51)]
     columns = ["id", "age", "income", "target"]
     return spark_session.createDataFrame(data, columns)
 
@@ -291,6 +281,7 @@ class TestValidationMixin:
 
     def test_train_test_split_default(self, regression_df):
         """Test train_test_split with default parameters."""
+        smallaxe.set_seed(42)
         mixin = ConcreteValidationMixin()
         train_df, test_df = mixin._train_test_split(regression_df, test_size=0.2)
 
@@ -300,6 +291,9 @@ class TestValidationMixin:
 
         # Check total count is preserved
         assert train_df.count() + test_df.count() == regression_df.count()
+
+        # Reset seed
+        smallaxe.set_seed(None)
 
     def test_train_test_split_with_seed(self, spark_session, regression_df):
         """Test train_test_split with seed produces reproducible results."""
