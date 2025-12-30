@@ -221,19 +221,35 @@ def r2(df: DataFrame, label_col: str = "label", prediction_col: str = "predict_l
     if df.limit(1).count() == 0:
         return 0.0
 
-    # 2. Setup the Regression Evaluator for R2
+    # 2. Handle Constant Labels (SS_tot = 0)
+    # If the min and max of the label column are the same, the labels are constant.
+    stats = df.select(
+        F.min(label_col).alias("min_label"),
+        F.max(label_col).alias("max_label"),
+        F.count_distinct(F.when(F.col(label_col) == F.col(prediction_col), 1)).alias(
+            "perfect_match"
+        ),
+    ).collect()[0]
+
+    if stats["min_label"] == stats["max_label"]:
+        # Check if predictions also match that constant value
+        # We check if there are any rows where label != prediction
+        mismatch_count = df.filter(F.col(label_col) != F.col(prediction_col)).count()
+        return 1.0 if mismatch_count == 0 else 0.0
+
+    # 3. Setup the Regression Evaluator for R2
     evaluator = RegressionEvaluator(
         labelCol=label_col, predictionCol=prediction_col, metricName="r2"
     )
 
-    # 3. Calculate R2
+    # 4. Calculate R2
     try:
         result = evaluator.evaluate(df)
 
-        # Spark's R2 evaluator returns -inf if SS_tot is 0 and SS_res > 0.
-        # We can add a quick check if you want to maintain your specific
-        # handling of the SS_tot == 0 case.
-        if result == float("-inf"):
+        # Spark's R2 evaluator returns NaN or -inf in edge cases
+        import math
+
+        if math.isnan(result) or result == float("-inf"):
             return 0.0
 
         return float(result)
