@@ -1,17 +1,5 @@
 ## TODO LIST - Build Phases
 
-### Phase 5: Pipeline Module (v0.4.0)
-
-#### Step 5.2: Pipeline Validation
-- [ ] Add preprocessing requirement validation:
-  - Check algorithm requirements when model is added
-  - Raise `PreprocessingError` if missing required steps
-- [ ] Update tests for validation logic
-- [ ] Commit: "Add pipeline preprocessing validation"
-- [ ] PR → main
-- [ ] **Tag: v0.4.0**
-
----
 
 ### Phase 6: Metrics Module (v0.5.0)
 

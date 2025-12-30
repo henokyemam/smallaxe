@@ -7,7 +7,7 @@ from typing import Any, ClassVar, Dict, List, Optional, Set, Tuple
 
 from pyspark.sql import DataFrame
 
-from smallaxe.exceptions import ModelNotFittedError, ValidationError
+from smallaxe.exceptions import ModelNotFittedError, PreprocessingError, ValidationError
 
 
 class Pipeline:
@@ -51,6 +51,20 @@ class Pipeline:
         "LightGBMClassifier",
         "CatBoostRegressor",
         "CatBoostClassifier",
+    }
+
+    # Preprocessing requirements for each model type
+    # Maps model type names to a set of required preprocessing step types
+    MODEL_PREPROCESSING_REQUIREMENTS: ClassVar[Dict[str, Set[str]]] = {
+        "RandomForestRegressor": {"Encoder"},
+        "RandomForestClassifier": {"Encoder"},
+        "XGBoostRegressor": {"Encoder"},
+        "XGBoostClassifier": {"Encoder"},
+        "LightGBMRegressor": {"Encoder"},
+        "LightGBMClassifier": {"Encoder"},
+        # CatBoost handles categoricals natively - no preprocessing required
+        "CatBoostRegressor": set(),
+        "CatBoostClassifier": set(),
     }
 
     def __init__(self, steps: List[Tuple[str, Any]]) -> None:
@@ -116,6 +130,9 @@ class Pipeline:
         # Validate step order: preprocessing steps should come before model
         self._validate_step_order(steps)
 
+        # Validate preprocessing requirements for models
+        self._validate_preprocessing_requirements(steps)
+
     def _validate_step_order(self, steps: List[Tuple[str, Any]]) -> None:
         """Validate that preprocessing steps come before model steps.
 
@@ -146,6 +163,54 @@ class Pipeline:
                         "All preprocessing steps must come before model steps."
                     )
                 )
+
+    def _validate_preprocessing_requirements(self, steps: List[Tuple[str, Any]]) -> None:
+        """Validate that required preprocessing steps are present for model.
+
+        Checks if the pipeline contains all preprocessing steps required by
+        the model. Different algorithms have different requirements - for example,
+        Random Forest and XGBoost require encoded categorical columns, while
+        CatBoost handles categoricals natively.
+
+        Parameters
+        ----------
+        steps : List[Tuple[str, Any]]
+            The steps to validate.
+
+        Raises
+        ------
+        PreprocessingError
+            If a required preprocessing step is missing for the model.
+        """
+        # Collect preprocessing step types present in the pipeline
+        preprocessing_types: Set[str] = set()
+        model_step = None
+        model_name = None
+
+        for name, step in steps:
+            step_type = type(step).__name__
+            if self._is_preprocessing_step(step):
+                preprocessing_types.add(step_type)
+            elif self._is_model_step(step):
+                model_step = step
+                model_name = step_type
+
+        # If no model, no validation needed
+        if model_step is None:
+            return
+
+        # Get requirements for this model type
+        required_steps = self.MODEL_PREPROCESSING_REQUIREMENTS.get(model_name, set())
+
+        # Check if all required steps are present
+        missing_steps = required_steps - preprocessing_types
+        if missing_steps:
+            # Raise error for the first missing step
+            missing_step = sorted(missing_steps)[0]
+            raise PreprocessingError(
+                algorithm=model_name,
+                missing_step=missing_step,
+            )
 
     def _is_preprocessing_step(self, step: Any) -> bool:
         """Check if a step is a preprocessing step.
