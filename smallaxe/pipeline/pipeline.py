@@ -187,7 +187,7 @@ class Pipeline:
         model_step = None
         model_name = None
 
-        for name, step in steps:
+        for _, step in steps:
             step_type = type(step).__name__
             if self._is_preprocessing_step(step):
                 preprocessing_types.add(step_type)
