@@ -2,29 +2,6 @@
 
 ### Phase 7: Training Module - Random Forest (v0.6.0)
 
-#### Step 7.2: Base Classes
-- [ ] Create `smallaxe/training/base.py`:
-  ```python
-  class BaseModel(ParamMixin, PersistenceMixin, ValidationMixin, MetadataMixin, SparkModelMixin):
-      def __init__(self, task: str): ...
-      def fit(self, df, label_col, feature_cols, exclude_cols, validation, ...): ...
-      def predict(self, df): ...
-
-  class BaseRegressor(BaseModel): ...
-  class BaseClassifier(BaseModel):
-      def predict_proba(self, df): ...
-  ```
-- [ ] Implement `task_type` property
-- [ ] Implement `exclude_cols` handling in fit
-- [ ] Implement caching based on `cache_strategy`
-- [ ] Create `tests/test_training_base.py`:
-  - Test task_type property
-  - Test exclude_cols works correctly
-  - Test predict before fit raises ModelNotFittedError
-  - Test metadata populated after fit
-- [ ] Commit: "Add training base classes"
-- [ ] PR → main
-
 #### Step 7.3: Random Forest Regressor
 - [ ] Create `smallaxe/training/random_forest.py`
 - [ ] Implement `RandomForestRegressor(task='simple_regression')`:
