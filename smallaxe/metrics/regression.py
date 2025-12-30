@@ -93,9 +93,7 @@ def mae(df: DataFrame, label_col: str = "label", prediction_col: str = "predict_
     """
     _validate_columns(df, label_col, prediction_col)
 
-    result = df.select(
-        F.avg(F.abs(F.col(label_col) - F.col(prediction_col))).alias("mae")
-    ).first()
+    result = df.select(F.avg(F.abs(F.col(label_col) - F.col(prediction_col))).alias("mae")).first()
 
     return float(result["mae"]) if result["mae"] is not None else 0.0
 
