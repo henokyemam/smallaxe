@@ -2,27 +2,6 @@
 
 ### Phase 7: Training Module - Random Forest (v0.6.0)
 
-#### Step 7.3: Random Forest Regressor
-- [ ] Create `smallaxe/training/random_forest.py`
-- [ ] Implement `RandomForestRegressor(task='simple_regression')`:
-  - Wrap PySpark MLlib RandomForestRegressor
-  - Define params dict with descriptions
-  - Define default_params
-  - Implement fit with train_test and kfold support
-  - Implement predict
-  - Implement save/load
-- [ ] Create `tests/test_random_forest.py`:
-  - Test fit on sample regression data
-  - Test predict returns correct columns
-  - Test params and default_params
-  - Test set_param
-  - Test save/load roundtrip
-  - Test validation='train_test'
-  - Test validation='kfold'
-- [ ] Run locally: `pytest tests/test_random_forest.py -v`
-- [ ] Commit: "Add RandomForestRegressor"
-- [ ] PR → main
-
 #### Step 7.4: Random Forest Classifier
 - [ ] Add `RandomForestClassifier(task='binary')` to `random_forest.py`
 - [ ] Implement stratified sampling for classification
