@@ -2,33 +2,6 @@
 
 ### Phase 5: Pipeline Module (v0.4.0)
 
-#### Step 5.1: Pipeline Class
-- [ ] Create `smallaxe/pipeline/pipeline.py`
-- [ ] Implement `Pipeline` class:
-  ```python
-  class Pipeline:
-      def __init__(self, steps: List[Tuple[str, Any]]): ...
-      def fit(self, df, label_col=None, numerical_cols=None, categorical_cols=None): ...
-      def transform(self, df): ...
-      def fit_transform(self, df, ...): ...
-      def predict(self, df): ...  # only if model in pipeline
-      def save(self, path): ...
-      @classmethod
-      def load(cls, path): ...
-  ```
-- [ ] Validate step order (preprocessing before model)
-- [ ] Pass correct columns to each step
-- [ ] Create `tests/test_pipeline.py`:
-  - Test preprocessing-only pipeline
-  - Test pipeline with model (use mock or simple model)
-  - Test fit_transform
-  - Test transform without fit raises error
-  - Test save/load roundtrip
-  - Test invalid step order raises error
-- [ ] Run locally: `pytest tests/test_pipeline.py -v`
-- [ ] Commit: "Add Pipeline class"
-- [ ] PR → main
-
 #### Step 5.2: Pipeline Validation
 - [ ] Add preprocessing requirement validation:
   - Check algorithm requirements when model is added
