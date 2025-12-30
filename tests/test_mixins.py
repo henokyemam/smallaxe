@@ -411,7 +411,7 @@ class TestMetadataMixin:
         metadata = mixin.metadata
         assert metadata["label_col"] == "target"
         assert metadata["feature_cols"] == ["age", "income"]
-        assert metadata["n_samples"] == 10
+        assert metadata["n_samples"] == 50
         assert metadata["n_features"] == 2
         assert "training_timestamp" in metadata
         assert "smallaxe_version" in metadata
@@ -437,8 +437,8 @@ class TestMetadataMixin:
         assert "label_min" in stats
         assert "label_max" in stats
         assert "label_mean" in stats
-        assert stats["label_min"] == 100.0
-        assert stats["label_max"] == 325.0
+        assert stats["label_min"] == 55.0
+        assert stats["label_max"] == 300.0
 
     def test_capture_label_stats_classification(self, classification_df):
         """Test _capture_label_stats for classification."""
