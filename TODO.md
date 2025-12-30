@@ -3,25 +3,6 @@
 
 ### Phase 6: Metrics Module (v0.5.0)
 
-#### Step 6.1: Regression Metrics
-- [ ] Create `smallaxe/metrics/regression.py`
-- [ ] Implement functions:
-  ```python
-  def rmse(df, label_col='label', prediction_col='predict_label'): ...
-  def mae(df, label_col='label', prediction_col='predict_label'): ...
-  def mse(df, label_col='label', prediction_col='predict_label'): ...
-  def r2(df, label_col='label', prediction_col='predict_label'): ...
-  def mape(df, label_col='label', prediction_col='predict_label'): ...
-  ```
-- [ ] Raise `ColumnNotFoundError` for missing columns
-- [ ] Create `tests/test_metrics_regression.py`:
-  - Test each metric with known values
-  - Test missing column error
-  - Test edge cases (zero values for MAPE, etc.)
-- [ ] Run locally: `pytest tests/test_metrics_regression.py -v`
-- [ ] Commit: "Add regression metrics"
-- [ ] PR → main
-
 #### Step 6.2: Classification Metrics
 - [ ] Create `smallaxe/metrics/classification.py`
 - [ ] Implement functions:
