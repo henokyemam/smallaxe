@@ -171,10 +171,12 @@ class TestSeed:
         with pytest.raises(ConfigurationError):
             smallaxe.set_seed("42")
 
-    def test_set_seed_none_raises_error(self):
-        """Test that None seed raises ConfigurationError."""
-        with pytest.raises(ConfigurationError):
-            smallaxe.set_seed(None)
+    def test_set_seed_none_resets_seed(self):
+        """Test that None seed resets the seed (valid behavior)."""
+        smallaxe.set_seed(42)
+        assert smallaxe.get_seed() == 42
+        smallaxe.set_seed(None)
+        assert smallaxe.get_seed() is None
 
 
 class TestCacheStrategy:
