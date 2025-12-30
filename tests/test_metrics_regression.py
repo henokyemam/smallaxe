@@ -3,7 +3,6 @@
 import math
 
 import pytest
-from pyspark.sql import functions as F
 
 from smallaxe.exceptions import ColumnNotFoundError
 from smallaxe.metrics.regression import mae, mape, mse, r2, rmse
