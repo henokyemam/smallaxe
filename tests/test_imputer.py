@@ -99,9 +99,7 @@ class TestImputerMeanStrategy:
         result = imputer.transform(df_with_nulls)
 
         # Check no nulls remain
-        null_count = result.filter(
-            F.col("age").isNull() | F.col("income").isNull()
-        ).count()
+        null_count = result.filter(F.col("age").isNull() | F.col("income").isNull()).count()
         assert null_count == 0
 
         # Check specific filled values
@@ -116,9 +114,7 @@ class TestImputerMeanStrategy:
         imputer = Imputer(numerical_strategy="mean")
         result = imputer.fit_transform(df_with_nulls, numerical_cols=["age", "income"])
 
-        null_count = result.filter(
-            F.col("age").isNull() | F.col("income").isNull()
-        ).count()
+        null_count = result.filter(F.col("age").isNull() | F.col("income").isNull()).count()
         assert null_count == 0
 
 
@@ -156,9 +152,7 @@ class TestImputerModeStrategy:
     def test_transform_fills_nulls_with_mode(self, df_with_many_categories):
         """Test that transform fills categorical nulls with mode."""
         imputer = Imputer(categorical_strategy="mode")
-        result = imputer.fit_transform(
-            df_with_many_categories, categorical_cols=["category"]
-        )
+        result = imputer.fit_transform(df_with_many_categories, categorical_cols=["category"])
 
         # Check no nulls remain
         null_count = result.filter(F.col("category").isNull()).count()
@@ -228,16 +222,12 @@ class TestImputerErrors:
     def test_missing_column_in_transform_raises_error(self, spark_session):
         """Test that missing column in transform raises ColumnNotFoundError."""
         # Fit on one DataFrame
-        df_fit = spark_session.createDataFrame(
-            [(1, 25.0), (2, None)], ["id", "age"]
-        )
+        df_fit = spark_session.createDataFrame([(1, 25.0), (2, None)], ["id", "age"])
         imputer = Imputer()
         imputer.fit(df_fit, numerical_cols=["age"])
 
         # Transform on a different DataFrame missing the column
-        df_transform = spark_session.createDataFrame(
-            [(1, "A"), (2, "B")], ["id", "category"]
-        )
+        df_transform = spark_session.createDataFrame([(1, "A"), (2, "B")], ["id", "category"])
         with pytest.raises(ColumnNotFoundError, match="age"):
             imputer.transform(df_transform)
 
@@ -265,10 +255,12 @@ class TestImputerEdgeCases:
         """Test handling of column with all null values."""
         from pyspark.sql.types import DoubleType, IntegerType, StructField, StructType
 
-        schema = StructType([
-            StructField("id", IntegerType(), False),
-            StructField("value", DoubleType(), True),
-        ])
+        schema = StructType(
+            [
+                StructField("id", IntegerType(), False),
+                StructField("value", DoubleType(), True),
+            ]
+        )
         data = [(1, None), (2, None), (3, None)]
         df = spark_session.createDataFrame(data, schema)
 
@@ -301,8 +293,6 @@ class TestImputerEdgeCases:
 
         # Check no nulls remain in any imputed column
         null_count = result.filter(
-            F.col("age").isNull()
-            | F.col("income").isNull()
-            | F.col("category").isNull()
+            F.col("age").isNull() | F.col("income").isNull() | F.col("category").isNull()
         ).count()
         assert null_count == 0

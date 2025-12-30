@@ -63,16 +63,14 @@ class Encoder:
         """Validate the encoding method."""
         if method not in VALID_METHODS:
             raise ValidationError(
-                f"Invalid method '{method}'. "
-                f"Must be one of {sorted(VALID_METHODS)}."
+                f"Invalid method '{method}'. Must be one of {sorted(VALID_METHODS)}."
             )
 
     def _validate_handle_rare(self, handle_rare: str) -> None:
         """Validate the handle_rare option."""
         if handle_rare not in VALID_HANDLE_RARE:
             raise ValidationError(
-                f"Invalid handle_rare '{handle_rare}'. "
-                f"Must be one of {sorted(VALID_HANDLE_RARE)}."
+                f"Invalid handle_rare '{handle_rare}'. Must be one of {sorted(VALID_HANDLE_RARE)}."
             )
 
     def _validate_max_categories(self, max_categories: int) -> None:
@@ -252,9 +250,7 @@ class Encoder:
             ColumnNotFoundError: If any fitted column is not in the DataFrame.
         """
         if not self._is_fitted:
-            raise ModelNotFittedError(
-                "Encoder has not been fitted. Call fit() before transform()."
-            )
+            raise ModelNotFittedError("Encoder has not been fitted. Call fit() before transform().")
 
         # Validate that all fitted columns exist
         self._validate_columns(df, self._categorical_cols)

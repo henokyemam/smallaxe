@@ -170,9 +170,7 @@ class TestLabelEncoder:
     def test_label_encoder_multiple_columns(self, df_for_encoding):
         """Test LabelEncoder with multiple columns."""
         encoder = Encoder(method="label")
-        result = encoder.fit_transform(
-            df_for_encoding, categorical_cols=["color", "size"]
-        )
+        result = encoder.fit_transform(df_for_encoding, categorical_cols=["color", "size"])
 
         # Both columns should be encoded
         for col in ["color", "size"]:
@@ -239,9 +237,7 @@ class TestOneHotEncoder:
     def test_onehot_encoder_multiple_columns(self, df_for_encoding):
         """Test OneHotEncoder with multiple columns."""
         encoder = Encoder(method="onehot")
-        result = encoder.fit_transform(
-            df_for_encoding, categorical_cols=["color", "size"]
-        )
+        result = encoder.fit_transform(df_for_encoding, categorical_cols=["color", "size"])
 
         # Original columns should be removed
         assert "color" not in result.columns
@@ -261,9 +257,7 @@ class TestMaxCategories:
     def test_max_categories_limits_onehot_columns(self, df_with_many_categories):
         """Test that max_categories limits the number of one-hot columns."""
         encoder = Encoder(method="onehot", max_categories=5, handle_rare="other")
-        result = encoder.fit_transform(
-            df_with_many_categories, categorical_cols=["category"]
-        )
+        result = encoder.fit_transform(df_with_many_categories, categorical_cols=["category"])
 
         # Should have at most max_categories + 1 (for OTHER) columns
         category_cols = [c for c in result.columns if c.startswith("category_")]
@@ -272,9 +266,7 @@ class TestMaxCategories:
     def test_max_categories_limits_label_indices(self, df_with_many_categories):
         """Test that max_categories limits the number of label indices."""
         encoder = Encoder(method="label", max_categories=5, handle_rare="other")
-        result = encoder.fit_transform(
-            df_with_many_categories, categorical_cols=["category"]
-        )
+        result = encoder.fit_transform(df_with_many_categories, categorical_cols=["category"])
 
         # Get unique encoded values
         unique_values = result.select("category").distinct().collect()
@@ -292,9 +284,7 @@ class TestHandleRare:
         # With max_categories=2, only cat_A and cat_B should be kept
         # cat_C and cat_D should be grouped into OTHER
         encoder = Encoder(method="onehot", max_categories=2, handle_rare="other")
-        result = encoder.fit_transform(
-            df_with_rare_categories, categorical_cols=["category"]
-        )
+        result = encoder.fit_transform(df_with_rare_categories, categorical_cols=["category"])
 
         category_cols = [c for c in result.columns if c.startswith("category_")]
 
@@ -308,9 +298,7 @@ class TestHandleRare:
     def test_handle_rare_keep_preserves_all(self, df_with_rare_categories):
         """Test that handle_rare='keep' preserves all categories."""
         encoder = Encoder(method="onehot", max_categories=2, handle_rare="keep")
-        result = encoder.fit_transform(
-            df_with_rare_categories, categorical_cols=["category"]
-        )
+        result = encoder.fit_transform(df_with_rare_categories, categorical_cols=["category"])
 
         category_cols = [c for c in result.columns if c.startswith("category_")]
 
@@ -363,7 +351,10 @@ class TestUnseenCategories:
         # Row with unseen category should get the OTHER index
         rows = result.orderBy("id").collect()
         # The unseen category D should map to OTHER (or None if no OTHER exists)
-        assert rows[1]["category"] is not None or "__OTHER__" not in encoder.category_mappings["category"]
+        assert (
+            rows[1]["category"] is not None
+            or "__OTHER__" not in encoder.category_mappings["category"]
+        )
 
     def test_unseen_category_in_onehot(self, spark_session):
         """Test handling of unseen categories in one-hot encoding."""
@@ -404,16 +395,12 @@ class TestEncoderErrors:
     def test_missing_column_in_transform_raises_error(self, spark_session):
         """Test that missing column in transform raises ColumnNotFoundError."""
         # Fit on one DataFrame
-        df_fit = spark_session.createDataFrame(
-            [(1, "A"), (2, "B")], ["id", "category"]
-        )
+        df_fit = spark_session.createDataFrame([(1, "A"), (2, "B")], ["id", "category"])
         encoder = Encoder()
         encoder.fit(df_fit, categorical_cols=["category"])
 
         # Transform on a different DataFrame missing the column
-        df_transform = spark_session.createDataFrame(
-            [(1, 100), (2, 200)], ["id", "value"]
-        )
+        df_transform = spark_session.createDataFrame([(1, 100), (2, 200)], ["id", "value"])
         with pytest.raises(ColumnNotFoundError, match="category"):
             encoder.transform(df_transform)
 
