@@ -3,27 +3,6 @@
 
 ### Phase 6: Metrics Module (v0.5.0)
 
-#### Step 6.2: Classification Metrics
-- [ ] Create `smallaxe/metrics/classification.py`
-- [ ] Implement functions:
-  ```python
-  def accuracy(df, label_col, prediction_col): ...
-  def precision(df, label_col, prediction_col): ...
-  def recall(df, label_col, prediction_col): ...
-  def f1_score(df, label_col, prediction_col): ...
-  def auc_roc(df, label_col, probability_col): ...
-  def auc_pr(df, label_col, probability_col): ...
-  def log_loss(df, label_col, probability_col): ...
-  ```
-- [ ] Create `tests/test_metrics_classification.py`:
-  - Test each metric with known values
-  - Test perfect predictions
-  - Test worst-case predictions
-  - Test probability-based metrics
-- [ ] Run locally: `pytest tests/test_metrics_classification.py -v`
-- [ ] Commit: "Add classification metrics"
-- [ ] PR → main
-
 #### Step 6.3: Metrics Module Exports
 - [ ] Update `smallaxe/metrics/__init__.py`
 - [ ] Run full metrics test suite
