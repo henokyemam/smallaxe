@@ -1,7 +1,6 @@
 """Base classes for training models."""
 
-from abc import abstractmethod
-from typing import Any, Dict, List, Literal, Optional, Union
+from typing import Any, Dict, List, Literal, Optional
 
 from pyspark.sql import DataFrame
 from pyspark.sql.types import NumericType
@@ -111,9 +110,7 @@ class BaseModel(
             ModelNotFittedError: If accessed before the model is fitted.
         """
         if not self._is_fitted:
-            raise ModelNotFittedError(
-                "No validation scores available. Model has not been fitted."
-            )
+            raise ModelNotFittedError("No validation scores available. Model has not been fitted.")
         return self._validation_scores
 
     def fit(
@@ -194,13 +191,9 @@ class BaseModel(
             if validation == "none":
                 self._fit_no_validation(cached_df, label_col, feature_cols)
             elif validation == "train_test":
-                self._fit_train_test(
-                    cached_df, label_col, feature_cols, test_size, stratified
-                )
+                self._fit_train_test(cached_df, label_col, feature_cols, test_size, stratified)
             elif validation == "kfold":
-                self._fit_kfold(
-                    cached_df, label_col, feature_cols, n_folds, stratified
-                )
+                self._fit_kfold(cached_df, label_col, feature_cols, n_folds, stratified)
 
             # Capture metadata
             self._capture_training_metadata(cached_df, label_col, feature_cols)
@@ -557,18 +550,15 @@ class BaseModel(
         if self._task == "binary":
             try:
                 # Get probability predictions
-                proba_df = self._predict_proba_spark_model(
-                    original_df, output_col="probability"
-                )
+                proba_df = self._predict_proba_spark_model(original_df, output_col="probability")
 
                 # Extract the probability of the positive class (class 1)
                 # Spark's probability is a vector, we need to extract the second element
-                from pyspark.sql import functions as F
                 from pyspark.ml.functions import vector_to_array
+                from pyspark.sql import functions as F
 
                 proba_df = proba_df.withColumn(
-                    "prob_positive",
-                    vector_to_array(F.col("probability"))[1]
+                    "prob_positive", vector_to_array(F.col("probability"))[1]
                 )
 
                 metrics["auc_roc"] = auc_roc(proba_df, label_col, "prob_positive")
@@ -625,9 +615,7 @@ class BaseModel(
             ModelNotFittedError: If the model has not been fitted.
         """
         if not self._is_fitted:
-            raise ModelNotFittedError(
-                "Model has not been fitted. Call fit() before predict()."
-            )
+            raise ModelNotFittedError("Model has not been fitted. Call fit() before predict().")
 
         return self._predict_spark_model(df, output_col=output_col)
 

@@ -169,6 +169,7 @@ def auc_roc(df, label_col="label", probability_col="probability"):
 
     return float(evaluator.evaluate(df))
 
+
 def auc_pr(df: DataFrame, label_col: str = "label", probability_col: str = "probability") -> float:
     """Compute Area Under the Precision-Recall Curve (AUC-PR)."""
     _validate_columns(df, label_col, probability_col)
@@ -238,5 +239,3 @@ def log_loss(
         return 0.0
 
     return float(result["log_loss"])
-
-

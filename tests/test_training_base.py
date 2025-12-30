@@ -3,14 +3,13 @@
 from typing import Any, Dict
 
 import pytest
-from pyspark.ml.classification import RandomForestClassifier as SparkRFClassifier
-from pyspark.ml.regression import RandomForestRegressor as SparkRFRegressor
-from pyspark.ml.regression import RandomForestRegressionModel
 from pyspark.ml.classification import RandomForestClassificationModel
+from pyspark.ml.classification import RandomForestClassifier as SparkRFClassifier
+from pyspark.ml.regression import RandomForestRegressionModel
+from pyspark.ml.regression import RandomForestRegressor as SparkRFRegressor
 
 from smallaxe.exceptions import ModelNotFittedError, ValidationError
-from smallaxe.training.base import BaseClassifier, BaseModel, BaseRegressor
-
+from smallaxe.training.base import BaseClassifier, BaseRegressor
 
 # --- Concrete implementations for testing ---
 
