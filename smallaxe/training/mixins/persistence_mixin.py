@@ -3,7 +3,7 @@
 import json
 import os
 from abc import ABC, abstractmethod
-from typing import Any, Dict, Optional, Type, TypeVar
+from typing import Any, Dict, Type, TypeVar
 
 from smallaxe.exceptions import ModelNotFittedError, ValidationError
 
@@ -73,9 +73,7 @@ class PersistenceMixin(ABC):
             >>> model.save('/path/to/model')
         """
         if not self._is_fitted:
-            raise ModelNotFittedError(
-                "Model has not been fitted. Call fit() before save()."
-            )
+            raise ModelNotFittedError("Model has not been fitted. Call fit() before save().")
 
         if not path:
             raise ValidationError("Path cannot be empty.")
@@ -97,7 +95,7 @@ class PersistenceMixin(ABC):
         # Allow subclasses to save additional artifacts
         self._save_artifacts(path)
 
-    def _save_artifacts(self, path: str) -> None:
+    def _save_artifacts(self, path: str) -> None:  # noqa: B027
         """Save additional model artifacts.
 
         Override in subclasses to save model-specific files
@@ -131,9 +129,7 @@ class PersistenceMixin(ABC):
 
         metadata_path = os.path.join(path, "metadata.json")
         if not os.path.exists(metadata_path):
-            raise ValidationError(
-                f"Invalid model directory: metadata.json not found at {path}"
-            )
+            raise ValidationError(f"Invalid model directory: metadata.json not found at {path}")
 
         # Load metadata
         with open(metadata_path) as f:
@@ -141,12 +137,11 @@ class PersistenceMixin(ABC):
 
         # Verify class matches
         saved_class = state.pop("__class__", None)
-        saved_module = state.pop("__module__", None)
+        state.pop("__module__", None)  # Remove module info from state
 
         if saved_class and saved_class != cls.__name__:
             raise ValidationError(
-                f"Model type mismatch: expected {cls.__name__}, "
-                f"got {saved_class}."
+                f"Model type mismatch: expected {cls.__name__}, got {saved_class}."
             )
 
         # Create new instance and restore state
@@ -158,7 +153,7 @@ class PersistenceMixin(ABC):
 
         return instance
 
-    def _load_artifacts(self, path: str) -> None:
+    def _load_artifacts(self, path: str) -> None:  # noqa: B027
         """Load additional model artifacts.
 
         Override in subclasses to load model-specific files.

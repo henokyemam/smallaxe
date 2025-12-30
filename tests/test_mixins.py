@@ -2,14 +2,12 @@
 
 import os
 import tempfile
-from typing import Any, Dict, List
+from typing import Any, Dict
 
 import pytest
-from pyspark.ml.classification import RandomForestClassificationModel
 from pyspark.ml.classification import RandomForestClassifier as SparkRFClassifier
 from pyspark.ml.regression import RandomForestRegressionModel
 from pyspark.ml.regression import RandomForestRegressor as SparkRFRegressor
-from pyspark.sql import functions as F
 
 import smallaxe
 from smallaxe.exceptions import ModelNotFittedError, ValidationError
@@ -20,7 +18,6 @@ from smallaxe.training.mixins import (
     SparkModelMixin,
     ValidationMixin,
 )
-
 
 # --- Concrete implementations for testing ---
 
@@ -379,17 +376,19 @@ class TestValidationMixin:
     def test_kfold_split_stratified(self, classification_df):
         """Test stratified kfold_split preserves class distribution in each fold."""
         mixin = ConcreteValidationMixin()
-        folds = list(mixin._kfold_split(
-            classification_df,
-            n_folds=3,
-            stratified=True,
-            label_col="label",
-        ))
+        folds = list(
+            mixin._kfold_split(
+                classification_df,
+                n_folds=3,
+                stratified=True,
+                label_col="label",
+            )
+        )
 
         assert len(folds) == 3
 
         # Each fold's train set should have both classes
-        for train_df, val_df in folds:
+        for train_df, _val_df in folds:
             train_classes = [r["label"] for r in train_df.select("label").distinct().collect()]
             assert len(train_classes) == 2
 

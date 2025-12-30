@@ -35,9 +35,7 @@ class MetadataMixin:
             ModelNotFittedError: If accessed before the model is fitted.
         """
         if not getattr(self, "_metadata", None):
-            raise ModelNotFittedError(
-                "No metadata available. Model has not been fitted."
-            )
+            raise ModelNotFittedError("No metadata available. Model has not been fitted.")
         return self._metadata.copy()
 
     def _capture_metadata(
@@ -109,21 +107,23 @@ class MetadataMixin:
             ).first()
 
             if label_stats:
-                stats["label_min"] = float(label_stats["min"]) if label_stats["min"] is not None else None
-                stats["label_max"] = float(label_stats["max"]) if label_stats["max"] is not None else None
-                stats["label_mean"] = float(label_stats["mean"]) if label_stats["mean"] is not None else None
-                stats["label_stddev"] = float(label_stats["stddev"]) if label_stats["stddev"] is not None else None
+                stats["label_min"] = (
+                    float(label_stats["min"]) if label_stats["min"] is not None else None
+                )
+                stats["label_max"] = (
+                    float(label_stats["max"]) if label_stats["max"] is not None else None
+                )
+                stats["label_mean"] = (
+                    float(label_stats["mean"]) if label_stats["mean"] is not None else None
+                )
+                stats["label_stddev"] = (
+                    float(label_stats["stddev"]) if label_stats["stddev"] is not None else None
+                )
 
         else:
             # Classification stats
-            class_counts = (
-                df.groupBy(label_col)
-                .count()
-                .collect()
-            )
-            stats["class_counts"] = {
-                str(row[label_col]): row["count"] for row in class_counts
-            }
+            class_counts = df.groupBy(label_col).count().collect()
+            stats["class_counts"] = {str(row[label_col]): row["count"] for row in class_counts}
             stats["n_classes"] = len(class_counts)
 
         return stats

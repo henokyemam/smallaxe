@@ -118,9 +118,7 @@ class SparkModelMixin(ABC):
             ModelNotFittedError: If the model has not been fitted.
         """
         if not hasattr(self, "_spark_model") or self._spark_model is None:
-            raise ModelNotFittedError(
-                "Model has not been fitted. Call fit() before predict()."
-            )
+            raise ModelNotFittedError("Model has not been fitted. Call fit() before predict().")
 
         # Assemble features
         df_with_features = self._assemble_features(df, self._feature_cols)
@@ -130,9 +128,7 @@ class SparkModelMixin(ABC):
 
         # Rename prediction column to output_col
         if output_col != self.PREDICTION_COL:
-            predictions_df = predictions_df.withColumnRenamed(
-                self.PREDICTION_COL, output_col
-            )
+            predictions_df = predictions_df.withColumnRenamed(self.PREDICTION_COL, output_col)
 
         # Drop intermediate columns
         cols_to_drop = [self.FEATURES_COL]
@@ -177,9 +173,7 @@ class SparkModelMixin(ABC):
 
         # Rename probability column if needed
         if self.PROBABILITY_COL in predictions_df.columns and output_col != self.PROBABILITY_COL:
-            predictions_df = predictions_df.withColumnRenamed(
-                self.PROBABILITY_COL, output_col
-            )
+            predictions_df = predictions_df.withColumnRenamed(self.PROBABILITY_COL, output_col)
 
         # Drop intermediate columns
         cols_to_drop = [
@@ -243,9 +237,7 @@ class SparkModelMixin(ABC):
         import os
 
         if not hasattr(self, "_spark_model") or self._spark_model is None:
-            raise ModelNotFittedError(
-                "Model has not been fitted. Call fit() before saving."
-            )
+            raise ModelNotFittedError("Model has not been fitted. Call fit() before saving.")
 
         model_path = os.path.join(path, "spark_model")
         self._spark_model.write().overwrite().save(model_path)

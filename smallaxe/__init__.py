@@ -112,7 +112,9 @@ def set_seed(seed: Optional[int]) -> None:
         ConfigurationError: If seed is not an integer or None.
     """
     if seed is not None and not isinstance(seed, int):
-        raise ConfigurationError(message=f"Seed must be an integer or None, got {type(seed).__name__}.")
+        raise ConfigurationError(
+            message=f"Seed must be an integer or None, got {type(seed).__name__}."
+        )
     _config._seed = seed
 
 

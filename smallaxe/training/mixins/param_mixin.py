@@ -62,8 +62,7 @@ class ParamMixin(ABC):
         for name, value in params.items():
             if name not in valid_params:
                 raise ValidationError(
-                    f"Invalid parameter '{name}'. "
-                    f"Valid parameters are: {sorted(valid_params)}"
+                    f"Invalid parameter '{name}'. Valid parameters are: {sorted(valid_params)}"
                 )
             self._validate_param(name, value)
             self._set_param_value(name, value)
@@ -85,8 +84,7 @@ class ParamMixin(ABC):
         valid_params = set(self.params.keys())
         if name not in valid_params:
             raise ValidationError(
-                f"Invalid parameter '{name}'. "
-                f"Valid parameters are: {sorted(valid_params)}"
+                f"Invalid parameter '{name}'. Valid parameters are: {sorted(valid_params)}"
             )
         return self._get_param_value(name)
 

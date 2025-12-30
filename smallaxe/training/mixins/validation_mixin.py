@@ -42,14 +42,10 @@ class ValidationMixin:
             ValidationError: If stratified=True but label_col is not specified.
         """
         if not 0 < test_size < 1:
-            raise ValidationError(
-                f"test_size must be between 0 and 1, got {test_size}."
-            )
+            raise ValidationError(f"test_size must be between 0 and 1, got {test_size}.")
 
         if stratified and not label_col:
-            raise ValidationError(
-                "label_col must be specified when stratified=True."
-            )
+            raise ValidationError("label_col must be specified when stratified=True.")
 
         seed = smallaxe.get_seed()
 
@@ -92,9 +88,7 @@ class ValidationMixin:
         for label in labels:
             label_df = df.filter(F.col(label_col) == label)
             if seed is not None:
-                train_part, test_part = label_df.randomSplit(
-                    [train_ratio, test_size], seed=seed
-                )
+                train_part, test_part = label_df.randomSplit([train_ratio, test_size], seed=seed)
             else:
                 train_part, test_part = label_df.randomSplit([train_ratio, test_size])
             train_dfs.append(train_part)
@@ -136,9 +130,7 @@ class ValidationMixin:
             raise ValidationError(f"n_folds must be at least 2, got {n_folds}.")
 
         if stratified and not label_col:
-            raise ValidationError(
-                "label_col must be specified when stratified=True."
-            )
+            raise ValidationError("label_col must be specified when stratified=True.")
 
         seed = smallaxe.get_seed()
 
@@ -176,8 +168,7 @@ class ValidationMixin:
         # Use row_number with random ordering, then modulo for fold assignment
         window = Window.orderBy(rand_col)
         df_with_fold = df_with_rand.withColumn(
-            fold_col,
-            (F.row_number().over(window) - 1) % n_folds
+            fold_col, (F.row_number().over(window) - 1) % n_folds
         ).drop(rand_col)
 
         for fold_idx in range(n_folds):
@@ -221,8 +212,7 @@ class ValidationMixin:
             # Use row_number with random ordering, then modulo for fold assignment
             window = Window.orderBy(rand_col)
             label_df = label_df.withColumn(
-                fold_col,
-                (F.row_number().over(window) - 1) % n_folds
+                fold_col, (F.row_number().over(window) - 1) % n_folds
             ).drop(rand_col)
             df_parts.append(label_df)
 
