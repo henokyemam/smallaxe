@@ -1,15 +1,26 @@
 """Scaler for numerical feature scaling in PySpark DataFrames."""
 
+import json
+import os
 from typing import List
 
 from pyspark.ml.feature import (
     MaxAbsScaler as SparkMaxAbsScaler,
 )
 from pyspark.ml.feature import (
+    MaxAbsScalerModel,
+)
+from pyspark.ml.feature import (
     MinMaxScaler as SparkMinMaxScaler,
 )
 from pyspark.ml.feature import (
+    MinMaxScalerModel,
+)
+from pyspark.ml.feature import (
     StandardScaler as SparkStandardScaler,
+)
+from pyspark.ml.feature import (
+    StandardScalerModel,
 )
 from pyspark.ml.feature import (
     VectorAssembler,
@@ -223,3 +234,60 @@ class Scaler:
                 "Scaler has not been fitted. Call fit() to access numerical_cols."
             )
         return self._numerical_cols.copy()
+
+    def save(self, path: str) -> None:
+        """Save the scaler to disk.
+
+        Args:
+            path: The directory path to save the scaler to.
+
+        Raises:
+            ModelNotFittedError: If save is called before fit.
+        """
+        if not self._is_fitted:
+            raise ModelNotFittedError(
+                "Scaler has not been fitted. Call fit() before saving."
+            )
+
+        os.makedirs(path, exist_ok=True)
+
+        metadata = {
+            "method": self._method,
+            "numerical_cols": self._numerical_cols,
+            "is_fitted": self._is_fitted,
+        }
+
+        with open(os.path.join(path, "scaler_metadata.json"), "w") as f:
+            json.dump(metadata, f, indent=2)
+
+        # Save the Spark ML model
+        model_path = os.path.join(path, "spark_model")
+        self._scaler_model.write().overwrite().save(model_path)
+
+    @classmethod
+    def load(cls, path: str) -> "Scaler":
+        """Load a scaler from disk.
+
+        Args:
+            path: The directory path to load the scaler from.
+
+        Returns:
+            The loaded Scaler instance.
+        """
+        with open(os.path.join(path, "scaler_metadata.json"), "r") as f:
+            metadata = json.load(f)
+
+        scaler = cls(method=metadata["method"])
+        scaler._numerical_cols = metadata["numerical_cols"]
+        scaler._is_fitted = metadata["is_fitted"]
+
+        # Load the Spark ML model based on method
+        model_path = os.path.join(path, "spark_model")
+        if metadata["method"] == "standard":
+            scaler._scaler_model = StandardScalerModel.load(model_path)
+        elif metadata["method"] == "minmax":
+            scaler._scaler_model = MinMaxScalerModel.load(model_path)
+        elif metadata["method"] == "maxabs":
+            scaler._scaler_model = MaxAbsScalerModel.load(model_path)
+
+        return scaler

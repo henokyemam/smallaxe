@@ -1,5 +1,7 @@
 """Imputer for handling missing values in PySpark DataFrames."""
 
+import json
+import os
 from typing import Dict, List, Optional, Union
 
 from pyspark.sql import DataFrame
@@ -271,3 +273,57 @@ class Imputer:
                 "Imputer has not been fitted. Call fit() to compute fill values."
             )
         return self._categorical_fill_values.copy()
+
+    def save(self, path: str) -> None:
+        """Save the imputer to disk.
+
+        Args:
+            path: The directory path to save the imputer to.
+
+        Raises:
+            ModelNotFittedError: If save is called before fit.
+        """
+        if not self._is_fitted:
+            raise ModelNotFittedError(
+                "Imputer has not been fitted. Call fit() before saving."
+            )
+
+        os.makedirs(path, exist_ok=True)
+
+        metadata = {
+            "numerical_strategy": self._numerical_strategy,
+            "categorical_strategy": self._categorical_strategy,
+            "numerical_cols": self._numerical_cols,
+            "categorical_cols": self._categorical_cols,
+            "numerical_fill_values": self._numerical_fill_values,
+            "categorical_fill_values": self._categorical_fill_values,
+            "is_fitted": self._is_fitted,
+        }
+
+        with open(os.path.join(path, "imputer_metadata.json"), "w") as f:
+            json.dump(metadata, f, indent=2)
+
+    @classmethod
+    def load(cls, path: str) -> "Imputer":
+        """Load an imputer from disk.
+
+        Args:
+            path: The directory path to load the imputer from.
+
+        Returns:
+            The loaded Imputer instance.
+        """
+        with open(os.path.join(path, "imputer_metadata.json"), "r") as f:
+            metadata = json.load(f)
+
+        imputer = cls(
+            numerical_strategy=metadata["numerical_strategy"],
+            categorical_strategy=metadata["categorical_strategy"],
+        )
+        imputer._numerical_cols = metadata["numerical_cols"]
+        imputer._categorical_cols = metadata["categorical_cols"]
+        imputer._numerical_fill_values = metadata["numerical_fill_values"]
+        imputer._categorical_fill_values = metadata["categorical_fill_values"]
+        imputer._is_fitted = metadata["is_fitted"]
+
+        return imputer

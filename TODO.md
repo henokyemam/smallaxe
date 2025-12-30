@@ -1,18 +1,5 @@
 ## TODO LIST - Build Phases
 
-### Phase 4: Preprocessing Module (v0.3.0)
-
-#### Step 4.4: Preprocessing Module Exports
-- [ ] Update `smallaxe/preprocessing/__init__.py` with exports
-- [ ] Create integration test `tests/test_preprocessing_integration.py`:
-  - Test Imputer → Scaler → Encoder chain manually
-- [ ] Run full preprocessing test suite
-- [ ] Commit: "Finalize preprocessing module exports"
-- [ ] PR → main
-- [ ] **Tag: v0.3.0**
-
----
-
 ### Phase 5: Pipeline Module (v0.4.0)
 
 #### Step 5.1: Pipeline Class
