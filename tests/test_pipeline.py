@@ -85,11 +85,13 @@ class TestPipelineInit:
 
     def test_create_pipeline_with_multiple_steps(self):
         """Test creating a pipeline with multiple steps."""
-        pipeline = Pipeline([
-            ("imputer", Imputer()),
-            ("scaler", Scaler()),
-            ("encoder", Encoder()),
-        ])
+        pipeline = Pipeline(
+            [
+                ("imputer", Imputer()),
+                ("scaler", Scaler()),
+                ("encoder", Encoder()),
+            ]
+        )
         assert len(pipeline) == 3
 
     def test_empty_steps_raises_error(self):
@@ -100,10 +102,12 @@ class TestPipelineInit:
     def test_duplicate_names_raises_error(self):
         """Test that duplicate step names raise ValidationError."""
         with pytest.raises(ValidationError, match="must be unique"):
-            Pipeline([
-                ("step1", Imputer()),
-                ("step1", Scaler()),
-            ])
+            Pipeline(
+                [
+                    ("step1", Imputer()),
+                    ("step1", Scaler()),
+                ]
+            )
 
     def test_invalid_step_format_raises_error(self):
         """Test that invalid step format raises ValidationError."""
@@ -126,38 +130,46 @@ class TestPipelineStepOrder:
 
     def test_valid_preprocessing_order(self):
         """Test that valid preprocessing order is accepted."""
-        pipeline = Pipeline([
-            ("imputer", Imputer()),
-            ("scaler", Scaler()),
-            ("encoder", Encoder()),
-        ])
+        pipeline = Pipeline(
+            [
+                ("imputer", Imputer()),
+                ("scaler", Scaler()),
+                ("encoder", Encoder()),
+            ]
+        )
         assert len(pipeline) == 3
 
     def test_valid_preprocessing_with_model(self):
         """Test that preprocessing before model is accepted."""
-        pipeline = Pipeline([
-            ("imputer", Imputer()),
-            ("scaler", Scaler()),
-            ("model", MockModel()),
-        ])
+        pipeline = Pipeline(
+            [
+                ("imputer", Imputer()),
+                ("scaler", Scaler()),
+                ("model", MockModel()),
+            ]
+        )
         assert len(pipeline) == 3
 
     def test_invalid_order_preprocessing_after_model(self):
         """Test that preprocessing after model raises ValidationError."""
         with pytest.raises(ValidationError, match="Invalid step order"):
-            Pipeline([
-                ("model", MockModel()),
-                ("imputer", Imputer()),
-            ])
+            Pipeline(
+                [
+                    ("model", MockModel()),
+                    ("imputer", Imputer()),
+                ]
+            )
 
     def test_invalid_order_scaler_after_model(self):
         """Test that scaler after model raises ValidationError."""
         with pytest.raises(ValidationError, match="Invalid step order"):
-            Pipeline([
-                ("imputer", Imputer()),
-                ("model", MockModel()),
-                ("scaler", Scaler()),
-            ])
+            Pipeline(
+                [
+                    ("imputer", Imputer()),
+                    ("model", MockModel()),
+                    ("scaler", Scaler()),
+                ]
+            )
 
 
 class TestPipelinePreprocessingOnly:
@@ -206,10 +218,12 @@ class TestPipelinePreprocessingOnly:
 
     def test_multi_step_preprocessing_pipeline(self, df_with_nulls):
         """Test pipeline with multiple preprocessing steps."""
-        pipeline = Pipeline([
-            ("imputer", Imputer()),
-            ("scaler", Scaler()),
-        ])
+        pipeline = Pipeline(
+            [
+                ("imputer", Imputer()),
+                ("scaler", Scaler()),
+            ]
+        )
         result = pipeline.fit_transform(
             df_with_nulls,
             numerical_cols=["age", "income"],
@@ -217,9 +231,7 @@ class TestPipelinePreprocessingOnly:
         )
 
         # Check no nulls remain
-        null_count = result.filter(
-            F.col("age").isNull() | F.col("income").isNull()
-        ).count()
+        null_count = result.filter(F.col("age").isNull() | F.col("income").isNull()).count()
         assert null_count == 0
 
         # Check scaling was applied (values should be different from original)
@@ -230,11 +242,13 @@ class TestPipelinePreprocessingOnly:
 
     def test_imputer_scaler_encoder_pipeline(self, df_with_nulls):
         """Test pipeline with imputer, scaler, and encoder."""
-        pipeline = Pipeline([
-            ("imputer", Imputer()),
-            ("scaler", Scaler()),
-            ("encoder", Encoder(method="label")),
-        ])
+        pipeline = Pipeline(
+            [
+                ("imputer", Imputer()),
+                ("scaler", Scaler()),
+                ("encoder", Encoder(method="label")),
+            ]
+        )
         result = pipeline.fit_transform(
             df_with_nulls,
             numerical_cols=["age", "income"],
@@ -251,10 +265,12 @@ class TestPipelineWithModel:
 
     def test_fit_pipeline_with_model(self, df_clean):
         """Test fitting a pipeline with a model."""
-        pipeline = Pipeline([
-            ("imputer", Imputer()),
-            ("model", MockModel()),
-        ])
+        pipeline = Pipeline(
+            [
+                ("imputer", Imputer()),
+                ("model", MockModel()),
+            ]
+        )
         pipeline.fit(
             df_clean,
             label_col="target",
@@ -265,10 +281,12 @@ class TestPipelineWithModel:
 
     def test_predict_with_model(self, df_clean):
         """Test predict with a pipeline containing a model."""
-        pipeline = Pipeline([
-            ("imputer", Imputer()),
-            ("model", MockModel()),
-        ])
+        pipeline = Pipeline(
+            [
+                ("imputer", Imputer()),
+                ("model", MockModel()),
+            ]
+        )
         pipeline.fit(
             df_clean,
             label_col="target",
@@ -294,10 +312,12 @@ class TestPipelineWithModel:
 
     def test_fit_model_pipeline_without_label_col_raises_error(self, df_clean):
         """Test that fitting model pipeline without label_col raises error."""
-        pipeline = Pipeline([
-            ("imputer", Imputer()),
-            ("model", MockModel()),
-        ])
+        pipeline = Pipeline(
+            [
+                ("imputer", Imputer()),
+                ("model", MockModel()),
+            ]
+        )
 
         with pytest.raises(ValidationError, match="label_col is required"):
             pipeline.fit(
@@ -318,10 +338,12 @@ class TestPipelineNotFitted:
 
     def test_predict_before_fit_raises_error(self, df_clean):
         """Test that predict before fit raises ModelNotFittedError."""
-        pipeline = Pipeline([
-            ("imputer", Imputer()),
-            ("model", MockModel()),
-        ])
+        pipeline = Pipeline(
+            [
+                ("imputer", Imputer()),
+                ("model", MockModel()),
+            ]
+        )
 
         with pytest.raises(ModelNotFittedError, match="has not been fitted"):
             pipeline.predict(df_clean)
@@ -355,10 +377,12 @@ class TestPipelineSaveLoad:
 
     def test_save_load_multi_step_pipeline(self, df_clean, temp_dir):
         """Test save and load for multi-step pipeline."""
-        pipeline = Pipeline([
-            ("imputer", Imputer()),
-            ("scaler", Scaler()),
-        ])
+        pipeline = Pipeline(
+            [
+                ("imputer", Imputer()),
+                ("scaler", Scaler()),
+            ]
+        )
         pipeline.fit(
             df_clean,
             numerical_cols=["age", "income"],
@@ -422,10 +446,12 @@ class TestPipelineProperties:
         """Test named_steps property."""
         imputer = Imputer()
         scaler = Scaler()
-        pipeline = Pipeline([
-            ("imputer", imputer),
-            ("scaler", scaler),
-        ])
+        pipeline = Pipeline(
+            [
+                ("imputer", imputer),
+                ("scaler", scaler),
+            ]
+        )
 
         named = pipeline.named_steps
         assert named["imputer"] is imputer
@@ -447,10 +473,12 @@ class TestPipelineProperties:
 
     def test_len(self):
         """Test len() on pipeline."""
-        pipeline = Pipeline([
-            ("imputer", Imputer()),
-            ("scaler", Scaler()),
-        ])
+        pipeline = Pipeline(
+            [
+                ("imputer", Imputer()),
+                ("scaler", Scaler()),
+            ]
+        )
         assert len(pipeline) == 2
 
     def test_repr_not_fitted(self):

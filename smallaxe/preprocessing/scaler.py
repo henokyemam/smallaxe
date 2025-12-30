@@ -239,9 +239,7 @@ class Scaler:
             ModelNotFittedError: If save is called before fit.
         """
         if not self._is_fitted:
-            raise ModelNotFittedError(
-                "Scaler has not been fitted. Call fit() before saving."
-            )
+            raise ModelNotFittedError("Scaler has not been fitted. Call fit() before saving.")
 
         os.makedirs(path, exist_ok=True)
 

@@ -96,9 +96,7 @@ class Pipeline:
 
         for step in steps:
             if not isinstance(step, tuple) or len(step) != 2:
-                raise ValidationError(
-                    message="Each step must be a (name, step) tuple"
-                )
+                raise ValidationError(message="Each step must be a (name, step) tuple")
             name, obj = step
             if not isinstance(name, str):
                 raise ValidationError(
@@ -166,11 +164,7 @@ class Pipeline:
         if step_type in self.PREPROCESSING_TYPES:
             return True
         # Also check for duck typing - has fit and transform but not predict
-        return (
-            hasattr(step, "fit")
-            and hasattr(step, "transform")
-            and not hasattr(step, "predict")
-        )
+        return hasattr(step, "fit") and hasattr(step, "transform") and not hasattr(step, "predict")
 
     def _is_model_step(self, step: Any) -> bool:
         """Check if a step is a model step.
@@ -263,9 +257,7 @@ class Pipeline:
 
         # Validate label_col if model is present
         if self._has_model and label_col is None:
-            raise ValidationError(
-                message="label_col is required when pipeline contains a model"
-            )
+            raise ValidationError(message="label_col is required when pipeline contains a model")
 
         current_df = df
 
@@ -341,9 +333,7 @@ class Pipeline:
                     pass
             return step.transform(df) if hasattr(step, "transform") else df
 
-    def _get_feature_cols(
-        self, df: DataFrame, label_col: Optional[str]
-    ) -> List[str]:
+    def _get_feature_cols(self, df: DataFrame, label_col: Optional[str]) -> List[str]:
         """Get feature columns (all columns except label).
 
         Parameters
@@ -382,9 +372,7 @@ class Pipeline:
             If transform is called before fit.
         """
         if not self._is_fitted:
-            raise ModelNotFittedError(
-                "Pipeline has not been fitted. Call fit() first."
-            )
+            raise ModelNotFittedError("Pipeline has not been fitted. Call fit() first.")
 
         current_df = df
 
@@ -454,9 +442,7 @@ class Pipeline:
             If the pipeline does not contain a model.
         """
         if not self._is_fitted:
-            raise ModelNotFittedError(
-                "Pipeline has not been fitted. Call fit() first."
-            )
+            raise ModelNotFittedError("Pipeline has not been fitted. Call fit() first.")
 
         if not self._has_model:
             raise ValidationError(
@@ -488,9 +474,7 @@ class Pipeline:
             If save is called before fit.
         """
         if not self._is_fitted:
-            raise ModelNotFittedError(
-                "Pipeline has not been fitted. Call fit() before saving."
-            )
+            raise ModelNotFittedError("Pipeline has not been fitted. Call fit() before saving.")
 
         # Create directory if it doesn't exist
         os.makedirs(path, exist_ok=True)
