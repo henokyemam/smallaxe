@@ -54,8 +54,7 @@ class Scaler:
         """Validate the scaling method."""
         if method not in VALID_METHODS:
             raise ValidationError(
-                f"Invalid method '{method}'. "
-                f"Must be one of {sorted(VALID_METHODS)}."
+                f"Invalid method '{method}'. Must be one of {sorted(VALID_METHODS)}."
             )
 
     def _validate_columns(
@@ -144,9 +143,7 @@ class Scaler:
             ColumnNotFoundError: If any fitted column is not in the DataFrame.
         """
         if not self._is_fitted:
-            raise ModelNotFittedError(
-                "Scaler has not been fitted. Call fit() before transform()."
-            )
+            raise ModelNotFittedError("Scaler has not been fitted. Call fit() before transform().")
 
         # Validate that all fitted columns exist
         self._validate_columns(df, self._numerical_cols)
@@ -178,9 +175,7 @@ class Scaler:
                 lambda v, i=idx: float(v[i]) if v is not None else None,
                 DoubleType(),
             )
-            result_df = result_df.withColumn(
-                col_name, extract_element(F.col("_scaled_features"))
-            )
+            result_df = result_df.withColumn(col_name, extract_element(F.col("_scaled_features")))
 
         # Drop temporary columns
         result_df = result_df.drop("_assembled_features", "_scaled_features")

@@ -72,8 +72,7 @@ class Imputer:
                 pass
         else:
             raise ValidationError(
-                f"categorical_strategy must be a string, "
-                f"got {type(categorical_strategy).__name__}."
+                f"categorical_strategy must be a string, got {type(categorical_strategy).__name__}."
             )
 
     def _validate_columns(
@@ -130,9 +129,7 @@ class Imputer:
         self._is_fitted = True
         return self
 
-    def _compute_numerical_fill_values(
-        self, df: DataFrame, numerical_cols: List[str]
-    ) -> None:
+    def _compute_numerical_fill_values(self, df: DataFrame, numerical_cols: List[str]) -> None:
         """Compute fill values for numerical columns based on strategy."""
         if isinstance(self._numerical_strategy, (int, float)):
             # Custom value - use it for all columns
@@ -149,9 +146,7 @@ class Imputer:
         elif self._numerical_strategy == "median":
             # Compute median for each column using approx_percentile
             for col in numerical_cols:
-                median_value = df.select(
-                    F.expr(f"percentile_approx({col}, 0.5)")
-                ).first()[0]
+                median_value = df.select(F.expr(f"percentile_approx({col}, 0.5)")).first()[0]
                 self._numerical_fill_values[col] = (
                     float(median_value) if median_value is not None else 0.0
                 )
@@ -170,9 +165,7 @@ class Imputer:
                 else:
                     self._numerical_fill_values[col] = 0.0
 
-    def _compute_categorical_fill_values(
-        self, df: DataFrame, categorical_cols: List[str]
-    ) -> None:
+    def _compute_categorical_fill_values(self, df: DataFrame, categorical_cols: List[str]) -> None:
         """Compute fill values for categorical columns based on strategy."""
         if self._categorical_strategy == "mode":
             # Compute mode for each column
@@ -207,9 +200,7 @@ class Imputer:
             ColumnNotFoundError: If any fitted column is not in the DataFrame.
         """
         if not self._is_fitted:
-            raise ModelNotFittedError(
-                "Imputer has not been fitted. Call fit() before transform()."
-            )
+            raise ModelNotFittedError("Imputer has not been fitted. Call fit() before transform().")
 
         # Validate that all fitted columns exist in the transform DataFrame
         all_cols = self._numerical_cols + self._categorical_cols

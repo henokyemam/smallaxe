@@ -108,9 +108,7 @@ class TestStandardScaler:
     def test_standard_scaler_multiple_columns(self, df_with_known_stats):
         """Test StandardScaler with multiple columns."""
         scaler = Scaler(method="standard")
-        result = scaler.fit_transform(
-            df_with_known_stats, numerical_cols=["value1", "value2"]
-        )
+        result = scaler.fit_transform(df_with_known_stats, numerical_cols=["value1", "value2"])
 
         # Both columns should have approximately zero mean and unit sample std
         # PySpark's StandardScaler uses sample std (N-1), so use stddev_samp
@@ -161,9 +159,7 @@ class TestMinMaxScaler:
     def test_minmax_scaler_multiple_columns(self, df_with_known_stats):
         """Test MinMaxScaler with multiple columns."""
         scaler = Scaler(method="minmax")
-        result = scaler.fit_transform(
-            df_with_known_stats, numerical_cols=["value1", "value2"]
-        )
+        result = scaler.fit_transform(df_with_known_stats, numerical_cols=["value1", "value2"])
 
         stats = result.select(
             F.min("value1").alias("min1"),
@@ -241,16 +237,12 @@ class TestScalerErrors:
     def test_missing_column_in_transform_raises_error(self, spark_session):
         """Test that missing column in transform raises ColumnNotFoundError."""
         # Fit on one DataFrame
-        df_fit = spark_session.createDataFrame(
-            [(1, 10.0), (2, 20.0)], ["id", "value"]
-        )
+        df_fit = spark_session.createDataFrame([(1, 10.0), (2, 20.0)], ["id", "value"])
         scaler = Scaler()
         scaler.fit(df_fit, numerical_cols=["value"])
 
         # Transform on a different DataFrame missing the column
-        df_transform = spark_session.createDataFrame(
-            [(1, "A"), (2, "B")], ["id", "category"]
-        )
+        df_transform = spark_session.createDataFrame([(1, "A"), (2, "B")], ["id", "category"])
         with pytest.raises(ColumnNotFoundError, match="value"):
             scaler.transform(df_transform)
 
@@ -308,9 +300,7 @@ class TestScalerEdgeCases:
         result_ids = [row["id"] for row in result.orderBy("id").collect()]
         assert original_ids == result_ids
 
-        original_value2 = [
-            row["value2"] for row in df_for_scaling.orderBy("id").collect()
-        ]
+        original_value2 = [row["value2"] for row in df_for_scaling.orderBy("id").collect()]
         result_value2 = [row["value2"] for row in result.orderBy("id").collect()]
         assert original_value2 == result_value2
 
