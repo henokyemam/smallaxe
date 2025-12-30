@@ -8,7 +8,7 @@ import pytest
 from pyspark.sql import DataFrame
 from pyspark.sql import functions as F
 
-from smallaxe.exceptions import ModelNotFittedError, ValidationError
+from smallaxe.exceptions import ModelNotFittedError, PreprocessingError, ValidationError
 from smallaxe.pipeline import Pipeline
 from smallaxe.preprocessing import Encoder, Imputer, Scaler
 
@@ -35,6 +35,62 @@ class MockModel:
                 component="MockModel",
                 message="MockModel has not been fitted.",
             )
+        return df.withColumn("prediction", F.lit(1.0))
+
+
+class RandomForestRegressor:
+    """Mock RandomForestRegressor for testing preprocessing requirements."""
+
+    def __init__(self):
+        self._is_fitted = False
+
+    def fit(self, df: DataFrame, label_col: str, feature_cols: list) -> "RandomForestRegressor":
+        self._is_fitted = True
+        return self
+
+    def predict(self, df: DataFrame) -> DataFrame:
+        return df.withColumn("prediction", F.lit(1.0))
+
+
+class RandomForestClassifier:
+    """Mock RandomForestClassifier for testing preprocessing requirements."""
+
+    def __init__(self):
+        self._is_fitted = False
+
+    def fit(self, df: DataFrame, label_col: str, feature_cols: list) -> "RandomForestClassifier":
+        self._is_fitted = True
+        return self
+
+    def predict(self, df: DataFrame) -> DataFrame:
+        return df.withColumn("prediction", F.lit(1.0))
+
+
+class XGBoostRegressor:
+    """Mock XGBoostRegressor for testing preprocessing requirements."""
+
+    def __init__(self):
+        self._is_fitted = False
+
+    def fit(self, df: DataFrame, label_col: str, feature_cols: list) -> "XGBoostRegressor":
+        self._is_fitted = True
+        return self
+
+    def predict(self, df: DataFrame) -> DataFrame:
+        return df.withColumn("prediction", F.lit(1.0))
+
+
+class CatBoostRegressor:
+    """Mock CatBoostRegressor for testing preprocessing requirements."""
+
+    def __init__(self):
+        self._is_fitted = False
+
+    def fit(self, df: DataFrame, label_col: str, feature_cols: list) -> "CatBoostRegressor":
+        self._is_fitted = True
+        return self
+
+    def predict(self, df: DataFrame) -> DataFrame:
         return df.withColumn("prediction", F.lit(1.0))
 
 
@@ -500,3 +556,111 @@ class TestPipelineProperties:
         assert "Pipeline" in repr_str
         assert "fitted" in repr_str
         assert "not fitted" not in repr_str
+
+
+class TestPipelinePreprocessingValidation:
+    """Tests for pipeline preprocessing requirement validation."""
+
+    def test_random_forest_without_encoder_raises_error(self):
+        """Test that RandomForestRegressor without Encoder raises PreprocessingError."""
+        with pytest.raises(PreprocessingError) as exc_info:
+            Pipeline(
+                [
+                    ("imputer", Imputer()),
+                    ("model", RandomForestRegressor()),
+                ]
+            )
+        assert "RandomForestRegressor" in str(exc_info.value)
+        assert "Encoder" in str(exc_info.value)
+
+    def test_random_forest_classifier_without_encoder_raises_error(self):
+        """Test that RandomForestClassifier without Encoder raises PreprocessingError."""
+        with pytest.raises(PreprocessingError) as exc_info:
+            Pipeline(
+                [
+                    ("imputer", Imputer()),
+                    ("model", RandomForestClassifier()),
+                ]
+            )
+        assert "RandomForestClassifier" in str(exc_info.value)
+        assert "Encoder" in str(exc_info.value)
+
+    def test_xgboost_without_encoder_raises_error(self):
+        """Test that XGBoostRegressor without Encoder raises PreprocessingError."""
+        with pytest.raises(PreprocessingError) as exc_info:
+            Pipeline(
+                [
+                    ("imputer", Imputer()),
+                    ("scaler", Scaler()),
+                    ("model", XGBoostRegressor()),
+                ]
+            )
+        assert "XGBoostRegressor" in str(exc_info.value)
+        assert "Encoder" in str(exc_info.value)
+
+    def test_random_forest_with_encoder_succeeds(self):
+        """Test that RandomForestRegressor with Encoder succeeds."""
+        pipeline = Pipeline(
+            [
+                ("imputer", Imputer()),
+                ("encoder", Encoder()),
+                ("model", RandomForestRegressor()),
+            ]
+        )
+        assert len(pipeline) == 3
+
+    def test_random_forest_with_encoder_and_scaler_succeeds(self):
+        """Test that RandomForestRegressor with Encoder and Scaler succeeds."""
+        pipeline = Pipeline(
+            [
+                ("imputer", Imputer()),
+                ("scaler", Scaler()),
+                ("encoder", Encoder()),
+                ("model", RandomForestRegressor()),
+            ]
+        )
+        assert len(pipeline) == 4
+
+    def test_catboost_without_encoder_succeeds(self):
+        """Test that CatBoostRegressor works without Encoder (handles categoricals natively)."""
+        pipeline = Pipeline(
+            [
+                ("imputer", Imputer()),
+                ("scaler", Scaler()),
+                ("model", CatBoostRegressor()),
+            ]
+        )
+        assert len(pipeline) == 3
+
+    def test_unknown_model_type_succeeds(self):
+        """Test that unknown model types have no preprocessing requirements."""
+        # MockModel is not in MODEL_PREPROCESSING_REQUIREMENTS, so it should succeed
+        pipeline = Pipeline(
+            [
+                ("imputer", Imputer()),
+                ("model", MockModel()),
+            ]
+        )
+        assert len(pipeline) == 2
+
+    def test_preprocessing_only_pipeline_succeeds(self):
+        """Test that preprocessing-only pipelines have no validation issues."""
+        pipeline = Pipeline(
+            [
+                ("imputer", Imputer()),
+                ("scaler", Scaler()),
+            ]
+        )
+        assert len(pipeline) == 2
+
+    def test_preprocessing_error_contains_algorithm_and_step(self):
+        """Test that PreprocessingError contains algorithm and missing step info."""
+        with pytest.raises(PreprocessingError) as exc_info:
+            Pipeline(
+                [
+                    ("model", RandomForestRegressor()),
+                ]
+            )
+        error = exc_info.value
+        assert error.algorithm == "RandomForestRegressor"
+        assert error.missing_step == "Encoder"
