@@ -1,17 +1,5 @@
 ## TODO LIST - Build Phases
 
-
-### Phase 6: Metrics Module (v0.5.0)
-
-#### Step 6.3: Metrics Module Exports
-- [ ] Update `smallaxe/metrics/__init__.py`
-- [ ] Run full metrics test suite
-- [ ] Commit: "Finalize metrics module"
-- [ ] PR → main
-- [ ] **Tag: v0.5.0**
-
----
-
 ### Phase 7: Training Module - Random Forest (v0.6.0)
 
 #### Step 7.1: Mixins
