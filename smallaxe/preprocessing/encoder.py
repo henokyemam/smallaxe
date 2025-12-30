@@ -1,9 +1,8 @@
 """Encoder for categorical feature encoding in PySpark DataFrames."""
 
-from typing import Dict, List, Optional
+from typing import Dict, List
 
 from pyspark.ml.feature import OneHotEncoder as SparkOneHotEncoder
-from pyspark.ml.feature import StringIndexer
 from pyspark.sql import DataFrame
 from pyspark.sql import functions as F
 from pyspark.sql.types import DoubleType, IntegerType
@@ -190,9 +189,6 @@ class Encoder:
             indexed_col = f"__{col}_indexed"
             onehot_col = f"__{col}_onehot"
 
-            # Determine the number of categories for this column
-            num_categories = len(self._category_mappings[col])
-
             # Create and fit OneHotEncoder
             encoder = SparkOneHotEncoder(
                 inputCol=indexed_col,
@@ -287,9 +283,6 @@ class Encoder:
 
         # Apply one-hot encoding for each column
         for col in self._categorical_cols:
-            indexed_col = f"__{col}_indexed"
-            onehot_col = f"__{col}_onehot"
-
             # Apply the fitted OneHotEncoder
             result_df = self._onehot_models[col].transform(result_df)
 
