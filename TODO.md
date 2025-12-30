@@ -2,50 +2,6 @@
 
 ### Phase 7: Training Module - Random Forest (v0.6.0)
 
-#### Step 7.1: Mixins
-- [ ] Create `smallaxe/training/mixins/` directory
-- [ ] Implement `ParamMixin` in `param_mixin.py`:
-  ```python
-  class ParamMixin:
-      @property
-      def params(self): ...  # {'name': 'description'}
-      @property
-      def default_params(self): ...  # {'name': value}
-      def set_param(self, params: dict): ...
-      def _validate_param(self, name, value): ...
-  ```
-- [ ] Implement `PersistenceMixin` in `persistence_mixin.py`:
-  ```python
-  class PersistenceMixin:
-      def save(self, path): ...
-      @classmethod
-      def load(cls, path): ...
-  ```
-- [ ] Implement `ValidationMixin` in `validation_mixin.py`:
-  ```python
-  class ValidationMixin:
-      def _train_test_split(self, df, test_size, stratified): ...
-      def _kfold_split(self, df, n_folds, stratified): ...
-  ```
-- [ ] Implement `MetadataMixin` in `metadata_mixin.py`:
-  ```python
-  class MetadataMixin:
-      @property
-      def metadata(self): ...  # training_timestamp, spark_version, etc.
-      def _capture_metadata(self, df, label_col, feature_cols): ...
-  ```
-- [ ] Implement `SparkModelMixin` in `spark_model_mixin.py`:
-  ```python
-  class SparkModelMixin:
-      def _assemble_features(self, df, feature_cols): ...
-      def _fit_spark_model(self, df): ...
-      def _predict_spark_model(self, df): ...
-  ```
-- [ ] Create `tests/test_mixins.py`:
-  - Test each mixin independently
-- [ ] Commit: "Add training mixins"
-- [ ] PR → main
-
 #### Step 7.2: Base Classes
 - [ ] Create `smallaxe/training/base.py`:
   ```python
