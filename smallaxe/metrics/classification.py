@@ -2,10 +2,9 @@
 
 from typing import List
 
+from pyspark.ml.evaluation import BinaryClassificationEvaluator
 from pyspark.sql import DataFrame
 from pyspark.sql import functions as F
-from pyspark.ml.evaluation import BinaryClassificationEvaluator
-
 
 from smallaxe.exceptions import ColumnNotFoundError
 
