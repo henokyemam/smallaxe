@@ -313,7 +313,7 @@ class Imputer:
         Returns:
             The loaded Imputer instance.
         """
-        with open(os.path.join(path, "imputer_metadata.json"), "r") as f:
+        with open(os.path.join(path, "imputer_metadata.json")) as f:
             metadata = json.load(f)
 
         imputer = cls(

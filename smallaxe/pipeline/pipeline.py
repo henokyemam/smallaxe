@@ -135,7 +135,7 @@ class Pipeline:
         model_name = None
 
         for name, step in steps:
-            step_type = type(step).__name__
+            # step_type = type(step).__name__
 
             if self._is_model_step(step):
                 model_found = True
@@ -269,7 +269,7 @@ class Pipeline:
 
         current_df = df
 
-        for name, step in self._steps:
+        for _, step in self._steps:
             if self._is_model_step(step):
                 # Model step - use label_col and feature cols
                 feature_cols = self._get_feature_cols(current_df, label_col)
@@ -388,7 +388,7 @@ class Pipeline:
 
         current_df = df
 
-        for name, step in self._steps:
+        for _, step in self._steps:
             if self._is_model_step(step):
                 # Skip model steps in transform - use predict instead
                 break
@@ -467,7 +467,7 @@ class Pipeline:
         current_df = self.transform(df)
 
         # Find and apply the model
-        for name, step in self._steps:
+        for _, step in self._steps:
             if self._is_model_step(step):
                 return step.predict(current_df)
 
@@ -535,7 +535,7 @@ class Pipeline:
             The loaded pipeline.
         """
         # Load metadata
-        with open(os.path.join(path, "metadata.json"), "r") as f:
+        with open(os.path.join(path, "metadata.json")) as f:
             metadata = json.load(f)
 
         step_names = metadata["step_names"]

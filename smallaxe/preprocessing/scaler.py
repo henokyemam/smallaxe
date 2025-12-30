@@ -9,21 +9,15 @@ from pyspark.ml.feature import (
 )
 from pyspark.ml.feature import (
     MaxAbsScalerModel,
+    MinMaxScalerModel,
+    StandardScalerModel,
+    VectorAssembler,
 )
 from pyspark.ml.feature import (
     MinMaxScaler as SparkMinMaxScaler,
 )
 from pyspark.ml.feature import (
-    MinMaxScalerModel,
-)
-from pyspark.ml.feature import (
     StandardScaler as SparkStandardScaler,
-)
-from pyspark.ml.feature import (
-    StandardScalerModel,
-)
-from pyspark.ml.feature import (
-    VectorAssembler,
 )
 from pyspark.sql import DataFrame
 from pyspark.sql import functions as F
@@ -274,7 +268,7 @@ class Scaler:
         Returns:
             The loaded Scaler instance.
         """
-        with open(os.path.join(path, "scaler_metadata.json"), "r") as f:
+        with open(os.path.join(path, "scaler_metadata.json")) as f:
             metadata = json.load(f)
 
         scaler = cls(method=metadata["method"])
