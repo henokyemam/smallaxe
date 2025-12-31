@@ -81,13 +81,17 @@ class TestImputerInit:
     def test_numerical_cols_without_strategy_raises_error(self, df_with_nulls):
         """Test that providing numerical_cols without numerical_strategy raises ValidationError."""
         imputer = Imputer()
-        with pytest.raises(ValidationError, match="numerical_cols provided but numerical_strategy is None"):
+        with pytest.raises(
+            ValidationError, match="numerical_cols provided but numerical_strategy is None"
+        ):
             imputer.fit(df_with_nulls, numerical_cols=["age"])
 
     def test_categorical_cols_without_strategy_raises_error(self, df_with_nulls):
         """Test that providing categorical_cols without categorical_strategy raises ValidationError."""
         imputer = Imputer()
-        with pytest.raises(ValidationError, match="categorical_cols provided but categorical_strategy is None"):
+        with pytest.raises(
+            ValidationError, match="categorical_cols provided but categorical_strategy is None"
+        ):
             imputer.fit(df_with_nulls, categorical_cols=["category"])
 
     def test_numerical_only_imputer(self, df_with_nulls):
