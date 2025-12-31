@@ -7,7 +7,7 @@ from smallaxe.exceptions import (
     ModelNotFittedError,
     ValidationError,
 )
-from smallaxe.preprocessing.encoder import Encoder
+from smallaxe.preprocessing import Encoder
 
 
 @pytest.fixture

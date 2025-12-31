@@ -233,7 +233,9 @@ class TestPipelinePreprocessingOnly:
 
     def test_fit_single_imputer(self, df_with_nulls):
         """Test fitting a pipeline with just an imputer."""
-        pipeline = Pipeline([("imputer", Imputer())])
+        pipeline = Pipeline(
+            [("imputer", Imputer(numerical_strategy="mean", categorical_strategy="most_frequent"))]
+        )
         pipeline.fit(
             df_with_nulls,
             numerical_cols=["age", "income"],
@@ -243,7 +245,9 @@ class TestPipelinePreprocessingOnly:
 
     def test_transform_single_imputer(self, df_with_nulls):
         """Test transforming with a single imputer pipeline."""
-        pipeline = Pipeline([("imputer", Imputer())])
+        pipeline = Pipeline(
+            [("imputer", Imputer(numerical_strategy="mean", categorical_strategy="most_frequent"))]
+        )
         pipeline.fit(
             df_with_nulls,
             numerical_cols=["age", "income"],
@@ -259,7 +263,9 @@ class TestPipelinePreprocessingOnly:
 
     def test_fit_transform_pipeline(self, df_with_nulls):
         """Test fit_transform convenience method."""
-        pipeline = Pipeline([("imputer", Imputer())])
+        pipeline = Pipeline(
+            [("imputer", Imputer(numerical_strategy="mean", categorical_strategy="most_frequent"))]
+        )
         result = pipeline.fit_transform(
             df_with_nulls,
             numerical_cols=["age", "income"],
@@ -276,7 +282,10 @@ class TestPipelinePreprocessingOnly:
         """Test pipeline with multiple preprocessing steps."""
         pipeline = Pipeline(
             [
-                ("imputer", Imputer()),
+                (
+                    "imputer",
+                    Imputer(numerical_strategy="mean", categorical_strategy="most_frequent"),
+                ),
                 ("scaler", Scaler()),
             ]
         )
@@ -300,7 +309,10 @@ class TestPipelinePreprocessingOnly:
         """Test pipeline with imputer, scaler, and encoder."""
         pipeline = Pipeline(
             [
-                ("imputer", Imputer()),
+                (
+                    "imputer",
+                    Imputer(numerical_strategy="mean", categorical_strategy="most_frequent"),
+                ),
                 ("scaler", Scaler()),
                 ("encoder", Encoder(method="label")),
             ]
@@ -323,7 +335,10 @@ class TestPipelineWithModel:
         """Test fitting a pipeline with a model."""
         pipeline = Pipeline(
             [
-                ("imputer", Imputer()),
+                (
+                    "imputer",
+                    Imputer(numerical_strategy="mean", categorical_strategy="most_frequent"),
+                ),
                 ("model", MockModel()),
             ]
         )
@@ -339,7 +354,10 @@ class TestPipelineWithModel:
         """Test predict with a pipeline containing a model."""
         pipeline = Pipeline(
             [
-                ("imputer", Imputer()),
+                (
+                    "imputer",
+                    Imputer(numerical_strategy="mean", categorical_strategy="most_frequent"),
+                ),
                 ("model", MockModel()),
             ]
         )
@@ -356,7 +374,9 @@ class TestPipelineWithModel:
 
     def test_predict_without_model_raises_error(self, df_clean):
         """Test that predict on preprocessing-only pipeline raises error."""
-        pipeline = Pipeline([("imputer", Imputer())])
+        pipeline = Pipeline(
+            [("imputer", Imputer(numerical_strategy="mean", categorical_strategy="most_frequent"))]
+        )
         pipeline.fit(
             df_clean,
             numerical_cols=["age", "income"],
@@ -410,7 +430,9 @@ class TestPipelineSaveLoad:
 
     def test_save_load_preprocessing_pipeline(self, df_clean, temp_dir):
         """Test save and load roundtrip for preprocessing pipeline."""
-        pipeline = Pipeline([("imputer", Imputer())])
+        pipeline = Pipeline(
+            [("imputer", Imputer(numerical_strategy="mean", categorical_strategy="most_frequent"))]
+        )
         pipeline.fit(
             df_clean,
             numerical_cols=["age", "income"],
@@ -435,7 +457,7 @@ class TestPipelineSaveLoad:
         """Test save and load for multi-step pipeline."""
         pipeline = Pipeline(
             [
-                ("imputer", Imputer()),
+                ("imputer", Imputer(numerical_strategy="mean")),
                 ("scaler", Scaler()),
             ]
         )
@@ -469,7 +491,9 @@ class TestPipelineSaveLoad:
 
     def test_load_preserves_metadata(self, df_clean, temp_dir):
         """Test that load preserves pipeline metadata."""
-        pipeline = Pipeline([("imputer", Imputer())])
+        pipeline = Pipeline(
+            [("imputer", Imputer(numerical_strategy="mean", categorical_strategy="most_frequent"))]
+        )
         pipeline.fit(
             df_clean,
             numerical_cols=["age", "income"],
@@ -561,39 +585,62 @@ class TestPipelineProperties:
 class TestPipelinePreprocessingValidation:
     """Tests for pipeline preprocessing requirement validation."""
 
-    def test_random_forest_without_encoder_raises_error(self):
-        """Test that RandomForestRegressor without Encoder raises PreprocessingError."""
+    def test_random_forest_without_encoder_raises_error_with_categorical_cols(self, df_clean):
+        """Test that RandomForestRegressor without Encoder raises PreprocessingError when categorical_cols provided."""
+        pipeline = Pipeline(
+            [
+                ("imputer", Imputer()),
+                ("model", RandomForestRegressor()),
+            ]
+        )
+        # Error should be raised at fit() time when categorical_cols is provided
         with pytest.raises(PreprocessingError) as exc_info:
-            Pipeline(
-                [
-                    ("imputer", Imputer()),
-                    ("model", RandomForestRegressor()),
-                ]
+            pipeline.fit(
+                df_clean,
+                label_col="target",
+                numerical_cols=["age", "income"],
+                categorical_cols=["category"],
             )
         assert "RandomForestRegressor" in str(exc_info.value)
         assert "Encoder" in str(exc_info.value)
 
-    def test_random_forest_classifier_without_encoder_raises_error(self):
-        """Test that RandomForestClassifier without Encoder raises PreprocessingError."""
+    def test_random_forest_classifier_without_encoder_raises_error_with_categorical_cols(
+        self, df_clean
+    ):
+        """Test that RandomForestClassifier without Encoder raises PreprocessingError when categorical_cols provided."""
+        pipeline = Pipeline(
+            [
+                ("imputer", Imputer()),
+                ("model", RandomForestClassifier()),
+            ]
+        )
+        # Error should be raised at fit() time when categorical_cols is provided
         with pytest.raises(PreprocessingError) as exc_info:
-            Pipeline(
-                [
-                    ("imputer", Imputer()),
-                    ("model", RandomForestClassifier()),
-                ]
+            pipeline.fit(
+                df_clean,
+                label_col="target",
+                numerical_cols=["age", "income"],
+                categorical_cols=["category"],
             )
         assert "RandomForestClassifier" in str(exc_info.value)
         assert "Encoder" in str(exc_info.value)
 
-    def test_xgboost_without_encoder_raises_error(self):
-        """Test that XGBoostRegressor without Encoder raises PreprocessingError."""
+    def test_xgboost_without_encoder_raises_error_with_categorical_cols(self, df_clean):
+        """Test that XGBoostRegressor without Encoder raises PreprocessingError when categorical_cols provided."""
+        pipeline = Pipeline(
+            [
+                ("imputer", Imputer()),
+                ("scaler", Scaler()),
+                ("model", XGBoostRegressor()),
+            ]
+        )
+        # Error should be raised at fit() time when categorical_cols is provided
         with pytest.raises(PreprocessingError) as exc_info:
-            Pipeline(
-                [
-                    ("imputer", Imputer()),
-                    ("scaler", Scaler()),
-                    ("model", XGBoostRegressor()),
-                ]
+            pipeline.fit(
+                df_clean,
+                label_col="target",
+                numerical_cols=["age", "income"],
+                categorical_cols=["category"],
             )
         assert "XGBoostRegressor" in str(exc_info.value)
         assert "Encoder" in str(exc_info.value)
@@ -653,14 +700,72 @@ class TestPipelinePreprocessingValidation:
         )
         assert len(pipeline) == 2
 
-    def test_preprocessing_error_contains_algorithm_and_step(self):
+    def test_preprocessing_error_contains_algorithm_and_step(self, df_clean):
         """Test that PreprocessingError contains algorithm and missing step info."""
+        pipeline = Pipeline(
+            [
+                ("model", RandomForestRegressor()),
+            ]
+        )
         with pytest.raises(PreprocessingError) as exc_info:
-            Pipeline(
-                [
-                    ("model", RandomForestRegressor()),
-                ]
+            pipeline.fit(
+                df_clean,
+                label_col="target",
+                numerical_cols=["age", "income"],
+                categorical_cols=["category"],
             )
         error = exc_info.value
         assert error.algorithm == "RandomForestRegressor"
         assert error.missing_step == "Encoder"
+
+    def test_random_forest_without_encoder_succeeds_with_numerical_only(self, df_clean):
+        """Test that RandomForestRegressor without Encoder succeeds when categorical_cols is None."""
+        pipeline = Pipeline(
+            [
+                ("imputer", Imputer(numerical_strategy="mean")),
+                ("model", RandomForestRegressor()),
+            ]
+        )
+        # Should not raise error when categorical_cols is None (numerical data only)
+        pipeline.fit(
+            df_clean,
+            label_col="target",
+            numerical_cols=["age", "income"],
+            categorical_cols=None,
+        )
+        assert pipeline._is_fitted
+
+    def test_xgboost_without_encoder_succeeds_with_numerical_only(self, df_clean):
+        """Test that XGBoostRegressor without Encoder succeeds when categorical_cols is None."""
+        pipeline = Pipeline(
+            [
+                ("imputer", Imputer(numerical_strategy="mean")),
+                ("scaler", Scaler()),
+                ("model", XGBoostRegressor()),
+            ]
+        )
+        # Should not raise error when categorical_cols is None (numerical data only)
+        pipeline.fit(
+            df_clean,
+            label_col="target",
+            numerical_cols=["age", "income"],
+            categorical_cols=None,
+        )
+        assert pipeline._is_fitted
+
+    def test_random_forest_without_encoder_succeeds_with_empty_categorical_cols(self, df_clean):
+        """Test that RandomForestRegressor without Encoder succeeds when categorical_cols is empty list."""
+        pipeline = Pipeline(
+            [
+                ("imputer", Imputer(numerical_strategy="mean")),
+                ("model", RandomForestRegressor()),
+            ]
+        )
+        # Should not raise error when categorical_cols is empty list
+        pipeline.fit(
+            df_clean,
+            label_col="target",
+            numerical_cols=["age", "income"],
+            categorical_cols=[],
+        )
+        assert pipeline._is_fitted

@@ -14,32 +14,39 @@ from smallaxe.exceptions import (
 )
 
 VALID_NUMERICAL_STRATEGIES = {"mean", "median", "mode"}
-VALID_CATEGORICAL_STRATEGIES = {"mode"}
+VALID_CATEGORICAL_STRATEGIES = {"most_frequent"}
 
 
 class Imputer:
     """Impute missing values in numerical and categorical columns.
 
     Supports different strategies for numerical columns (mean, median, mode)
-    and categorical columns (mode). Custom values can also be specified.
+    and categorical columns (most_frequent). Custom values can also be specified.
 
     Args:
         numerical_strategy: Strategy for imputing numerical columns.
             One of 'mean', 'median', 'mode', or a custom numeric value.
-            Default is 'mean'.
+            Default is None (must be specified if numerical_cols are used).
         categorical_strategy: Strategy for imputing categorical columns.
-            One of 'mode' or a custom string value. Default is 'mode'.
+            One of 'most_frequent' or a custom string value.
+            Default is None (must be specified if categorical_cols are used).
 
     Example:
-        >>> imputer = Imputer(numerical_strategy='median', categorical_strategy='mode')
+        >>> # Impute only numerical columns
+        >>> imputer = Imputer(numerical_strategy='median')
+        >>> imputer.fit(df, numerical_cols=['age', 'income'])
+        >>> transformed_df = imputer.transform(df)
+
+        >>> # Impute both numerical and categorical columns
+        >>> imputer = Imputer(numerical_strategy='median', categorical_strategy='most_frequent')
         >>> imputer.fit(df, numerical_cols=['age', 'income'], categorical_cols=['category'])
         >>> transformed_df = imputer.transform(df)
     """
 
     def __init__(
         self,
-        numerical_strategy: Union[str, int, float] = "mean",
-        categorical_strategy: Union[str] = "mode",
+        numerical_strategy: Optional[Union[str, int, float]] = None,
+        categorical_strategy: Optional[str] = None,
     ):
         self._validate_strategies(numerical_strategy, categorical_strategy)
         self._numerical_strategy = numerical_strategy
@@ -52,30 +59,28 @@ class Imputer:
 
     def _validate_strategies(
         self,
-        numerical_strategy: Union[str, int, float],
-        categorical_strategy: Union[str],
+        numerical_strategy: Optional[Union[str, int, float]],
+        categorical_strategy: Optional[str],
     ) -> None:
         """Validate the imputation strategies."""
-        if isinstance(numerical_strategy, str):
-            if numerical_strategy not in VALID_NUMERICAL_STRATEGIES:
+        if numerical_strategy is not None:
+            if isinstance(numerical_strategy, str):
+                if numerical_strategy not in VALID_NUMERICAL_STRATEGIES:
+                    raise ValidationError(
+                        f"Invalid numerical_strategy '{numerical_strategy}'. "
+                        f"Must be one of {sorted(VALID_NUMERICAL_STRATEGIES)} or a numeric value."
+                    )
+            elif not isinstance(numerical_strategy, (int, float)):
                 raise ValidationError(
-                    f"Invalid numerical_strategy '{numerical_strategy}'. "
-                    f"Must be one of {sorted(VALID_NUMERICAL_STRATEGIES)} or a numeric value."
+                    f"numerical_strategy must be a string strategy or numeric value, "
+                    f"got {type(numerical_strategy).__name__}."
                 )
-        elif not isinstance(numerical_strategy, (int, float)):
-            raise ValidationError(
-                f"numerical_strategy must be a string strategy or numeric value, "
-                f"got {type(numerical_strategy).__name__}."
-            )
 
-        if isinstance(categorical_strategy, str):
-            if categorical_strategy not in VALID_CATEGORICAL_STRATEGIES:
-                # It's a custom string value, which is allowed
-                pass
-        else:
-            raise ValidationError(
-                f"categorical_strategy must be a string, got {type(categorical_strategy).__name__}."
-            )
+        if categorical_strategy is not None:
+            if not isinstance(categorical_strategy, str):
+                raise ValidationError(
+                    f"categorical_strategy must be a string, got {type(categorical_strategy).__name__}."
+                )
 
     def _validate_columns(
         self,
@@ -112,6 +117,17 @@ class Imputer:
         """
         numerical_cols = numerical_cols or []
         categorical_cols = categorical_cols or []
+
+        if numerical_cols and self._numerical_strategy is None:
+            raise ValidationError(
+                "numerical_cols provided but numerical_strategy is None. "
+                "Specify a numerical_strategy in the constructor."
+            )
+        if categorical_cols and self._categorical_strategy is None:
+            raise ValidationError(
+                "categorical_cols provided but categorical_strategy is None. "
+                "Specify a categorical_strategy in the constructor."
+            )
 
         self._validate_columns(df, numerical_cols, categorical_cols)
 
@@ -169,8 +185,8 @@ class Imputer:
 
     def _compute_categorical_fill_values(self, df: DataFrame, categorical_cols: List[str]) -> None:
         """Compute fill values for categorical columns based on strategy."""
-        if self._categorical_strategy == "mode":
-            # Compute mode for each column
+        if self._categorical_strategy == "most_frequent":
+            # Compute most frequent value for each column
             for col in categorical_cols:
                 mode_row = (
                     df.filter(F.col(col).isNotNull())
