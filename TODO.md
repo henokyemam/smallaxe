@@ -2,24 +2,6 @@
 
 ### Phase 7: Training Module - Random Forest (v0.6.0)
 
-#### Step 7.5: Regressors/Classifiers Factory
-- [ ] Create `smallaxe/training/regressors.py`:
-  ```python
-  class Regressors:
-      @staticmethod
-      def random_forest(**kwargs): ...
-      @staticmethod
-      def load(path): ...
-  ```
-- [ ] Create `smallaxe/training/classifiers.py` similarly
-- [ ] Update `smallaxe/training/__init__.py`
-- [ ] Add integration test
-- [ ] Commit: "Add Regressors and Classifiers factory classes"
-- [ ] PR → main
-- [ ] **Tag: v0.6.0**
-
----
-
 ### Phase 8: Training Module - External Algorithms (v0.7.0)
 
 #### Step 8.1: XGBoost
