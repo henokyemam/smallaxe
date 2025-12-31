@@ -130,8 +130,9 @@ class Pipeline:
         # Validate step order: preprocessing steps should come before model
         self._validate_step_order(steps)
 
-        # Validate preprocessing requirements for models
-        self._validate_preprocessing_requirements(steps)
+        # Note: Preprocessing requirements are validated in fit() where we know
+        # if categorical columns are present. This allows pipelines with only
+        # numerical data to skip the Encoder requirement.
 
     def _validate_step_order(self, steps: List[Tuple[str, Any]]) -> None:
         """Validate that preprocessing steps come before model steps.
@@ -164,7 +165,11 @@ class Pipeline:
                     )
                 )
 
-    def _validate_preprocessing_requirements(self, steps: List[Tuple[str, Any]]) -> None:
+    def _validate_preprocessing_requirements(
+        self,
+        steps: List[Tuple[str, Any]],
+        categorical_cols: Optional[List[str]] = None,
+    ) -> None:
         """Validate that required preprocessing steps are present for model.
 
         Checks if the pipeline contains all preprocessing steps required by
@@ -172,10 +177,16 @@ class Pipeline:
         Random Forest and XGBoost require encoded categorical columns, while
         CatBoost handles categoricals natively.
 
+        The Encoder requirement is only enforced when categorical_cols are provided,
+        allowing pipelines with purely numerical data to work without an Encoder.
+
         Parameters
         ----------
         steps : List[Tuple[str, Any]]
             The steps to validate.
+        categorical_cols : List[str], optional
+            List of categorical column names. If None or empty, Encoder
+            requirement is skipped.
 
         Raises
         ------
@@ -201,6 +212,10 @@ class Pipeline:
 
         # Get requirements for this model type
         required_steps = self.MODEL_PREPROCESSING_REQUIREMENTS.get(model_name, set())
+
+        # Only require Encoder if categorical columns are provided
+        if not categorical_cols:
+            required_steps = required_steps - {"Encoder"}
 
         # Check if all required steps are present
         missing_steps = required_steps - preprocessing_types
@@ -314,6 +329,8 @@ class Pipeline:
         ------
         ValidationError
             If label_col is missing when pipeline contains a model.
+        PreprocessingError
+            If categorical columns are provided but required preprocessing is missing.
         """
         # Store column configurations
         self._numerical_cols = numerical_cols
@@ -323,6 +340,9 @@ class Pipeline:
         # Validate label_col if model is present
         if self._has_model and label_col is None:
             raise ValidationError(message="label_col is required when pipeline contains a model")
+
+        # Validate preprocessing requirements (e.g., Encoder required when categorical_cols provided)
+        self._validate_preprocessing_requirements(self._steps, categorical_cols)
 
         current_df = df
 

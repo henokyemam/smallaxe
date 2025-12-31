@@ -48,10 +48,10 @@ class TestImputerInit:
     """Tests for Imputer initialization."""
 
     def test_default_strategies(self):
-        """Test that default strategies are set correctly."""
+        """Test that default strategies are None."""
         imputer = Imputer()
-        assert imputer._numerical_strategy == "mean"
-        assert imputer._categorical_strategy == "mode"
+        assert imputer._numerical_strategy is None
+        assert imputer._categorical_strategy is None
 
     def test_custom_numerical_strategy(self):
         """Test setting custom numerical strategy."""
@@ -77,6 +77,32 @@ class TestImputerInit:
         """Test that non-string categorical strategy raises ValidationError."""
         with pytest.raises(ValidationError, match="categorical_strategy must be a string"):
             Imputer(categorical_strategy=123)
+
+    def test_numerical_cols_without_strategy_raises_error(self, df_with_nulls):
+        """Test that providing numerical_cols without numerical_strategy raises ValidationError."""
+        imputer = Imputer()
+        with pytest.raises(ValidationError, match="numerical_cols provided but numerical_strategy is None"):
+            imputer.fit(df_with_nulls, numerical_cols=["age"])
+
+    def test_categorical_cols_without_strategy_raises_error(self, df_with_nulls):
+        """Test that providing categorical_cols without categorical_strategy raises ValidationError."""
+        imputer = Imputer()
+        with pytest.raises(ValidationError, match="categorical_cols provided but categorical_strategy is None"):
+            imputer.fit(df_with_nulls, categorical_cols=["category"])
+
+    def test_numerical_only_imputer(self, df_with_nulls):
+        """Test that imputer with only numerical_strategy works without categorical_strategy."""
+        imputer = Imputer(numerical_strategy="mean")
+        imputer.fit(df_with_nulls, numerical_cols=["age", "income"])
+        result = imputer.transform(df_with_nulls)
+        assert result.filter(result.age.isNull()).count() == 0
+
+    def test_categorical_only_imputer(self, df_with_nulls):
+        """Test that imputer with only categorical_strategy works without numerical_strategy."""
+        imputer = Imputer(categorical_strategy="mode")
+        imputer.fit(df_with_nulls, categorical_cols=["category"])
+        result = imputer.transform(df_with_nulls)
+        assert result.filter(result.category.isNull()).count() == 0
 
 
 class TestImputerMeanStrategy:
@@ -143,7 +169,7 @@ class TestImputerModeStrategy:
 
     def test_fit_computes_mode_categorical(self, df_with_many_categories):
         """Test that fit computes mode for categorical columns."""
-        imputer = Imputer(categorical_strategy="mode")
+        imputer = Imputer(categorical_strategy="most_frequent")
         imputer.fit(df_with_many_categories, categorical_cols=["category"])
 
         # category: A appears 3 times, B appears 2 times, C appears 1 time
@@ -151,7 +177,7 @@ class TestImputerModeStrategy:
 
     def test_transform_fills_nulls_with_mode(self, df_with_many_categories):
         """Test that transform fills categorical nulls with mode."""
-        imputer = Imputer(categorical_strategy="mode")
+        imputer = Imputer(categorical_strategy="most_frequent")
         result = imputer.fit_transform(df_with_many_categories, categorical_cols=["category"])
 
         # Check no nulls remain
@@ -215,7 +241,7 @@ class TestImputerErrors:
 
     def test_missing_column_in_fit_raises_error(self, df_with_nulls):
         """Test that missing column in fit raises ColumnNotFoundError."""
-        imputer = Imputer()
+        imputer = Imputer(numerical_strategy="mean")
         with pytest.raises(ColumnNotFoundError, match="nonexistent"):
             imputer.fit(df_with_nulls, numerical_cols=["nonexistent"])
 
@@ -223,7 +249,7 @@ class TestImputerErrors:
         """Test that missing column in transform raises ColumnNotFoundError."""
         # Fit on one DataFrame
         df_fit = spark_session.createDataFrame([(1, 25.0), (2, None)], ["id", "age"])
-        imputer = Imputer()
+        imputer = Imputer(numerical_strategy="mean")
         imputer.fit(df_fit, numerical_cols=["age"])
 
         # Transform on a different DataFrame missing the column
@@ -284,7 +310,7 @@ class TestImputerEdgeCases:
 
     def test_mixed_numerical_and_categorical(self, df_with_nulls):
         """Test imputing both numerical and categorical columns."""
-        imputer = Imputer(numerical_strategy="mean", categorical_strategy="mode")
+        imputer = Imputer(numerical_strategy="mean", categorical_strategy="most_frequent")
         result = imputer.fit_transform(
             df_with_nulls,
             numerical_cols=["age", "income"],
