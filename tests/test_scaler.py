@@ -10,7 +10,7 @@ from smallaxe.exceptions import (
     ModelNotFittedError,
     ValidationError,
 )
-from smallaxe.preprocessing.scaler import Scaler
+from smallaxe.preprocessing import Scaler
 
 
 @pytest.fixture

@@ -8,7 +8,7 @@ from smallaxe.exceptions import (
     ModelNotFittedError,
     ValidationError,
 )
-from smallaxe.preprocessing.imputer import Imputer
+from smallaxe.preprocessing import Imputer
 
 
 @pytest.fixture
