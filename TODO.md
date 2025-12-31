@@ -1,7 +1,5 @@
 ## TODO LIST - Build Phases
 
-### Phase 7: Training Module - Random Forest (v0.6.0)
-
 ### Phase 8: Training Module - External Algorithms (v0.7.0)
 
 #### Step 8.1: XGBoost

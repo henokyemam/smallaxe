@@ -3,6 +3,7 @@ smallaxe - A PySpark MLOps library for simplified model training and optimizatio
 """
 
 from contextlib import contextmanager
+from importlib.metadata import PackageNotFoundError, version
 from typing import Any, Generator, Optional
 
 from smallaxe._config import (
@@ -12,7 +13,10 @@ from smallaxe._config import (
 )
 from smallaxe.exceptions import ConfigurationError
 
-__version__ = "0.1.0"
+try:
+    __version__ = version("smallaxe")
+except PackageNotFoundError:
+    __version__ = "0.0.0.dev0"
 
 __all__ = [
     "__version__",
