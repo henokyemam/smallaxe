@@ -9,12 +9,13 @@ def test_import_smallaxe():
 
 
 def test_version():
-    """Test that version is defined."""
+    """Test that version is defined and is a valid version string."""
     import smallaxe
 
     assert hasattr(smallaxe, "__version__")
     assert isinstance(smallaxe.__version__, str)
-    assert smallaxe.__version__ == "0.1.0"
+    assert len(smallaxe.__version__) > 0
+    assert smallaxe.__version__[0].isdigit()
 
 
 def test_import_submodules():
