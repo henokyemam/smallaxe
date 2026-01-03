@@ -27,3 +27,16 @@ try:
     __all__.extend(["XGBoostRegressor", "XGBoostClassifier"])
 except ImportError:
     pass
+
+# Import LightGBM classes if available (optional dependency)
+try:
+    from smallaxe.training.lightgbm import (
+        LightGBMClassifier as LightGBMClassifier,
+    )
+    from smallaxe.training.lightgbm import (
+        LightGBMRegressor as LightGBMRegressor,
+    )
+
+    __all__.extend(["LightGBMRegressor", "LightGBMClassifier"])
+except ImportError:
+    pass

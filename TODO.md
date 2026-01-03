@@ -2,14 +2,6 @@
 
 ### Phase 8: Training Module - External Algorithms (v0.7.0)
 
-#### Step 8.2: LightGBM
-- [ ] Create `smallaxe/training/lightgbm.py`
-- [ ] Implement `LightGBMRegressor` and `LightGBMClassifier`
-- [ ] Handle optional dependency
-- [ ] Create `tests/test_lightgbm.py`
-- [ ] Commit: "Add LightGBM support"
-- [ ] PR → main
-
 #### Step 8.3: CatBoost
 - [ ] Create `smallaxe/training/catboost.py`
 - [ ] Implement `CatBoostRegressor` and `CatBoostClassifier`
