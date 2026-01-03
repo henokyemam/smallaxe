@@ -7,6 +7,15 @@ from typing import Any
 from smallaxe.exceptions import ValidationError
 from smallaxe.training.random_forest import RandomForestClassifier
 
+# Import XGBoost with optional dependency handling
+try:
+    from smallaxe.training.xgboost import XGBoostClassifier
+
+    XGBOOST_AVAILABLE = True
+except ImportError:
+    XGBOOST_AVAILABLE = False
+    XGBoostClassifier = None
+
 
 class Classifiers:
     """Factory class for creating and loading classification models.
@@ -30,6 +39,10 @@ class Classifiers:
     _REGISTRY = {
         "RandomForestClassifier": RandomForestClassifier,
     }
+
+    # Add XGBoost to registry if available
+    if XGBOOST_AVAILABLE:
+        _REGISTRY["XGBoostClassifier"] = XGBoostClassifier
 
     @staticmethod
     def random_forest(task: str = "binary", **kwargs: Any) -> RandomForestClassifier:
@@ -56,6 +69,46 @@ class Classifiers:
             >>> model.fit(df, label_col='label', feature_cols=['f1', 'f2'])
         """
         model = RandomForestClassifier(task=task)
+        if kwargs:
+            model.set_param(kwargs)
+        return model
+
+    @staticmethod
+    def xgboost(task: str = "binary", **kwargs: Any) -> "XGBoostClassifier":
+        """Create an XGBoost classifier.
+
+        Note:
+            This requires the xgboost package to be installed.
+            Install with: pip install xgboost
+
+        Args:
+            task: The classification task type. Options are 'binary' or 'multiclass'.
+                Default is 'binary'.
+            **kwargs: Parameters to pass to the model. Common parameters include:
+                - n_estimators: Number of boosting rounds (default: 100)
+                - max_depth: Maximum depth of each tree (default: 6)
+                - learning_rate: Step size shrinkage (default: 0.3)
+                - subsample: Fraction of samples for training each tree (default: 1.0)
+                - colsample_bytree: Fraction of features for training each tree (default: 1.0)
+                - min_child_weight: Minimum sum of instance weight in a child (default: 1)
+                - reg_alpha: L1 regularization term (default: 0.0)
+                - reg_lambda: L2 regularization term (default: 1.0)
+                - gamma: Minimum loss reduction for a split (default: 0.0)
+                - seed: Random seed for reproducibility (default: None)
+
+        Returns:
+            XGBoostClassifier: A configured XGBoost classifier instance.
+
+        Raises:
+            DependencyError: If xgboost is not installed.
+
+        Example:
+            >>> model = Classifiers.xgboost(task='binary', n_estimators=100)
+            >>> model.fit(df, label_col='label', feature_cols=['f1', 'f2'])
+        """
+        from smallaxe.training.xgboost import XGBoostClassifier
+
+        model = XGBoostClassifier(task=task)
         if kwargs:
             model.set_param(kwargs)
         return model
