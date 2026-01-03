@@ -9,8 +9,12 @@ from smallaxe.training.base import BaseClassifier, BaseRegressor
 
 # Check for xgboost availability
 try:
-    from xgboost.spark import SparkXGBClassifier, SparkXGBClassifierModel
-    from xgboost.spark import SparkXGBRegressor, SparkXGBRegressorModel
+    from xgboost.spark import (
+        SparkXGBClassifier,
+        SparkXGBClassifierModel,
+        SparkXGBRegressor,
+        SparkXGBRegressorModel,
+    )
 
     XGBOOST_AVAILABLE = True
 except ImportError:
