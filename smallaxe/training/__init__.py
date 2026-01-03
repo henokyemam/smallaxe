@@ -14,3 +14,11 @@ __all__ = [
     "Regressors",
     "Classifiers",
 ]
+
+# Import XGBoost classes if available (optional dependency)
+try:
+    from smallaxe.training.xgboost import XGBoostClassifier, XGBoostRegressor
+
+    __all__.extend(["XGBoostRegressor", "XGBoostClassifier"])
+except ImportError:
+    pass

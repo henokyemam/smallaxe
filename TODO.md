@@ -2,18 +2,6 @@
 
 ### Phase 8: Training Module - External Algorithms (v0.7.0)
 
-#### Step 8.1: XGBoost
-- [ ] Create `smallaxe/training/xgboost.py`
-- [ ] Implement `XGBoostRegressor` and `XGBoostClassifier`
-- [ ] Handle optional dependency with `DependencyError`
-- [ ] Create `tests/test_xgboost.py`:
-  - Skip tests if xgboost not installed
-  - Test fit/predict for both regressor and classifier
-  - Test save/load
-- [ ] Update Regressors/Classifiers factories
-- [ ] Commit: "Add XGBoost support"
-- [ ] PR → main
-
 #### Step 8.2: LightGBM
 - [ ] Create `smallaxe/training/lightgbm.py`
 - [ ] Implement `LightGBMRegressor` and `LightGBMClassifier`
