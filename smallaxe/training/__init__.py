@@ -40,3 +40,16 @@ try:
     __all__.extend(["LightGBMRegressor", "LightGBMClassifier"])
 except ImportError:
     pass
+
+# Import CatBoost classes if available (optional dependency)
+try:
+    from smallaxe.training.catboost import (
+        CatBoostClassifier as CatBoostClassifier,
+    )
+    from smallaxe.training.catboost import (
+        CatBoostRegressor as CatBoostRegressor,
+    )
+
+    __all__.extend(["CatBoostRegressor", "CatBoostClassifier"])
+except ImportError:
+    pass
