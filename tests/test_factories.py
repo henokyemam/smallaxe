@@ -5,13 +5,15 @@ import tempfile
 
 import pytest
 
-from smallaxe.exceptions import ValidationError
+from smallaxe.exceptions import DependencyError, ValidationError
 from smallaxe.training import (
     Classifiers,
     RandomForestClassifier,
     RandomForestRegressor,
     Regressors,
 )
+from smallaxe.training import classifiers as classifier_factory_module
+from smallaxe.training import regressors as regressor_factory_module
 
 # =============================================================================
 # Fixtures
@@ -75,6 +77,60 @@ class TestRegressorsFactory:
         models = Regressors.list_models()
         assert isinstance(models, list)
         assert "RandomForestRegressor" in models
+
+    def test_available_models_reports_optional_regressors(self):
+        """Test available_models reports installed and unavailable regressors."""
+        models = Regressors.available_models()
+
+        assert set(models) == {"random_forest", "xgboost", "lightgbm", "catboost"}
+        assert models["random_forest"] == {
+            "class_name": "RandomForestRegressor",
+            "available": True,
+            "dependency": None,
+            "install_hint": None,
+        }
+        assert models["xgboost"]["class_name"] == "XGBoostRegressor"
+        assert models["xgboost"]["dependency"] == "xgboost"
+        assert isinstance(models["xgboost"]["available"], bool)
+        assert models["lightgbm"]["class_name"] == "LightGBMRegressor"
+        assert models["lightgbm"]["dependency"] == "synapseml"
+        assert isinstance(models["lightgbm"]["available"], bool)
+        assert models["catboost"]["class_name"] == "CatBoostRegressor"
+        assert models["catboost"]["dependency"] == "catboost_spark"
+        assert isinstance(models["catboost"]["available"], bool)
+
+    def test_xgboost_missing_dependency_raises_actionable_error(self, monkeypatch):
+        """Test xgboost factory raises DependencyError when dependency is unavailable."""
+        monkeypatch.setattr(regressor_factory_module, "XGBOOST_AVAILABLE", False)
+
+        with pytest.raises(DependencyError, match="xgboost is not installed"):
+            Regressors.xgboost()
+
+    def test_lightgbm_missing_dependency_raises_actionable_error(self, monkeypatch):
+        """Test lightgbm factory raises DependencyError when dependency is unavailable."""
+        monkeypatch.setattr(regressor_factory_module, "LIGHTGBM_AVAILABLE", False)
+
+        with pytest.raises(DependencyError, match="synapseml is not installed"):
+            Regressors.lightgbm()
+
+    def test_catboost_missing_dependency_raises_actionable_error(self, monkeypatch):
+        """Test catboost factory raises DependencyError when dependency is unavailable."""
+        monkeypatch.setattr(regressor_factory_module, "is_catboost_available", lambda: False)
+
+        with pytest.raises(DependencyError, match="catboost_spark is not installed"):
+            Regressors.catboost()
+
+    def test_available_models_includes_install_hints_for_missing_regressors(self, monkeypatch):
+        """Test unavailable optional regressors include install hints."""
+        monkeypatch.setattr(regressor_factory_module, "XGBOOST_AVAILABLE", False)
+        monkeypatch.setattr(regressor_factory_module, "LIGHTGBM_AVAILABLE", False)
+        monkeypatch.setattr(regressor_factory_module, "is_catboost_available", lambda: False)
+
+        models = Regressors.available_models()
+
+        assert models["xgboost"]["install_hint"] == "pip install smallaxe[xgboost]"
+        assert "smallaxe[lightgbm]" in models["lightgbm"]["install_hint"]
+        assert "smallaxe[catboost]" in models["catboost"]["install_hint"]
 
     def test_load_regressor(self, regression_df):
         """Test loading a regressor using factory load method."""
@@ -191,6 +247,60 @@ class TestClassifiersFactory:
         models = Classifiers.list_models()
         assert isinstance(models, list)
         assert "RandomForestClassifier" in models
+
+    def test_available_models_reports_optional_classifiers(self):
+        """Test available_models reports installed and unavailable classifiers."""
+        models = Classifiers.available_models()
+
+        assert set(models) == {"random_forest", "xgboost", "lightgbm", "catboost"}
+        assert models["random_forest"] == {
+            "class_name": "RandomForestClassifier",
+            "available": True,
+            "dependency": None,
+            "install_hint": None,
+        }
+        assert models["xgboost"]["class_name"] == "XGBoostClassifier"
+        assert models["xgboost"]["dependency"] == "xgboost"
+        assert isinstance(models["xgboost"]["available"], bool)
+        assert models["lightgbm"]["class_name"] == "LightGBMClassifier"
+        assert models["lightgbm"]["dependency"] == "synapseml"
+        assert isinstance(models["lightgbm"]["available"], bool)
+        assert models["catboost"]["class_name"] == "CatBoostClassifier"
+        assert models["catboost"]["dependency"] == "catboost_spark"
+        assert isinstance(models["catboost"]["available"], bool)
+
+    def test_xgboost_missing_dependency_raises_actionable_error(self, monkeypatch):
+        """Test xgboost factory raises DependencyError when dependency is unavailable."""
+        monkeypatch.setattr(classifier_factory_module, "XGBOOST_AVAILABLE", False)
+
+        with pytest.raises(DependencyError, match="xgboost is not installed"):
+            Classifiers.xgboost()
+
+    def test_lightgbm_missing_dependency_raises_actionable_error(self, monkeypatch):
+        """Test lightgbm factory raises DependencyError when dependency is unavailable."""
+        monkeypatch.setattr(classifier_factory_module, "LIGHTGBM_AVAILABLE", False)
+
+        with pytest.raises(DependencyError, match="synapseml is not installed"):
+            Classifiers.lightgbm()
+
+    def test_catboost_missing_dependency_raises_actionable_error(self, monkeypatch):
+        """Test catboost factory raises DependencyError when dependency is unavailable."""
+        monkeypatch.setattr(classifier_factory_module, "is_catboost_available", lambda: False)
+
+        with pytest.raises(DependencyError, match="catboost_spark is not installed"):
+            Classifiers.catboost()
+
+    def test_available_models_includes_install_hints_for_missing_classifiers(self, monkeypatch):
+        """Test unavailable optional classifiers include install hints."""
+        monkeypatch.setattr(classifier_factory_module, "XGBOOST_AVAILABLE", False)
+        monkeypatch.setattr(classifier_factory_module, "LIGHTGBM_AVAILABLE", False)
+        monkeypatch.setattr(classifier_factory_module, "is_catboost_available", lambda: False)
+
+        models = Classifiers.available_models()
+
+        assert models["xgboost"]["install_hint"] == "pip install smallaxe[xgboost]"
+        assert "smallaxe[lightgbm]" in models["lightgbm"]["install_hint"]
+        assert "smallaxe[catboost]" in models["catboost"]["install_hint"]
 
     def test_load_classifier(self, classification_df):
         """Test loading a classifier using factory load method."""
