@@ -28,10 +28,12 @@ def _load_catboost_spark() -> bool:
         return True
 
     try:
-        from catboost_spark import CatBoostClassificationModel
-        from catboost_spark import CatBoostClassifier
-        from catboost_spark import CatBoostRegressionModel
-        from catboost_spark import CatBoostRegressor
+        from catboost_spark import (
+            CatBoostClassificationModel,
+            CatBoostClassifier,
+            CatBoostRegressionModel,
+            CatBoostRegressor,
+        )
     except ImportError:
         return False
 
