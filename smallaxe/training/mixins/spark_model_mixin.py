@@ -23,16 +23,39 @@ class SparkModelMixin(ABC):
     RAW_PREDICTION_COL = "rawPrediction"
 
     @abstractmethod
-    def _create_spark_estimator(self) -> Any:
+    def _create_spark_estimator(
+        self,
+        features_col: Optional[str] = None,
+        label_col: Optional[str] = None,
+        prediction_col: Optional[str] = None,
+    ) -> Any:
         """Create the underlying Spark MLlib estimator.
 
         Subclasses must implement this to create their specific
         Spark MLlib estimator (e.g., RandomForestRegressor).
 
+        For estimators that accept column names via constructor (XGBoost,
+        LightGBM), use the provided column params. For estimators that use
+        setters (native Spark ML), ignore these and let the base class set
+        them via setters.
+
+        Args:
+            features_col: Features column name.
+            label_col: Label column name.
+            prediction_col: Prediction column name.
+
         Returns:
             A Spark MLlib estimator instance.
         """
         pass
+
+    def _uses_constructor_col_params(self) -> bool:
+        """Whether this estimator takes column names via constructor.
+
+        Override and return True for estimators like XGBoost and LightGBM
+        that require column names at construction time rather than via setters.
+        """
+        return False
 
     def _assemble_features(
         self,
@@ -84,11 +107,18 @@ class SparkModelMixin(ABC):
         # Assemble features
         df_with_features = self._assemble_features(df, feature_cols)
 
-        # Create and configure the estimator
-        estimator = self._create_spark_estimator()
-        estimator.setLabelCol(label_col)
-        estimator.setFeaturesCol(self.FEATURES_COL)
-        estimator.setPredictionCol(self.PREDICTION_COL)
+        # Create the estimator with column params
+        estimator = self._create_spark_estimator(
+            features_col=self.FEATURES_COL,
+            label_col=label_col,
+            prediction_col=self.PREDICTION_COL,
+        )
+
+        # For estimators that use setters (native Spark ML), set column names
+        if not self._uses_constructor_col_params():
+            estimator.setLabelCol(label_col)
+            estimator.setFeaturesCol(self.FEATURES_COL)
+            estimator.setPredictionCol(self.PREDICTION_COL)
 
         # Store feature columns for prediction
         self._feature_cols = feature_cols

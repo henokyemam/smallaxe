@@ -147,26 +147,35 @@ def f1_score(
     return float(2 * (prec * rec) / (prec + rec))
 
 
-def auc_roc(df, label_col="label", probability_col="probability"):
+def auc_roc(
+    df: DataFrame, label_col: str = "label", probability_col: str = "probability"
+) -> float:
+    """Compute Area Under the ROC Curve (AUC-ROC).
+
+    Args:
+        df: PySpark DataFrame containing true labels and probability scores.
+        label_col: Name of the column containing true labels (0 or 1). Default is 'label'.
+        probability_col: Name of the column containing probability scores. Default is 'probability'.
+
+    Returns:
+        AUC-ROC as a float between 0 and 1.
+        Returns 0.0 if the DataFrame is empty or contains only one class.
+
+    Raises:
+        ColumnNotFoundError: If label_col or probability_col is not in the DataFrame.
+    """
     _validate_columns(df, label_col, probability_col)
 
-    # 1. Check for empty DataFrame
-    # Spark's evaluator might return 0.5 for empty sets; your test wants 0.0.
-    if df.storageLevel.useMemory or df.limit(1).count() == 0:
-        if df.limit(1).count() == 0:
-            return 0.0
+    if df.limit(1).count() == 0:
+        return 0.0
 
-    # 2. Check for single-class data (No negatives or no positives)
-    # Spark often returns 1.0 or NaN here; your test expects 0.0.
     distinct_labels = [row[0] for row in df.select(label_col).distinct().collect()]
     if len(distinct_labels) < 2:
         return 0.0
 
-    # 3. Use the Spark Evaluator for the heavy lifting
     evaluator = BinaryClassificationEvaluator(
         labelCol=label_col, rawPredictionCol=probability_col, metricName="areaUnderROC"
     )
-
     return float(evaluator.evaluate(df))
 
 

@@ -479,14 +479,11 @@ class BaseModel(
         Returns:
             Dictionary of evaluation metrics.
         """
-        # Generate predictions
-        predictions_df = self._predict_spark_model(df, output_col="prediction")
-
-        # Compute metrics based on task type
         if self.task_type == "regression":
+            predictions_df = self._predict_spark_model(df, output_col="prediction")
             return self._compute_regression_metrics(predictions_df, label_col)
         else:
-            return self._compute_classification_metrics(df, predictions_df, label_col)
+            return self._compute_classification_metrics_single_pass(df, label_col)
 
     def _compute_regression_metrics(
         self,
@@ -512,17 +509,15 @@ class BaseModel(
             "mape": mape(predictions_df, label_col, "prediction"),
         }
 
-    def _compute_classification_metrics(
+    def _compute_classification_metrics_single_pass(
         self,
-        original_df: DataFrame,
-        predictions_df: DataFrame,
+        df: DataFrame,
         label_col: str,
     ) -> Dict[str, Any]:
-        """Compute classification metrics.
+        """Compute classification metrics in a single transform pass.
 
         Args:
-            original_df: Original DataFrame (for probability-based metrics).
-            predictions_df: DataFrame with predictions.
+            df: Original DataFrame to evaluate.
             label_col: Label column name.
 
         Returns:
@@ -538,34 +533,32 @@ class BaseModel(
             recall,
         )
 
+        # Single transform pass produces predictions AND probabilities
+        df_with_features = self._assemble_features(df, self._feature_cols)
+        full_df = self._spark_model.transform(df_with_features)
+
         # Basic metrics using class predictions
         metrics = {
-            "accuracy": accuracy(predictions_df, label_col, "prediction"),
-            "precision": precision(predictions_df, label_col, "prediction"),
-            "recall": recall(predictions_df, label_col, "prediction"),
-            "f1_score": f1_score(predictions_df, label_col, "prediction"),
+            "accuracy": accuracy(full_df, label_col, self.PREDICTION_COL),
+            "precision": precision(full_df, label_col, self.PREDICTION_COL),
+            "recall": recall(full_df, label_col, self.PREDICTION_COL),
+            "f1_score": f1_score(full_df, label_col, self.PREDICTION_COL),
         }
 
         # Probability-based metrics (only for binary classification)
         if self._task == "binary":
             try:
-                # Get probability predictions
-                proba_df = self._predict_proba_spark_model(original_df, output_col="probability")
-
-                # Extract the probability of the positive class (class 1)
-                # Spark's probability is a vector, we need to extract the second element
                 from pyspark.ml.functions import vector_to_array
                 from pyspark.sql import functions as F
 
-                proba_df = proba_df.withColumn(
-                    "prob_positive", vector_to_array(F.col("probability"))[1]
+                proba_df = full_df.withColumn(
+                    "prob_positive", vector_to_array(F.col(self.PROBABILITY_COL))[1]
                 )
 
                 metrics["auc_roc"] = auc_roc(proba_df, label_col, "prob_positive")
                 metrics["auc_pr"] = auc_pr(proba_df, label_col, "prob_positive")
                 metrics["log_loss"] = log_loss(proba_df, label_col, "prob_positive")
             except Exception:
-                # If probability extraction fails, skip these metrics
                 metrics["auc_roc"] = None
                 metrics["auc_pr"] = None
                 metrics["log_loss"] = None

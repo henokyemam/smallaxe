@@ -31,7 +31,7 @@ class ConcreteRegressor(BaseRegressor):
             "max_depth": 5,
         }
 
-    def _create_spark_estimator(self) -> Any:
+    def _create_spark_estimator(self, **kwargs) -> Any:
         n_estimators = self.get_param("n_estimators")
         max_depth = self.get_param("max_depth")
         return SparkRFRegressor(numTrees=n_estimators, maxDepth=max_depth)
@@ -58,7 +58,7 @@ class ConcreteClassifier(BaseClassifier):
             "max_depth": 5,
         }
 
-    def _create_spark_estimator(self) -> Any:
+    def _create_spark_estimator(self, **kwargs) -> Any:
         n_estimators = self.get_param("n_estimators")
         max_depth = self.get_param("max_depth")
         return SparkRFClassifier(numTrees=n_estimators, maxDepth=max_depth)

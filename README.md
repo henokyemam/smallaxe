@@ -13,10 +13,9 @@ PySpark MLlib has a steep learning curve and verbose API. **smallaxe** provides 
 - **Simple API** - Train models with familiar `fit()`/`predict()` patterns
 - **Multiple Algorithms** - XGBoost, LightGBM, CatBoost, and Random Forest
 - **Preprocessing Pipeline** - Imputer, Scaler, Encoder with chainable pipelines
-- **Hyperparameter Optimization** - Built-in hyperopt integration with early stopping
-- **Automated Training** - Train all algorithms and compare with one call
-- **Visualization** - Plotly-based charts for model evaluation
 - **Cross-Validation** - Train/test split and k-fold with stratified sampling
+- **Metrics** - Classification (accuracy, precision, recall, F1, AUC-ROC, AUC-PR, log loss) and regression (MSE, RMSE, MAE, R², MAPE)
+- **Visualization** - Plotly-based charts for model evaluation
 
 ## Installation
 
@@ -93,63 +92,20 @@ pipeline.fit(
 predictions = pipeline.predict(new_df)
 ```
 
-### Hyperparameter Optimization
-
-```python
-from smallaxe.search import optimize
-from hyperopt import hp
-
-param_grid = {
-    'max_depth': hp.choice('max_depth', [3, 5, 7, 10]),
-    'learning_rate': hp.uniform('learning_rate', 0.01, 0.3)
-}
-
-best_model = optimize.run(
-    model=Regressors.xgboost(),
-    dataframe=df,
-    label_col='target',
-    param_grid=param_grid,
-    metric='rmse',
-    max_evals=50
-)
-
-print(best_model.best_params)
-```
-
-### Automated Training
-
-```python
-from smallaxe.auto import AutomatedTraining
-
-auto = AutomatedTraining(model_type='classification', metrics=['f1_score', 'auc_roc'])
-auto.fit(
-    df,
-    label_col='churn',
-    numerical_cols=['tenure', 'monthly_charges'],
-    categorical_cols=['contract'],
-    n_folds=5
-)
-
-# Compare all models
-auto.metrics.show()
-
-# Use best model
-predictions = auto.predict(new_df)
-```
-
 ## Supported Algorithms
 
 | Algorithm | Regressor | Classifier | Dependencies |
 |-----------|-----------|------------|--------------|
-| Random Forest | Yes | Yes | None (native PySpark) |
-| XGBoost | Yes | Yes | `smallaxe[xgboost]` |
-| LightGBM | Yes | Yes | `smallaxe[lightgbm]` |
-| CatBoost | Yes | Yes | `smallaxe[catboost]` |
+| Random Forest | ✓ | ✓ | None (native PySpark) |
+| XGBoost | ✓ | ✓ | `smallaxe[xgboost]` |
+| LightGBM | ✓ | ✓ | `smallaxe[lightgbm]` |
+| CatBoost | ✓ | ✓ | `smallaxe[catboost]` |
 
 ## Requirements
 
 - Python 3.8 - 3.12
 - PySpark 3.3+
+- Java 8 or 11 (required by Spark)
 
 ## License
 

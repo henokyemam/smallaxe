@@ -1,8 +1,6 @@
 """LightGBM models for regression and classification."""
 
-from typing import Any, Dict, List
-
-from pyspark.sql import DataFrame
+from typing import Any, Dict, Optional
 
 from smallaxe.exceptions import DependencyError
 from smallaxe.training.base import BaseClassifier, BaseRegressor
@@ -132,104 +130,48 @@ class LightGBMRegressor(BaseRegressor):
             "seed": None,
         }
 
-    def _create_spark_estimator(self) -> Any:
+    def _uses_constructor_col_params(self) -> bool:
+        return True
+
+    def _create_spark_estimator(
+        self,
+        features_col: Optional[str] = None,
+        label_col: Optional[str] = None,
+        prediction_col: Optional[str] = None,
+    ) -> Any:
         """Create the underlying SparkLightGBMRegressor.
 
         Returns:
             Configured SparkLightGBMRegressor instance.
         """
-        n_estimators = self.get_param("n_estimators")
-        max_depth = self.get_param("max_depth")
-        learning_rate = self.get_param("learning_rate")
-        num_leaves = self.get_param("num_leaves")
-        min_data_in_leaf = self.get_param("min_data_in_leaf")
-        feature_fraction = self.get_param("feature_fraction")
-        bagging_fraction = self.get_param("bagging_fraction")
-        bagging_freq = self.get_param("bagging_freq")
-        lambda_l1 = self.get_param("lambda_l1")
-        lambda_l2 = self.get_param("lambda_l2")
         seed = self.get_param("seed")
 
-        estimator = SparkLightGBMRegressor(
-            numIterations=n_estimators,
-            maxDepth=max_depth,
-            learningRate=learning_rate,
-            numLeaves=num_leaves,
-            minDataInLeaf=min_data_in_leaf,
-            featureFraction=feature_fraction,
-            baggingFraction=bagging_fraction,
-            baggingFreq=bagging_freq,
-            lambdaL1=lambda_l1,
-            lambdaL2=lambda_l2,
-        )
+        kwargs = {
+            "numIterations": self.get_param("n_estimators"),
+            "maxDepth": self.get_param("max_depth"),
+            "learningRate": self.get_param("learning_rate"),
+            "numLeaves": self.get_param("num_leaves"),
+            "minDataInLeaf": self.get_param("min_data_in_leaf"),
+            "featureFraction": self.get_param("feature_fraction"),
+            "baggingFraction": self.get_param("bagging_fraction"),
+            "baggingFreq": self.get_param("bagging_freq"),
+            "lambdaL1": self.get_param("lambda_l1"),
+            "lambdaL2": self.get_param("lambda_l2"),
+        }
+
+        if features_col is not None:
+            kwargs["featuresCol"] = features_col
+        if label_col is not None:
+            kwargs["labelCol"] = label_col
+        if prediction_col is not None:
+            kwargs["predictionCol"] = prediction_col
+
+        estimator = SparkLightGBMRegressor(**kwargs)
 
         if seed is not None:
             estimator.setSeed(seed)
 
         return estimator
-
-    def _fit_spark_model(
-        self,
-        df: DataFrame,
-        label_col: str,
-        feature_cols: List[str],
-    ) -> Any:
-        """Fit the LightGBM model.
-
-        Override base class method to handle LightGBM's API.
-
-        Args:
-            df: PySpark DataFrame with training data.
-            label_col: Name of the label column.
-            feature_cols: List of feature column names.
-
-        Returns:
-            Fitted LightGBM model.
-        """
-        # Assemble features
-        df_with_features = self._assemble_features(df, feature_cols)
-
-        # Get parameters
-        n_estimators = self.get_param("n_estimators")
-        max_depth = self.get_param("max_depth")
-        learning_rate = self.get_param("learning_rate")
-        num_leaves = self.get_param("num_leaves")
-        min_data_in_leaf = self.get_param("min_data_in_leaf")
-        feature_fraction = self.get_param("feature_fraction")
-        bagging_fraction = self.get_param("bagging_fraction")
-        bagging_freq = self.get_param("bagging_freq")
-        lambda_l1 = self.get_param("lambda_l1")
-        lambda_l2 = self.get_param("lambda_l2")
-        seed = self.get_param("seed")
-
-        # Create estimator with all params including column names
-        estimator = SparkLightGBMRegressor(
-            numIterations=n_estimators,
-            maxDepth=max_depth,
-            learningRate=learning_rate,
-            numLeaves=num_leaves,
-            minDataInLeaf=min_data_in_leaf,
-            featureFraction=feature_fraction,
-            baggingFraction=bagging_fraction,
-            baggingFreq=bagging_freq,
-            lambdaL1=lambda_l1,
-            lambdaL2=lambda_l2,
-            featuresCol=self.FEATURES_COL,
-            labelCol=label_col,
-            predictionCol=self.PREDICTION_COL,
-        )
-
-        if seed is not None:
-            estimator.setSeed(seed)
-
-        # Store feature columns for prediction
-        self._feature_cols = feature_cols
-        self._label_col = label_col
-
-        # Fit the model
-        self._spark_model = estimator.fit(df_with_features)
-
-        return self._spark_model
 
     def _load_artifacts(self, path: str) -> None:
         """Load the Spark model from disk.
@@ -331,106 +273,50 @@ class LightGBMClassifier(BaseClassifier):
             "seed": None,
         }
 
-    def _create_spark_estimator(self) -> Any:
+    def _uses_constructor_col_params(self) -> bool:
+        return True
+
+    def _create_spark_estimator(
+        self,
+        features_col: Optional[str] = None,
+        label_col: Optional[str] = None,
+        prediction_col: Optional[str] = None,
+    ) -> Any:
         """Create the underlying SparkLightGBMClassifier.
 
         Returns:
             Configured SparkLightGBMClassifier instance.
         """
-        n_estimators = self.get_param("n_estimators")
-        max_depth = self.get_param("max_depth")
-        learning_rate = self.get_param("learning_rate")
-        num_leaves = self.get_param("num_leaves")
-        min_data_in_leaf = self.get_param("min_data_in_leaf")
-        feature_fraction = self.get_param("feature_fraction")
-        bagging_fraction = self.get_param("bagging_fraction")
-        bagging_freq = self.get_param("bagging_freq")
-        lambda_l1 = self.get_param("lambda_l1")
-        lambda_l2 = self.get_param("lambda_l2")
         seed = self.get_param("seed")
 
-        estimator = SparkLightGBMClassifier(
-            numIterations=n_estimators,
-            maxDepth=max_depth,
-            learningRate=learning_rate,
-            numLeaves=num_leaves,
-            minDataInLeaf=min_data_in_leaf,
-            featureFraction=feature_fraction,
-            baggingFraction=bagging_fraction,
-            baggingFreq=bagging_freq,
-            lambdaL1=lambda_l1,
-            lambdaL2=lambda_l2,
-        )
+        kwargs = {
+            "numIterations": self.get_param("n_estimators"),
+            "maxDepth": self.get_param("max_depth"),
+            "learningRate": self.get_param("learning_rate"),
+            "numLeaves": self.get_param("num_leaves"),
+            "minDataInLeaf": self.get_param("min_data_in_leaf"),
+            "featureFraction": self.get_param("feature_fraction"),
+            "baggingFraction": self.get_param("bagging_fraction"),
+            "baggingFreq": self.get_param("bagging_freq"),
+            "lambdaL1": self.get_param("lambda_l1"),
+            "lambdaL2": self.get_param("lambda_l2"),
+            "probabilityCol": self.PROBABILITY_COL,
+            "rawPredictionCol": self.RAW_PREDICTION_COL,
+        }
+
+        if features_col is not None:
+            kwargs["featuresCol"] = features_col
+        if label_col is not None:
+            kwargs["labelCol"] = label_col
+        if prediction_col is not None:
+            kwargs["predictionCol"] = prediction_col
+
+        estimator = SparkLightGBMClassifier(**kwargs)
 
         if seed is not None:
             estimator.setSeed(seed)
 
         return estimator
-
-    def _fit_spark_model(
-        self,
-        df: DataFrame,
-        label_col: str,
-        feature_cols: List[str],
-    ) -> Any:
-        """Fit the LightGBM classifier.
-
-        Override base class method to handle LightGBM's API.
-
-        Args:
-            df: PySpark DataFrame with training data.
-            label_col: Name of the label column.
-            feature_cols: List of feature column names.
-
-        Returns:
-            Fitted LightGBM model.
-        """
-        # Assemble features
-        df_with_features = self._assemble_features(df, feature_cols)
-
-        # Get parameters
-        n_estimators = self.get_param("n_estimators")
-        max_depth = self.get_param("max_depth")
-        learning_rate = self.get_param("learning_rate")
-        num_leaves = self.get_param("num_leaves")
-        min_data_in_leaf = self.get_param("min_data_in_leaf")
-        feature_fraction = self.get_param("feature_fraction")
-        bagging_fraction = self.get_param("bagging_fraction")
-        bagging_freq = self.get_param("bagging_freq")
-        lambda_l1 = self.get_param("lambda_l1")
-        lambda_l2 = self.get_param("lambda_l2")
-        seed = self.get_param("seed")
-
-        # Create estimator with all params including column names
-        estimator = SparkLightGBMClassifier(
-            numIterations=n_estimators,
-            maxDepth=max_depth,
-            learningRate=learning_rate,
-            numLeaves=num_leaves,
-            minDataInLeaf=min_data_in_leaf,
-            featureFraction=feature_fraction,
-            baggingFraction=bagging_fraction,
-            baggingFreq=bagging_freq,
-            lambdaL1=lambda_l1,
-            lambdaL2=lambda_l2,
-            featuresCol=self.FEATURES_COL,
-            labelCol=label_col,
-            predictionCol=self.PREDICTION_COL,
-            probabilityCol=self.PROBABILITY_COL,
-            rawPredictionCol=self.RAW_PREDICTION_COL,
-        )
-
-        if seed is not None:
-            estimator.setSeed(seed)
-
-        # Store feature columns for prediction
-        self._feature_cols = feature_cols
-        self._label_col = label_col
-
-        # Fit the model
-        self._spark_model = estimator.fit(df_with_features)
-
-        return self._spark_model
 
     def _load_artifacts(self, path: str) -> None:
         """Load the Spark model from disk.

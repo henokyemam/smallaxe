@@ -1,0 +1,10 @@
+{
+  "extraKnownMarketplaces": {
+    "eg-skills": {
+      "source": {
+        "source": "github",
+        "repo": "eg-internal/skills"
+      }
+    }
+  }
+}

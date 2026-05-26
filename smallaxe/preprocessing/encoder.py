@@ -3,9 +3,9 @@
 from typing import Dict, List
 
 from pyspark.ml.feature import OneHotEncoder as SparkOneHotEncoder
+from pyspark.ml.functions import vector_to_array
 from pyspark.sql import DataFrame
 from pyspark.sql import functions as F
-from pyspark.sql.types import DoubleType, IntegerType
 
 from smallaxe.exceptions import (
     ColumnNotFoundError,
@@ -187,6 +187,9 @@ class Encoder:
             indexed_col = f"__{col}_indexed"
             onehot_col = f"__{col}_onehot"
 
+            if not self._category_mappings[col]:
+                continue
+
             # Create and fit OneHotEncoder
             encoder = SparkOneHotEncoder(
                 inputCol=indexed_col,
@@ -196,40 +199,44 @@ class Encoder:
             self._onehot_models[col] = encoder.fit(indexed_df)
 
     def _apply_label_encoding(self, df: DataFrame) -> DataFrame:
-        """Apply label encoding using the fitted category mappings."""
+        """Apply label encoding using native Spark SQL map lookups."""
         result_df = df
 
         for col in self._categorical_cols:
             mapping = self._category_mappings[col]
             indexed_col = f"__{col}_indexed"
 
-            # Broadcast the mapping for efficiency
-            spark = df.sparkSession
-            broadcast_mapping = spark.sparkContext.broadcast(mapping)
-
-            # Check if we have an OTHER category
             has_other = "__OTHER__" in mapping
             other_idx = mapping.get("__OTHER__", -1)
 
-            # Create a UDF to map categories to indices
-            def create_map_udf(bc_mapping, has_other_flag, other_index):
-                def map_category(value):
-                    if value is None:
-                        return None
-                    m = bc_mapping.value
-                    str_val = str(value)
-                    if str_val in m:
-                        return float(m[str_val])
-                    elif has_other_flag:
-                        return float(other_index)
-                    else:
-                        # Handle unseen categories - map to OTHER if available, else None
-                        return None
+            # Build a Spark SQL map literal: create_map(key1, val1, key2, val2, ...)
+            map_args = []
+            for cat_str, idx in mapping.items():
+                if cat_str == "__OTHER__":
+                    continue
+                map_args.append(F.lit(cat_str))
+                map_args.append(F.lit(float(idx)))
 
-                return F.udf(map_category, DoubleType())
+            if map_args:
+                mapping_col = F.create_map(*map_args)
+                lookup_result = mapping_col[F.col(col).cast("string")]
+            else:
+                lookup_result = F.lit(None).cast("double")
 
-            map_udf = create_map_udf(broadcast_mapping, has_other, other_idx)
-            result_df = result_df.withColumn(indexed_col, map_udf(F.col(col)))
+            if has_other:
+                result_df = result_df.withColumn(
+                    indexed_col,
+                    F.when(F.col(col).isNull(), F.lit(None).cast("double")).otherwise(
+                        F.coalesce(lookup_result, F.lit(float(other_idx)))
+                    ),
+                )
+            else:
+                result_df = result_df.withColumn(
+                    indexed_col,
+                    F.when(F.col(col).isNull(), F.lit(None).cast("double")).otherwise(
+                        lookup_result
+                    ),
+                )
 
         return result_df
 
@@ -267,7 +274,7 @@ class Encoder:
         # Replace original columns with indexed columns
         for col in self._categorical_cols:
             indexed_col = f"__{col}_indexed"
-            result_df = result_df.withColumn(col, F.col(indexed_col).cast(IntegerType()))
+            result_df = result_df.withColumn(col, F.col(indexed_col).cast("int"))
             result_df = result_df.drop(indexed_col)
 
         return result_df
@@ -279,6 +286,8 @@ class Encoder:
 
         # Apply one-hot encoding for each column
         for col in self._categorical_cols:
+            if col not in self._onehot_models:
+                continue
             # Apply the fitted OneHotEncoder
             result_df = self._onehot_models[col].transform(result_df)
 
@@ -288,48 +297,43 @@ class Encoder:
         return result_df
 
     def _extract_onehot_columns(self, df: DataFrame) -> DataFrame:
-        """Extract one-hot encoded vectors to individual columns."""
+        """Extract one-hot encoded vectors to individual columns using native Spark."""
         result_df = df
 
         for col in self._categorical_cols:
             mapping = self._category_mappings[col]
             onehot_col = f"__{col}_onehot"
             indexed_col = f"__{col}_indexed"
+            array_col = f"__{col}_array"
 
-            # Create a reverse mapping (index -> category name)
+            if not mapping:
+                result_df = result_df.drop(col, indexed_col)
+                continue
+
+            # Convert the sparse vector to an array
+            result_df = result_df.withColumn(array_col, vector_to_array(F.col(onehot_col)))
+
             reverse_mapping = {v: k for k, v in mapping.items()}
-
-            # Extract each position from the one-hot vector as a separate column
             num_categories = len(mapping)
-
-            # Track used column names to avoid collisions
-            used_col_names = set()
+            used_col_names: set = set()
 
             for idx in range(num_categories):
                 category_name = reverse_mapping.get(idx, f"unknown_{idx}")
-                # Clean up category name for column naming
                 if category_name == "__OTHER__":
                     new_col_name = f"{col}_OTHER"
                 else:
-                    # Sanitize category name for column naming
                     safe_name = str(category_name).replace(" ", "_").replace("-", "_")
                     new_col_name = f"{col}_{safe_name}"
-
-                    # Handle potential collisions by appending index
                     if new_col_name in used_col_names:
                         new_col_name = f"{new_col_name}_{idx}"
 
                 used_col_names.add(new_col_name)
 
-                # Extract the idx-th element from the one-hot vector
-                extract_element = F.udf(
-                    lambda v, i=idx: float(v[i]) if v is not None and len(v) > i else 0.0,
-                    DoubleType(),
+                result_df = result_df.withColumn(
+                    new_col_name, F.col(array_col)[idx].cast("double")
                 )
-                result_df = result_df.withColumn(new_col_name, extract_element(F.col(onehot_col)))
 
-            # Drop the original column, indexed column, and onehot vector column
-            result_df = result_df.drop(col, indexed_col, onehot_col)
+            result_df = result_df.drop(col, indexed_col, onehot_col, array_col)
 
         return result_df
 

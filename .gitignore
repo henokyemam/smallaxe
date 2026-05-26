@@ -128,3 +128,6 @@ Thumbs.db
 tmp/
 temp/
 .spark-local/
+
+# Claude Code - track settings but ignore other .claude files
+!.claude/settings.json

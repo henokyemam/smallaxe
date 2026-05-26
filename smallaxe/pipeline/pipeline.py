@@ -3,7 +3,7 @@
 import json
 import os
 import pickle
-from typing import Any, ClassVar, Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 from pyspark.sql import DataFrame
 
@@ -37,34 +37,13 @@ class Pipeline:
     >>> result = pipeline.transform(df)
     """
 
-    # Step types for validation
-    PREPROCESSING_TYPES: ClassVar[Set[str]] = {"Imputer", "Scaler", "Encoder"}
-    MODEL_TYPES: ClassVar[Set[str]] = {
-        "BaseModel",
-        "BaseRegressor",
-        "BaseClassifier",
+    MODEL_TYPES_REQUIRING_ENCODER: Set[str] = {
         "RandomForestRegressor",
         "RandomForestClassifier",
         "XGBoostRegressor",
         "XGBoostClassifier",
         "LightGBMRegressor",
         "LightGBMClassifier",
-        "CatBoostRegressor",
-        "CatBoostClassifier",
-    }
-
-    # Preprocessing requirements for each model type
-    # Maps model type names to a set of required preprocessing step types
-    MODEL_PREPROCESSING_REQUIREMENTS: ClassVar[Dict[str, Set[str]]] = {
-        "RandomForestRegressor": {"Encoder"},
-        "RandomForestClassifier": {"Encoder"},
-        "XGBoostRegressor": {"Encoder"},
-        "XGBoostClassifier": {"Encoder"},
-        "LightGBMRegressor": {"Encoder"},
-        "LightGBMClassifier": {"Encoder"},
-        # CatBoost handles categoricals natively - no preprocessing required
-        "CatBoostRegressor": set(),
-        "CatBoostClassifier": set(),
     }
 
     def __init__(self, steps: List[Tuple[str, Any]]) -> None:
@@ -193,42 +172,48 @@ class Pipeline:
         PreprocessingError
             If a required preprocessing step is missing for the model.
         """
-        # Collect preprocessing step types present in the pipeline
+        from smallaxe.preprocessing import Encoder
+        from smallaxe.training.base import BaseModel
+
         preprocessing_types: Set[str] = set()
         model_step = None
         model_name = None
 
         for _, step in steps:
-            step_type = type(step).__name__
             if self._is_preprocessing_step(step):
-                preprocessing_types.add(step_type)
+                preprocessing_types.add(type(step).__name__)
             elif self._is_model_step(step):
                 model_step = step
-                model_name = step_type
+                model_name = type(step).__name__
 
-        # If no model, no validation needed
         if model_step is None:
             return
 
-        # Get requirements for this model type
-        required_steps = self.MODEL_PREPROCESSING_REQUIREMENTS.get(model_name, set())
+        required_steps: Set[str] = set()
+        if isinstance(model_step, BaseModel):
+            if "CatBoost" not in model_name:
+                required_steps.add("Encoder")
+        elif model_name in self.MODEL_TYPES_REQUIRING_ENCODER:
+            required_steps.add("Encoder")
 
         # Only require Encoder if categorical columns are provided
         if not categorical_cols:
             required_steps = required_steps - {"Encoder"}
 
-        # Check if all required steps are present
-        missing_steps = required_steps - preprocessing_types
-        if missing_steps:
-            # Raise error for the first missing step
-            missing_step = sorted(missing_steps)[0]
+        # Check for Encoder presence (also check by isinstance for duck-typed)
+        has_encoder = "Encoder" in preprocessing_types or any(
+            isinstance(step, Encoder) for _, step in steps
+        )
+        if "Encoder" in required_steps and not has_encoder:
             raise PreprocessingError(
                 algorithm=model_name,
-                missing_step=missing_step,
+                missing_step="Encoder",
             )
 
     def _is_preprocessing_step(self, step: Any) -> bool:
         """Check if a step is a preprocessing step.
+
+        Uses isinstance checks for known types with duck-typing fallback.
 
         Parameters
         ----------
@@ -240,14 +225,17 @@ class Pipeline:
         bool
             True if the step is a preprocessing step.
         """
-        step_type = type(step).__name__
-        if step_type in self.PREPROCESSING_TYPES:
+        from smallaxe.preprocessing import Encoder, Imputer, Scaler
+
+        if isinstance(step, (Imputer, Scaler, Encoder)):
             return True
-        # Also check for duck typing - has fit and transform but not predict
+        # Duck-typing fallback: has fit and transform but not predict
         return hasattr(step, "fit") and hasattr(step, "transform") and not hasattr(step, "predict")
 
     def _is_model_step(self, step: Any) -> bool:
         """Check if a step is a model step.
+
+        Uses isinstance check for BaseModel with duck-typing fallback.
 
         Parameters
         ----------
@@ -259,10 +247,11 @@ class Pipeline:
         bool
             True if the step is a model step.
         """
-        step_type = type(step).__name__
-        if step_type in self.MODEL_TYPES:
+        from smallaxe.training.base import BaseModel
+
+        if isinstance(step, BaseModel):
             return True
-        # Also check for duck typing - has fit and predict
+        # Duck-typing fallback: has fit and predict
         return hasattr(step, "fit") and hasattr(step, "predict")
 
     def _check_has_model(self) -> bool:
@@ -619,7 +608,7 @@ class Pipeline:
             step = cls._load_step(step_path, step_type)
             steps.append((name, step))
 
-        # Create pipeline without validation (steps are already validated)
+        # Create pipeline and validate loaded steps
         pipeline = object.__new__(cls)
         pipeline._steps = steps
         pipeline._is_fitted = True
@@ -627,6 +616,9 @@ class Pipeline:
         pipeline._numerical_cols = metadata["numerical_cols"]
         pipeline._categorical_cols = metadata["categorical_cols"]
         pipeline._label_col = metadata["label_col"]
+
+        # Validate loaded steps (same checks as __init__)
+        pipeline._validate_steps(steps)
 
         return pipeline
 

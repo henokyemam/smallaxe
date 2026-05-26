@@ -85,7 +85,7 @@ class ConcreteSparkModelMixin(SparkModelMixin):
         self._feature_cols = None
         self._label_col = None
 
-    def _create_spark_estimator(self) -> Any:
+    def _create_spark_estimator(self, **kwargs) -> Any:
         return SparkRFRegressor(numTrees=5, maxDepth=3)
 
 
@@ -97,7 +97,7 @@ class ConcreteSparkClassifierMixin(SparkModelMixin):
         self._feature_cols = None
         self._label_col = None
 
-    def _create_spark_estimator(self) -> Any:
+    def _create_spark_estimator(self, **kwargs) -> Any:
         return SparkRFClassifier(numTrees=5, maxDepth=3)
 
 
@@ -512,6 +512,27 @@ class TestSparkModelMixin:
             regression_df,
             label_col="target",
             feature_cols=["age", "income"],
+        )
+
+        assert model is not None
+        assert mixin._spark_model is not None
+
+    def test_fit_spark_model_skips_null_feature_rows(self, spark_session):
+        """Test model fitting preserves the existing null-feature skip behavior."""
+        df = spark_session.createDataFrame(
+            [
+                (1, 20.0, 100.0),
+                (2, None, 150.0),
+                (3, 30.0, 200.0),
+            ],
+            ["id", "age", "target"],
+        )
+
+        mixin = ConcreteSparkModelMixin()
+        model = mixin._fit_spark_model(
+            df,
+            label_col="target",
+            feature_cols=["age"],
         )
 
         assert model is not None

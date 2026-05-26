@@ -530,6 +530,33 @@ class TestEncoderEdgeCases:
         # Null values should remain null (or be handled gracefully)
         # The exact behavior depends on implementation
 
+    def test_all_null_label_encoding(self, spark_session):
+        """Test label encoding when a fitted categorical column has no categories."""
+        df = spark_session.createDataFrame(
+            [(1, None), (2, None)],
+            "id int, category string",
+        )
+
+        encoder = Encoder(method="label")
+        result = encoder.fit_transform(df, categorical_cols=["category"])
+
+        rows = result.orderBy("id").collect()
+        assert [row["category"] for row in rows] == [None, None]
+
+    def test_all_null_onehot_encoding(self, spark_session):
+        """Test one-hot encoding when a fitted categorical column has no categories."""
+        df = spark_session.createDataFrame(
+            [(1, None), (2, None)],
+            "id int, category string",
+        )
+
+        encoder = Encoder(method="onehot")
+        result = encoder.fit_transform(df, categorical_cols=["category"])
+
+        assert "category" not in result.columns
+        assert [col for col in result.columns if col.startswith("category_")] == []
+        assert result.count() == 2
+
     def test_numeric_string_categories(self, spark_session):
         """Test encoding with numeric-like string categories."""
         data = [

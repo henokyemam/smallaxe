@@ -1,6 +1,6 @@
 """Random Forest models for regression and classification."""
 
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 from pyspark.ml.classification import RandomForestClassificationModel
 from pyspark.ml.classification import RandomForestClassifier as SparkRFClassifier
@@ -64,7 +64,12 @@ class RandomForestRegressor(BaseRegressor):
             "seed": None,
         }
 
-    def _create_spark_estimator(self) -> Any:
+    def _create_spark_estimator(
+        self,
+        features_col: Optional[str] = None,
+        label_col: Optional[str] = None,
+        prediction_col: Optional[str] = None,
+    ) -> Any:
         """Create the underlying Spark MLlib RandomForestRegressor.
 
         Returns:
@@ -159,7 +164,12 @@ class RandomForestClassifier(BaseClassifier):
             "seed": None,
         }
 
-    def _create_spark_estimator(self) -> Any:
+    def _create_spark_estimator(
+        self,
+        features_col: Optional[str] = None,
+        label_col: Optional[str] = None,
+        prediction_col: Optional[str] = None,
+    ) -> Any:
         """Create the underlying Spark MLlib RandomForestClassifier.
 
         Returns:

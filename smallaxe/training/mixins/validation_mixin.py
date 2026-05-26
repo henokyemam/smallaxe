@@ -4,7 +4,6 @@ from typing import Iterator, List, Optional, Tuple
 
 from pyspark.sql import DataFrame
 from pyspark.sql import functions as F
-from pyspark.sql.window import Window
 
 import smallaxe
 from smallaxe.exceptions import ValidationError
@@ -147,6 +146,9 @@ class ValidationMixin:
     ) -> Iterator[Tuple[DataFrame, DataFrame]]:
         """Generate simple k-fold splits without stratification.
 
+        Uses a hash-based approach to assign fold indices, avoiding
+        the single-partition sort caused by row_number() with a global window.
+
         Args:
             df: PySpark DataFrame to split.
             n_folds: Number of folds.
@@ -155,21 +157,13 @@ class ValidationMixin:
         Yields:
             Tuple of (train_df, val_df) for each fold.
         """
-        # Add fold assignment column using row_number with random ordering
-        # This ensures even distribution of rows across folds
         fold_col = "__fold__"
-        rand_col = "__rand__"
+        hash_seed = seed if seed is not None else 42
 
-        if seed is not None:
-            df_with_rand = df.withColumn(rand_col, F.rand(seed))
-        else:
-            df_with_rand = df.withColumn(rand_col, F.rand())
-
-        # Use row_number with random ordering, then modulo for fold assignment
-        window = Window.orderBy(rand_col)
-        df_with_fold = df_with_rand.withColumn(
-            fold_col, (F.row_number().over(window) - 1) % n_folds
-        ).drop(rand_col)
+        df_with_fold = df.withColumn(
+            fold_col,
+            F.abs(F.hash(F.monotonically_increasing_id(), F.lit(hash_seed)) % n_folds),
+        )
 
         for fold_idx in range(n_folds):
             val_df = df_with_fold.filter(F.col(fold_col) == fold_idx).drop(fold_col)
@@ -185,6 +179,8 @@ class ValidationMixin:
     ) -> Iterator[Tuple[DataFrame, DataFrame]]:
         """Generate stratified k-fold splits preserving class distribution.
 
+        Uses a hash-based approach per class to avoid single-partition sorts.
+
         Args:
             df: PySpark DataFrame to split.
             n_folds: Number of folds.
@@ -195,33 +191,23 @@ class ValidationMixin:
             Tuple of (train_df, val_df) for each fold.
         """
         fold_col = "__fold__"
-        rand_col = "__rand__"
+        hash_seed = seed if seed is not None else 42
 
-        # Get unique labels
         labels = [row[label_col] for row in df.select(label_col).distinct().collect()]
 
-        # Assign folds within each class using row_number with random ordering
         df_parts: List[DataFrame] = []
         for label in labels:
             label_df = df.filter(F.col(label_col) == label)
-            if seed is not None:
-                label_df = label_df.withColumn(rand_col, F.rand(seed))
-            else:
-                label_df = label_df.withColumn(rand_col, F.rand())
-
-            # Use row_number with random ordering, then modulo for fold assignment
-            window = Window.orderBy(rand_col)
             label_df = label_df.withColumn(
-                fold_col, (F.row_number().over(window) - 1) % n_folds
-            ).drop(rand_col)
+                fold_col,
+                F.abs(F.hash(F.monotonically_increasing_id(), F.lit(hash_seed)) % n_folds),
+            )
             df_parts.append(label_df)
 
-        # Union all parts
         df_with_fold = df_parts[0]
         for i in range(1, len(labels)):
             df_with_fold = df_with_fold.union(df_parts[i])
 
-        # Generate folds
         for fold_idx in range(n_folds):
             val_df = df_with_fold.filter(F.col(fold_col) == fold_idx).drop(fold_col)
             train_df = df_with_fold.filter(F.col(fold_col) != fold_idx).drop(fold_col)

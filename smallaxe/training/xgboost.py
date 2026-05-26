@@ -1,8 +1,6 @@
 """XGBoost models for regression and classification."""
 
-from typing import Any, Dict, List
-
-from pyspark.sql import DataFrame
+from typing import Any, Dict, Optional
 
 from smallaxe.exceptions import DependencyError
 from smallaxe.training.base import BaseClassifier, BaseRegressor
@@ -112,103 +110,44 @@ class XGBoostRegressor(BaseRegressor):
             "seed": None,
         }
 
-    def _create_spark_estimator(self) -> Any:
+    def _uses_constructor_col_params(self) -> bool:
+        return True
+
+    def _create_spark_estimator(
+        self,
+        features_col: Optional[str] = None,
+        label_col: Optional[str] = None,
+        prediction_col: Optional[str] = None,
+    ) -> Any:
         """Create the underlying SparkXGBRegressor.
 
         Returns:
             Configured SparkXGBRegressor instance.
         """
-        n_estimators = self.get_param("n_estimators")
-        max_depth = self.get_param("max_depth")
-        learning_rate = self.get_param("learning_rate")
-        subsample = self.get_param("subsample")
-        colsample_bytree = self.get_param("colsample_bytree")
-        min_child_weight = self.get_param("min_child_weight")
-        reg_alpha = self.get_param("reg_alpha")
-        reg_lambda = self.get_param("reg_lambda")
-        gamma = self.get_param("gamma")
         seed = self.get_param("seed")
 
         estimator_params = {
-            "num_round": n_estimators,
-            "max_depth": max_depth,
-            "learning_rate": learning_rate,
-            "subsample": subsample,
-            "colsample_bytree": colsample_bytree,
-            "min_child_weight": min_child_weight,
-            "reg_alpha": reg_alpha,
-            "reg_lambda": reg_lambda,
-            "gamma": gamma,
+            "num_round": self.get_param("n_estimators"),
+            "max_depth": self.get_param("max_depth"),
+            "learning_rate": self.get_param("learning_rate"),
+            "subsample": self.get_param("subsample"),
+            "colsample_bytree": self.get_param("colsample_bytree"),
+            "min_child_weight": self.get_param("min_child_weight"),
+            "reg_alpha": self.get_param("reg_alpha"),
+            "reg_lambda": self.get_param("reg_lambda"),
+            "gamma": self.get_param("gamma"),
         }
 
         if seed is not None:
             estimator_params["seed"] = seed
+        if features_col is not None:
+            estimator_params["features_col"] = features_col
+        if label_col is not None:
+            estimator_params["label_col"] = label_col
+        if prediction_col is not None:
+            estimator_params["prediction_col"] = prediction_col
 
         return SparkXGBRegressor(**estimator_params)
-
-    def _fit_spark_model(
-        self,
-        df: DataFrame,
-        label_col: str,
-        feature_cols: List[str],
-    ) -> Any:
-        """Fit the XGBoost model.
-
-        Override base class method to handle XGBoost's different API.
-        XGBoost uses constructor parameters instead of setter methods.
-
-        Args:
-            df: PySpark DataFrame with training data.
-            label_col: Name of the label column.
-            feature_cols: List of feature column names.
-
-        Returns:
-            Fitted XGBoost model.
-        """
-        # Assemble features
-        df_with_features = self._assemble_features(df, feature_cols)
-
-        # Get base estimator params
-        n_estimators = self.get_param("n_estimators")
-        max_depth = self.get_param("max_depth")
-        learning_rate = self.get_param("learning_rate")
-        subsample = self.get_param("subsample")
-        colsample_bytree = self.get_param("colsample_bytree")
-        min_child_weight = self.get_param("min_child_weight")
-        reg_alpha = self.get_param("reg_alpha")
-        reg_lambda = self.get_param("reg_lambda")
-        gamma = self.get_param("gamma")
-        seed = self.get_param("seed")
-
-        estimator_params = {
-            "num_round": n_estimators,
-            "max_depth": max_depth,
-            "learning_rate": learning_rate,
-            "subsample": subsample,
-            "colsample_bytree": colsample_bytree,
-            "min_child_weight": min_child_weight,
-            "reg_alpha": reg_alpha,
-            "reg_lambda": reg_lambda,
-            "gamma": gamma,
-            "features_col": self.FEATURES_COL,
-            "label_col": label_col,
-            "prediction_col": self.PREDICTION_COL,
-        }
-
-        if seed is not None:
-            estimator_params["seed"] = seed
-
-        # Create estimator with all params including column names
-        estimator = SparkXGBRegressor(**estimator_params)
-
-        # Store feature columns for prediction
-        self._feature_cols = feature_cols
-        self._label_col = label_col
-
-        # Fit the model
-        self._spark_model = estimator.fit(df_with_features)
-
-        return self._spark_model
 
     def _load_artifacts(self, path: str) -> None:
         """Load the Spark model from disk.
@@ -299,105 +238,46 @@ class XGBoostClassifier(BaseClassifier):
             "seed": None,
         }
 
-    def _create_spark_estimator(self) -> Any:
+    def _uses_constructor_col_params(self) -> bool:
+        return True
+
+    def _create_spark_estimator(
+        self,
+        features_col: Optional[str] = None,
+        label_col: Optional[str] = None,
+        prediction_col: Optional[str] = None,
+    ) -> Any:
         """Create the underlying SparkXGBClassifier.
 
         Returns:
             Configured SparkXGBClassifier instance.
         """
-        n_estimators = self.get_param("n_estimators")
-        max_depth = self.get_param("max_depth")
-        learning_rate = self.get_param("learning_rate")
-        subsample = self.get_param("subsample")
-        colsample_bytree = self.get_param("colsample_bytree")
-        min_child_weight = self.get_param("min_child_weight")
-        reg_alpha = self.get_param("reg_alpha")
-        reg_lambda = self.get_param("reg_lambda")
-        gamma = self.get_param("gamma")
         seed = self.get_param("seed")
 
         estimator_params = {
-            "num_round": n_estimators,
-            "max_depth": max_depth,
-            "learning_rate": learning_rate,
-            "subsample": subsample,
-            "colsample_bytree": colsample_bytree,
-            "min_child_weight": min_child_weight,
-            "reg_alpha": reg_alpha,
-            "reg_lambda": reg_lambda,
-            "gamma": gamma,
-        }
-
-        if seed is not None:
-            estimator_params["seed"] = seed
-
-        return SparkXGBClassifier(**estimator_params)
-
-    def _fit_spark_model(
-        self,
-        df: DataFrame,
-        label_col: str,
-        feature_cols: List[str],
-    ) -> Any:
-        """Fit the XGBoost classifier.
-
-        Override base class method to handle XGBoost's different API.
-        XGBoost uses constructor parameters instead of setter methods.
-
-        Args:
-            df: PySpark DataFrame with training data.
-            label_col: Name of the label column.
-            feature_cols: List of feature column names.
-
-        Returns:
-            Fitted XGBoost model.
-        """
-        # Assemble features
-        df_with_features = self._assemble_features(df, feature_cols)
-
-        # Get base estimator params
-        n_estimators = self.get_param("n_estimators")
-        max_depth = self.get_param("max_depth")
-        learning_rate = self.get_param("learning_rate")
-        subsample = self.get_param("subsample")
-        colsample_bytree = self.get_param("colsample_bytree")
-        min_child_weight = self.get_param("min_child_weight")
-        reg_alpha = self.get_param("reg_alpha")
-        reg_lambda = self.get_param("reg_lambda")
-        gamma = self.get_param("gamma")
-        seed = self.get_param("seed")
-
-        estimator_params = {
-            "num_round": n_estimators,
-            "max_depth": max_depth,
-            "learning_rate": learning_rate,
-            "subsample": subsample,
-            "colsample_bytree": colsample_bytree,
-            "min_child_weight": min_child_weight,
-            "reg_alpha": reg_alpha,
-            "reg_lambda": reg_lambda,
-            "gamma": gamma,
-            "features_col": self.FEATURES_COL,
-            "label_col": label_col,
-            "prediction_col": self.PREDICTION_COL,
+            "num_round": self.get_param("n_estimators"),
+            "max_depth": self.get_param("max_depth"),
+            "learning_rate": self.get_param("learning_rate"),
+            "subsample": self.get_param("subsample"),
+            "colsample_bytree": self.get_param("colsample_bytree"),
+            "min_child_weight": self.get_param("min_child_weight"),
+            "reg_alpha": self.get_param("reg_alpha"),
+            "reg_lambda": self.get_param("reg_lambda"),
+            "gamma": self.get_param("gamma"),
             "probability_col": self.PROBABILITY_COL,
             "raw_prediction_col": self.RAW_PREDICTION_COL,
         }
 
         if seed is not None:
             estimator_params["seed"] = seed
+        if features_col is not None:
+            estimator_params["features_col"] = features_col
+        if label_col is not None:
+            estimator_params["label_col"] = label_col
+        if prediction_col is not None:
+            estimator_params["prediction_col"] = prediction_col
 
-        # Create estimator with all params including column names
-        estimator = SparkXGBClassifier(**estimator_params)
-
-        # Store feature columns for prediction
-        self._feature_cols = feature_cols
-        self._label_col = label_col
-
-        # Fit the model
-        self._spark_model = estimator.fit(df_with_features)
-
-        return self._spark_model
+        return SparkXGBClassifier(**estimator_params)
 
     def _load_artifacts(self, path: str) -> None:
         """Load the Spark model from disk.

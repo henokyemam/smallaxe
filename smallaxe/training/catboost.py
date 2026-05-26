@@ -150,9 +150,17 @@ class CatBoostRegressor(BaseRegressor):
         params.update({name: value for name, value in optional_params.items() if value is not None})
         return params
 
-    def _create_spark_estimator(self) -> Any:
+    def _uses_constructor_col_params(self) -> bool:
+        return True
+
+    def _create_spark_estimator(
+        self,
+        features_col: Optional[str] = None,
+        label_col: Optional[str] = None,
+        prediction_col: Optional[str] = None,
+    ) -> Any:
         """Create the underlying CatBoost Spark regressor."""
-        return SparkCatBoostRegressor(**self._catboost_params())
+        return SparkCatBoostRegressor(**self._catboost_params(label_col=label_col))
 
     def _fit_spark_model(
         self,
@@ -262,9 +270,17 @@ class CatBoostClassifier(BaseClassifier):
         params.update({name: value for name, value in optional_params.items() if value is not None})
         return params
 
-    def _create_spark_estimator(self) -> Any:
+    def _uses_constructor_col_params(self) -> bool:
+        return True
+
+    def _create_spark_estimator(
+        self,
+        features_col: Optional[str] = None,
+        label_col: Optional[str] = None,
+        prediction_col: Optional[str] = None,
+    ) -> Any:
         """Create the underlying CatBoost Spark classifier."""
-        return SparkCatBoostClassifier(**self._catboost_params())
+        return SparkCatBoostClassifier(**self._catboost_params(label_col=label_col))
 
     def _fit_spark_model(
         self,

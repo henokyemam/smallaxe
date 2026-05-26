@@ -19,9 +19,9 @@ from pyspark.ml.feature import (
 from pyspark.ml.feature import (
     StandardScaler as SparkStandardScaler,
 )
+from pyspark.ml.functions import vector_to_array
 from pyspark.sql import DataFrame
 from pyspark.sql import functions as F
-from pyspark.sql.types import DoubleType
 
 from smallaxe.exceptions import (
     ColumnNotFoundError,
@@ -171,20 +171,16 @@ class Scaler:
 
     def _extract_scaled_columns(self, df: DataFrame) -> DataFrame:
         """Extract scaled values from vector column back to individual columns."""
-        # Create UDFs to extract each element from the scaled vector
-        result_df = df
+        result_df = df.withColumn(
+            "_scaled_array", vector_to_array(F.col("_scaled_features"))
+        )
 
         for idx, col_name in enumerate(self._numerical_cols):
-            # Create a UDF to extract the idx-th element from the vector
-            extract_element = F.udf(
-                lambda v, i=idx: float(v[i]) if v is not None else None,
-                DoubleType(),
+            result_df = result_df.withColumn(
+                col_name, F.col("_scaled_array")[idx].cast("double")
             )
-            result_df = result_df.withColumn(col_name, extract_element(F.col("_scaled_features")))
 
-        # Drop temporary columns
-        result_df = result_df.drop("_assembled_features", "_scaled_features")
-
+        result_df = result_df.drop("_assembled_features", "_scaled_features", "_scaled_array")
         return result_df
 
     def fit_transform(
