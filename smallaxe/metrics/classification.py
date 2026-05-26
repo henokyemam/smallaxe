@@ -147,9 +147,7 @@ def f1_score(
     return float(2 * (prec * rec) / (prec + rec))
 
 
-def auc_roc(
-    df: DataFrame, label_col: str = "label", probability_col: str = "probability"
-) -> float:
+def auc_roc(df: DataFrame, label_col: str = "label", probability_col: str = "probability") -> float:
     """Compute Area Under the ROC Curve (AUC-ROC).
 
     Args:

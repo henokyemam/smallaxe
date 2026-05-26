@@ -70,7 +70,8 @@ class Encoder:
         """Validate the handle_rare option."""
         if handle_rare not in VALID_HANDLE_RARE:
             raise ValidationError(
-                f"Invalid handle_rare '{handle_rare}'. Must be one of {sorted(VALID_HANDLE_RARE)}."
+                f"Invalid handle_rare '{handle_rare}'. Must be one of "
+                f"{sorted(VALID_HANDLE_RARE)}."
             )
 
     def _validate_max_categories(self, max_categories: int) -> None:
@@ -97,7 +98,6 @@ class Encoder:
         col: str,
     ) -> List[str]:
         """Get the top N categories by frequency for a column."""
-        # Count categories and get top max_categories
         category_counts = (
             df.filter(F.col(col).isNotNull())
             .groupBy(col)
@@ -122,18 +122,16 @@ class Encoder:
             raise ValidationError(
                 f"Column '{col}' has {num_categories} categories, "
                 f"which exceeds max_categories={self._max_categories}. "
-                f"Set handle_rare='other' to group rare categories, or increase max_categories."
+                f"Set handle_rare='other' to group rare categories, or increase "
+                f"max_categories."
             )
 
         if self._handle_rare == "keep":
-            # Keep all categories
             mapping = {str(cat): idx for idx, cat in enumerate(categories)}
         else:
-            # Use 'other' strategy - limit to max_categories
             top_categories = categories[: self._max_categories]
             mapping = {str(cat): idx for idx, cat in enumerate(top_categories)}
 
-            # Add OTHER category for rare values if there are more categories
             if num_categories > self._max_categories:
                 mapping["__OTHER__"] = len(top_categories)
 
@@ -154,7 +152,8 @@ class Encoder:
             self: The fitted Encoder instance.
 
         Raises:
-            ValidationError: If categorical_cols is empty or max_categories exceeded with handle_rare='error'.
+            ValidationError: If categorical_cols is empty or max_categories exceeded
+                with handle_rare='error'.
             ColumnNotFoundError: If any specified column is not in the DataFrame.
         """
         if not categorical_cols:
@@ -166,12 +165,9 @@ class Encoder:
         self._indexer_models = {}
         self._onehot_models = {}
 
-        # Build category mappings for each column
         for col in categorical_cols:
             self._category_mappings[col] = self._build_category_mapping(df, col)
 
-        # For label encoding, we're done - we use the mappings directly
-        # For onehot encoding, we also fit the OneHotEncoder models
         if self._method == "onehot":
             self._fit_onehot_encoders(df)
 
@@ -180,7 +176,6 @@ class Encoder:
 
     def _fit_onehot_encoders(self, df: DataFrame) -> None:
         """Fit OneHotEncoder models for each categorical column."""
-        # First apply the category mappings to get indexed columns
         indexed_df = self._apply_label_encoding(df)
 
         for col in self._categorical_cols:
@@ -190,7 +185,6 @@ class Encoder:
             if not self._category_mappings[col]:
                 continue
 
-            # Create and fit OneHotEncoder
             encoder = SparkOneHotEncoder(
                 inputCol=indexed_col,
                 outputCol=onehot_col,
@@ -209,7 +203,6 @@ class Encoder:
             has_other = "__OTHER__" in mapping
             other_idx = mapping.get("__OTHER__", -1)
 
-            # Build a Spark SQL map literal: create_map(key1, val1, key2, val2, ...)
             map_args = []
             for cat_str, idx in mapping.items():
                 if cat_str == "__OTHER__":
@@ -257,21 +250,21 @@ class Encoder:
             ColumnNotFoundError: If any fitted column is not in the DataFrame.
         """
         if not self._is_fitted:
-            raise ModelNotFittedError("Encoder has not been fitted. Call fit() before transform().")
+            raise ModelNotFittedError(
+                "Encoder has not been fitted. Call fit() before transform()."
+            )
 
-        # Validate that all fitted columns exist
         self._validate_columns(df, self._categorical_cols)
 
         if self._method == "label":
             return self._transform_label(df)
-        else:
-            return self._transform_onehot(df)
+
+        return self._transform_onehot(df)
 
     def _transform_label(self, df: DataFrame) -> DataFrame:
         """Transform using label encoding."""
         result_df = self._apply_label_encoding(df)
 
-        # Replace original columns with indexed columns
         for col in self._categorical_cols:
             indexed_col = f"__{col}_indexed"
             result_df = result_df.withColumn(col, F.col(indexed_col).cast("int"))
@@ -281,17 +274,14 @@ class Encoder:
 
     def _transform_onehot(self, df: DataFrame) -> DataFrame:
         """Transform using one-hot encoding."""
-        # First apply label encoding
         result_df = self._apply_label_encoding(df)
 
-        # Apply one-hot encoding for each column
         for col in self._categorical_cols:
             if col not in self._onehot_models:
                 continue
-            # Apply the fitted OneHotEncoder
+
             result_df = self._onehot_models[col].transform(result_df)
 
-        # Extract one-hot encoded values to individual columns
         result_df = self._extract_onehot_columns(result_df)
 
         return result_df
@@ -310,7 +300,6 @@ class Encoder:
                 result_df = result_df.drop(col, indexed_col)
                 continue
 
-            # Convert the sparse vector to an array
             result_df = result_df.withColumn(array_col, vector_to_array(F.col(onehot_col)))
 
             reverse_mapping = {v: k for k, v in mapping.items()}
@@ -319,18 +308,21 @@ class Encoder:
 
             for idx in range(num_categories):
                 category_name = reverse_mapping.get(idx, f"unknown_{idx}")
+
                 if category_name == "__OTHER__":
                     new_col_name = f"{col}_OTHER"
                 else:
                     safe_name = str(category_name).replace(" ", "_").replace("-", "_")
                     new_col_name = f"{col}_{safe_name}"
+
                     if new_col_name in used_col_names:
                         new_col_name = f"{new_col_name}_{idx}"
 
                 used_col_names.add(new_col_name)
 
                 result_df = result_df.withColumn(
-                    new_col_name, F.col(array_col)[idx].cast("double")
+                    new_col_name,
+                    F.col(array_col)[idx].cast("double"),
                 )
 
             result_df = result_df.drop(col, indexed_col, onehot_col, array_col)
@@ -395,6 +387,7 @@ class Encoder:
             raise ModelNotFittedError(
                 "Encoder has not been fitted. Call fit() to access categorical_cols."
             )
+
         return self._categorical_cols.copy()
 
     @property
@@ -411,4 +404,5 @@ class Encoder:
             raise ModelNotFittedError(
                 "Encoder has not been fitted. Call fit() to access category_mappings."
             )
+
         return {col: mapping.copy() for col, mapping in self._category_mappings.items()}

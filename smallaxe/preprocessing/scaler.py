@@ -171,14 +171,10 @@ class Scaler:
 
     def _extract_scaled_columns(self, df: DataFrame) -> DataFrame:
         """Extract scaled values from vector column back to individual columns."""
-        result_df = df.withColumn(
-            "_scaled_array", vector_to_array(F.col("_scaled_features"))
-        )
+        result_df = df.withColumn("_scaled_array", vector_to_array(F.col("_scaled_features")))
 
         for idx, col_name in enumerate(self._numerical_cols):
-            result_df = result_df.withColumn(
-                col_name, F.col("_scaled_array")[idx].cast("double")
-            )
+            result_df = result_df.withColumn(col_name, F.col("_scaled_array")[idx].cast("double"))
 
         result_df = result_df.drop("_assembled_features", "_scaled_features", "_scaled_array")
         return result_df
