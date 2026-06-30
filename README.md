@@ -172,15 +172,20 @@ algorithms are installed in the current environment, with install hints for the 
 | Python | 3.8 – 3.12 |
 | PySpark | 3.3 – 3.5 (Spark < 4.0) |
 | Java | 8 or 11 (required by Spark) |
-| LightGBM (SynapseML) | Spark 3.x / **Scala 2.12** clusters, Linux native libs |
-| CatBoost (catboost-spark) | Spark 3.5 / **Scala 2.12** clusters, Linux native libs |
+| LightGBM (SynapseML) | Spark 3.x / **Scala 2.12 only** (no Scala 2.13 build), Linux |
+| CatBoost (catboost-spark) | Spark 3.5 / Scala **2.12 or 2.13**, Linux |
 
 > LightGBM and CatBoost depend on JVM packages compiled for a specific
-> Spark/Scala build (e.g. `synapseml_2.12`, `catboost-spark_3.5_2.12`) and native
-> shared libraries. They run on standard Linux Spark/Databricks clusters but are
-> not available on Spark 4.0 / Scala 2.13 runtimes or on Apple Silicon (where the
-> bundled native LightGBM library does not load). Random Forest and XGBoost have no
-> such constraints.
+> Spark/Scala build and on native shared libraries, so they run on Linux
+> Spark/Databricks clusters rather than locally on Apple Silicon. CatBoost
+> publishes both `catboost-spark_3.5_2.12` and `catboost-spark_3.5_2.13`;
+> SynapseML (LightGBM) publishes only `synapseml_2.12`, so LightGBM is
+> unavailable on Scala 2.13 runtimes. Neither supports Spark 4.0 yet. Random
+> Forest and XGBoost have no such constraints.
+>
+> Validated on Databricks (DBR 16.4, Spark 3.5.2): Random Forest, XGBoost, and
+> CatBoost train/evaluate/predict and tune via `search.optimize`. See
+> [`examples/databricks_validation.py`](examples/databricks_validation.py).
 
 ## Development
 
