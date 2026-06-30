@@ -250,9 +250,7 @@ class Encoder:
             ColumnNotFoundError: If any fitted column is not in the DataFrame.
         """
         if not self._is_fitted:
-            raise ModelNotFittedError(
-                "Encoder has not been fitted. Call fit() before transform()."
-            )
+            raise ModelNotFittedError("Encoder has not been fitted. Call fit() before transform().")
 
         self._validate_columns(df, self._categorical_cols)
 
