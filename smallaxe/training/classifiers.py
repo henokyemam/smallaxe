@@ -1,9 +1,9 @@
 """Classifiers factory for creating classification models."""
 
-import json
 import os
 from typing import Any
 
+from smallaxe import _fs
 from smallaxe.exceptions import DependencyError, ValidationError
 from smallaxe.training.catboost import (
     CatBoostClassifier,
@@ -235,14 +235,13 @@ class Classifiers:
         """
         # Read metadata to determine model type
         metadata_path = os.path.join(path, "metadata.json")
-        if not os.path.exists(metadata_path):
+        if not _fs.exists(metadata_path):
             raise FileNotFoundError(
                 f"Model metadata not found at {metadata_path}. "
                 "Ensure the path points to a valid model directory."
             )
 
-        with open(metadata_path) as f:
-            metadata = json.load(f)
+        metadata = _fs.read_json(metadata_path)
 
         model_class_name = metadata.get("__class__")
         if model_class_name is None:

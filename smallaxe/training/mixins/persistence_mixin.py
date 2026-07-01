@@ -1,10 +1,10 @@
 """PersistenceMixin for saving and loading models."""
 
-import json
 import os
 from abc import ABC, abstractmethod
 from typing import Any, Dict, Type, TypeVar
 
+from smallaxe import _fs
 from smallaxe.exceptions import ModelNotFittedError, ValidationError
 
 T = TypeVar("T", bound="PersistenceMixin")
@@ -78,8 +78,6 @@ class PersistenceMixin(ABC):
         if not path:
             raise ValidationError("Path cannot be empty.")
 
-        os.makedirs(path, exist_ok=True)
-
         # Get model state
         state = self._get_persistence_state()
 
@@ -87,10 +85,9 @@ class PersistenceMixin(ABC):
         state["__class__"] = self.__class__.__name__
         state["__module__"] = self.__class__.__module__
 
-        # Save metadata
-        metadata_path = os.path.join(path, "metadata.json")
-        with open(metadata_path, "w") as f:
-            json.dump(state, f, indent=2, default=str)
+        # Save metadata to the same filesystem Spark uses for the model artifacts
+        # (local, DBFS, S3, HDFS, ...), so save/load round-trips on any deployment.
+        _fs.write_json(os.path.join(path, "metadata.json"), state)
 
         # Allow subclasses to save additional artifacts
         self._save_artifacts(path)
@@ -124,16 +121,15 @@ class PersistenceMixin(ABC):
             >>> model = RandomForestRegressor.load('/path/to/model')
             >>> predictions = model.predict(df)
         """
-        if not path or not os.path.exists(path):
+        if not path or not _fs.exists(path):
             raise ValidationError(f"Model path does not exist: {path}")
 
         metadata_path = os.path.join(path, "metadata.json")
-        if not os.path.exists(metadata_path):
+        if not _fs.exists(metadata_path):
             raise ValidationError(f"Invalid model directory: metadata.json not found at {path}")
 
         # Load metadata
-        with open(metadata_path) as f:
-            state = json.load(f)
+        state = _fs.read_json(metadata_path)
 
         # Verify class matches
         saved_class = state.pop("__class__", None)
