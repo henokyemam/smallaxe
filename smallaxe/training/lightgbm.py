@@ -7,17 +7,21 @@ from smallaxe.training.base import BaseClassifier, BaseRegressor
 
 # Check for LightGBM availability (via SynapseML)
 try:
+    # SynapseML exports the fitted-model classes as LightGBM*Classification*Model /
+    # LightGBM*Regression*Model (not *Classifier*Model / *Regressor*Model). Using the
+    # wrong names made `from synapse.ml.lightgbm import ...` raise ImportError, which
+    # forced LIGHTGBM_AVAILABLE to False even when SynapseML was correctly installed.
+    from synapse.ml.lightgbm import (
+        LightGBMClassificationModel as SparkLightGBMClassifierModel,
+    )
     from synapse.ml.lightgbm import (
         LightGBMClassifier as SparkLightGBMClassifier,
     )
     from synapse.ml.lightgbm import (
-        LightGBMClassifierModel as SparkLightGBMClassifierModel,
+        LightGBMRegressionModel as SparkLightGBMRegressorModel,
     )
     from synapse.ml.lightgbm import (
         LightGBMRegressor as SparkLightGBMRegressor,
-    )
-    from synapse.ml.lightgbm import (
-        LightGBMRegressorModel as SparkLightGBMRegressorModel,
     )
 
     LIGHTGBM_AVAILABLE = True
