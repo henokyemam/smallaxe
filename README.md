@@ -183,8 +183,13 @@ algorithms are installed in the current environment, with install hints for the 
 > unavailable on Scala 2.13 runtimes. Neither supports Spark 4.0 yet. Random
 > Forest and XGBoost have no such constraints.
 >
-> Validated on Databricks (DBR 16.4, Spark 3.5.2): Random Forest, XGBoost, and
-> CatBoost train/evaluate/predict and tune via `search.optimize`. See
+> **LightGBM** additionally needs SynapseML's Python API on the path — its Maven
+> jar does not expose Python, so `pip install synapseml` (version matching the
+> jar) is required in addition to the `synapseml_2.12` package.
+>
+> Validated end-to-end on Databricks (Spark 3.5.2): **Random Forest, XGBoost,
+> LightGBM** (Scala 2.12) and **CatBoost** (Scala 2.13) train/evaluate/predict
+> and tune via `search.optimize`. See
 > [`examples/databricks_validation.py`](examples/databricks_validation.py).
 
 ## Development
