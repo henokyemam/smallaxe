@@ -51,10 +51,12 @@ The current implementation already has useful foundations:
 
 - Global configuration, custom exceptions, sample datasets, metrics, preprocessing, pipeline, and training modules.
 - Random Forest regressors/classifiers backed by PySpark ML.
-- Optional XGBoost and LightGBM wrappers.
+- Optional XGBoost, LightGBM (SynapseML), and CatBoost (catboost-spark) wrappers, all reachable from the `Regressors` / `Classifiers` factories.
 - Imputer, Scaler, Encoder, and Pipeline classes.
-- Model metadata, validation scores, feature importance, and save/load support for individual models.
-- A substantial test suite. With `~/Desktop/basic`, PySpark 3.5.x, and OpenJDK 11, the current suite passes: 485 passed, 102 skipped. The skipped tests are optional XGBoost/LightGBM coverage when those libraries are not installed.
+- Model metadata, validation scores, feature importance (Random Forest only, see below), and save/load support for individual models.
+- Hyperparameter search (`smallaxe.search.optimize`, hyperopt-backed).
+- A substantial test suite. With `~/Desktop/basic`, PySpark 3.5.x, and OpenJDK 11, the current suite passes: 556 passed, 67 skipped (2026-09-30). The skipped tests need the LightGBM/CatBoost JVM packages, or are the "dependency not installed" variants.
+- An end-to-end Databricks validation notebook covering all four algorithms on real mixed-type data: `examples/databricks_all_algorithms_validation.py`. See "Databricks Validation (2026-09-30)" below.
 
 ## Missing For v1
 
@@ -63,6 +65,8 @@ The current implementation already has useful foundations:
 - Update README to describe only implemented APIs, or implement the advertised APIs before release.
 - Current README advertises `smallaxe.search.optimize`, `smallaxe.auto.AutomatedTraining`, visualization, and CatBoost, but those modules are empty or missing.
 - Decide whether the first regression API is called "regression" or "linear regression." Random Forest, XGBoost, LightGBM, and CatBoost are not linear models. If true linear regression is a first-class goal, add a Spark `LinearRegression` baseline separately.
+
+**Status (2026-09-30):** mostly done. `search.optimize` and CatBoost are implemented, and the README lists `AutomatedTraining` and visualization only under "Roadmap". Still open: the regression naming decision.
 
 ### 2. Finish The Four-Algorithm Training Surface
 
@@ -75,6 +79,13 @@ The current implementation already has useful foundations:
 - Normalize model parameter names across algorithms where possible:
   - User-facing: `n_estimators`, `max_depth`, `learning_rate`, `seed`.
   - Internal adapters translate to Spark/XGBoost/LightGBM/CatBoost-specific names.
+
+**Status (2026-09-30):** done, including three fixes found by the Databricks validation:
+- CatBoost now works in the same session as LightGBM. SynapseML monkeypatches PySpark's `JavaParams` process-wide, which broke every CatBoost fit and CatBoost model load; `_ensure_synapseml_compat()` in `training/catboost.py` routes CatBoost's values back to CatBoost's converter.
+- `LightGBMClassifier(task="multiclass")` now passes `objective="multiclass"`. It previously trained a binary model on multiclass labels without any error.
+- The `smallaxe[lightgbm]` / `smallaxe[all]` extras now depend on `synapseml`. They previously named `synapse-ml-lightgbm`, which does not exist on PyPI, so both extras failed to install.
+
+Still open: "tests should verify missing optional dependency behavior without being globally skipped". `tests/test_lightgbm.py` is skipped wholesale without SynapseML, which is how the multiclass bug went unnoticed.
 
 ### 3. Make Preprocessing Production-Ready
 
@@ -94,6 +105,12 @@ The current implementation already has useful foundations:
 - Ensure transform-time behavior is stable for unseen categories, missing columns, and changed schemas.
 - Avoid silently dropping rows during feature assembly. Current `VectorAssembler(handleInvalid="skip")` can change row counts during training or prediction.
 
+**Status (2026-09-30):** open. Confirmed on Databricks:
+- One-hot `Encoder` crashes the whole `predict` when a category was not seen during fit (unless the column has more than `max_categories` levels, which routes unseen values to `__OTHER__`).
+- Label encoding turns an unseen category into null, and assembly then drops that row.
+- `predict` on rows with nulls and no Imputer silently dropped 513 of 10,892 rows.
+- `Encoder` has no `save()` / `load()`.
+
 ### 4. Harden Pipeline Semantics
 
 - Pipeline should own feature-column construction instead of passing all non-label columns to the model.
@@ -110,6 +127,12 @@ The current implementation already has useful foundations:
   - Model params.
   - Validation/evaluation metadata.
 - Add tests for saving and loading full pipelines with Random Forest first, then optional algorithm-specific tests.
+
+**Status (2026-09-30):** open. Confirmed locally and on Databricks:
+- Any pipeline containing an `Encoder` fails to save (`TypeError: cannot pickle '_thread.RLock'`). Pipeline falls back to pickling the Encoder, which holds live Spark models.
+- A pipeline with a model step saves, but `Pipeline.load` fails (`Could not load step .../step_N_model`).
+- `Pipeline.save` / `load` use local `os` / `open`, not the Hadoop filesystem layer that model save/load already uses, so `/dbfs/...` paths fail too.
+- Pipeline passes every non-label column to the model, so an unlisted string ID column (e.g. `customerID`) makes fit fail.
 
 ### 5. Evaluation API
 
@@ -132,6 +155,8 @@ The current implementation already has useful foundations:
   - MAPE.
 - Keep multiclass and multilabel metrics separate from binary metrics. The current binary precision/recall/F1 implementation should not be reused for multiclass without explicit averaging policy.
 
+**Status (2026-09-30):** open, and the multiclass metrics are actively wrong. For `task="multiclass"`, the precision, recall, and F1 in `validation_scores` equal class 1's one-vs-rest values, not an average. This was checked against scikit-learn on 7-class Covertype for all four algorithms. For example, Random Forest reported F1 0.754 against a macro F1 of 0.373. It also affects `search.optimize` when it optimizes those metrics. Regression and binary metrics match scikit-learn exactly. There is no `evaluate()` and no confusion matrix yet.
+
 ### 6. Training And Validation
 
 - Move train/test split and k-fold logic into a dedicated validation module.
@@ -143,6 +168,8 @@ The current implementation already has useful foundations:
   - Empty fold and tiny-class handling.
 - Add train/validation metrics and final model metadata in a consistent structure.
 - Add an option to cache training data during fitting, with documented tradeoffs.
+
+**Status (2026-09-30):** partially done. `validation` / `stratified` / `n_folds` / `cache_strategy` work for all four algorithms on Databricks, but the split logic still lives in `ValidationMixin`, with no public split utilities. Bug: `fit(cache_strategy="memory" | "disk")` calls `unpersist()` on the caller's own DataFrame, so a DataFrame the user cached before `fit` comes back uncached.
 
 ### 7. Model Persistence And Registry-Ready Artifacts
 
@@ -157,6 +184,8 @@ The current implementation already has useful foundations:
 - Ensure loaded models produce the same predictions as saved models on deterministic test data.
 - Design the artifact format so it can later plug into MLflow or a model registry.
 
+**Status (2026-09-30):** partially done. Model-level `save` / `load` (via the factories) round-trips with identical predictions for all four algorithms and all three tasks on `dbfs:/` paths. The stable artifact layout, version metadata, and `load_model` / `load_pipeline` helpers are not done. Pipeline persistence is broken (see item 4).
+
 ### 8. Automated Training
 
 - Implement `AutomatedTraining` after the four algorithm wrappers are stable.
@@ -167,6 +196,8 @@ The current implementation already has useful foundations:
   - Select `best_model` by a user-specified metric.
   - Persist the winning model or full comparison run.
 - Keep the first version constrained to binary classification and continuous regression.
+
+**Status (2026-09-30):** not started (`smallaxe/auto/` is empty).
 
 ### 9. Hyperparameter Search
 
@@ -181,6 +212,8 @@ The current implementation already has useful foundations:
   - max evaluations.
 - Preserve `best_params`, `best_score`, and trial history.
 - Make search optional and clearly dependency-gated if using Hyperopt.
+
+**Status (2026-09-30):** done. Validated on Databricks for all four algorithms, for binary (`auc_roc`) and regression (`rmse`). The search takes a model, not a Pipeline, so tuning with categoricals means pre-encoding the frame first.
 
 ### 10. Documentation And Examples
 
@@ -199,6 +232,58 @@ The current implementation already has useful foundations:
   - Full pipeline save/load.
 - Add a compatibility matrix for Python, Spark, Java, and optional algorithm packages.
 
+**Status (2026-09-30):** partially done. The README has the compatibility matrix, with the Databricks requirements corrected by this validation. Kaggle end-to-end scripts cover Random Forest classification and Random Forest + XGBoost regression, and `examples/databricks_all_algorithms_validation.py` covers all four algorithms. Still missing: a full pipeline save/load example (blocked on item 4).
+
+## Databricks Validation (2026-09-30)
+
+`examples/databricks_all_algorithms_validation.py` ran all four algorithms on four real datasets with both numeric and categorical features:
+- Diamonds: regression.
+- Telco churn: binary, with numeric missing values.
+- Adult income: binary, with categorical missing values.
+- Covertype: 7 classes, with 40-level categoricals.
+
+For each algorithm it covers the full Pipeline, row preservation, metrics cross-checked against scikit-learn, train_test and stratified k-fold validation, `predict_proba`, `feature_importances`, save/load, `search.optimize`, and label encoding. It also probes each known gap.
+
+| Run | Build | Cluster | PASS | GAP | FAIL | BLOCKED |
+|---|---|---|---|---|---|---|
+| 1 | PyPI 0.8.0 | autoscaling 2–8 | 47 | 18 | 11 | 8 |
+| 2 | 0.8.0 + fixes above | autoscaling 2–8 | 55 | 20 | 6 | 3 |
+| 3 | 0.8.0 + fixes above | fixed 2 workers | 62 | 21 | 1 | 0 |
+
+GAP means a known library gap (item status notes above); the probe starts passing once the gap is fixed.
+
+Environment requirements:
+- DBR 16.4 LTS **Scala 2.12** (Spark 3.5.2) is the only LTS runtime that can host all four algorithms, because SynapseML has no Scala 2.13 or Spark 4 build.
+- Maven packages: `com.microsoft.azure:synapseml-lightgbm_2.12:1.1.3` and `ai.catboost:catboost-spark_3.5_2.12:1.2.10`. On Databricks, the SynapseML jar also puts `synapse.ml` on the Python path.
+- A **fixed-size cluster** for CatBoost. CatBoost-Spark training fails ("Error while executing workers", worker exit 134) whenever executors join or leave mid-fit. All 13 CatBoost failures under autoscaling lined up with resize events, and there were none on a fixed cluster.
+
+Findings not covered by the items above:
+- `feature_importances` returns `None` for XGBoost, LightGBM, and CatBoost. It only reads `featureImportances`, which only Random Forest exposes. The others expose `get_feature_importances()`, `getFeatureImportances()`, and `getFeatureImportance()`.
+- CatBoost native categoricals are not implemented. Pipeline exempts CatBoost from needing an `Encoder`, but raw string columns then fail at vector assembly.
+- Databricks MLflow autologging logs every internal Spark ML fit, including each fold, each hyperopt trial, and the StandardScaler/OneHotEncoder fits: about 250 runs per validation run. Setting `spark.databricks.mlflow.autologging.enabled=false` at runtime did not stop it.
+- The SynapseML/CatBoost shim assumes SynapseML is imported last, as smallaxe's factories do. If catboost_spark only becomes importable later (the lazy `_load_catboost_spark()` path), its `_from_java` wins instead, and loading a saved LightGBM model may break.
+- `pyspark<4.0` is stricter than necessary on Databricks: Random Forest and XGBoost ran on DBR 17.3 (Spark 4.0). `catboost-spark_4.0_2.13` exists; SynapseML has no Spark 4 build.
+- The one remaining FAIL: in one CatBoost Diamonds pipeline fit, RMSE/MSE overflowed to infinity while MAE and R² matched scikit-learn. It did not reproduce in 4 identical reruns and is unexplained. CatBoost-Spark is also not fully deterministic for a fixed seed across distributed runs.
+- LightGBM's multiclass bug slipped through because `tests/test_lightgbm.py` only asserted `_is_fitted`, and the whole file is skipped without SynapseML. That test now checks the probability vector length.
+
+## Recommended Order Of Execution
+
+Rerun `examples/databricks_all_algorithms_validation.py` after each step. A step is done when its GAP probes become PASS with no new FAIL, and the local suite still passes.
+
+1. **Multiclass metrics (item 5).** Add macro and weighted precision, recall, and F1 for `task="multiclass"`, and keep the binary formulas for binary only. This comes first because it silently reports wrong numbers today, including inside `search.optimize`. Done when the four multiclass metric probes match scikit-learn.
+2. **Pipeline persistence (items 4 and 7).** Give `Encoder` its own `save` / `load`, load model steps through the `Regressors` / `Classifiers` factories, and route pipeline IO through `smallaxe._fs`. This is a v1 acceptance criterion. Done when all three pipeline save/load probes pass and a reloaded pipeline predicts identically, locally and on `dbfs:/`.
+3. **Unseen categories and row preservation (item 3).** Map unseen categories to an all-zeros vector or `__OTHER__` instead of crashing, and stop dropping rows at assembly: keep them, or fail loudly. Done when the unseen-category and null-row probes pass.
+4. **Pipeline owns its feature columns (item 4).** Build the model's features from `numerical_cols` and the Encoder's output columns, and ignore unlisted columns. Done when the ID-column probe passes.
+5. **Small correctness fixes.** Stop `fit(cache_strategy=...)` from unpersisting the caller's DataFrame (item 6), and implement `feature_importances` for XGBoost, LightGBM, and CatBoost.
+6. **Evaluation API (item 5).** Model- and pipeline-level `evaluate()`, plus a confusion matrix.
+7. **CatBoost categoricals.** Either implement native categorical handling or remove the Pipeline's CatBoost exemption from the Encoder requirement.
+8. **Databricks ergonomics.** An option to suppress MLflow autologging during internal fits, a warning when CatBoost trains on an autoscaling cluster, and hardening of the SynapseML/CatBoost shim for the reverse import order.
+9. **Validation module and artifact layout (items 6 and 7).** Public split utilities, a versioned artifact layout, and `load_model` / `load_pipeline`.
+10. **AutomatedTraining (item 8), then visualization.**
+11. **Spark 4 support.** Relax `pyspark<4.0` once RF, XGBoost, and CatBoost (`catboost-spark_4.0_2.13`) pass the validation notebook on DBR 17.x. LightGBM stays Spark 3.5-only until SynapseML ships a Spark 4 build.
+
+Cross-cutting: make the Databricks validation notebook a release gate. It is currently the only run that exercises LightGBM and CatBoost against their JVM packages; CI skips those tests.
+
 ## v1 Acceptance Criteria
 
 - A new user can train, evaluate, save, load, and predict with Random Forest on a PySpark DataFrame in under 20 lines of code.
@@ -208,6 +293,11 @@ The current implementation already has useful foundations:
 - Missing optional dependencies fail with actionable install instructions.
 - Documentation does not advertise unimplemented APIs.
 - CI runs core tests on supported Python/Spark versions and optional algorithm tests in separate dependency-enabled jobs.
+
+Status (2026-09-30):
+- **Met:** the Random Forest workflow in under 20 lines; the same workflow for XGBoost, LightGBM, and CatBoost, on the runtime and cluster described above; actionable install errors; README advertises only implemented APIs.
+- **Met for binary and regression only:** clear metrics and stable output schemas. Multiclass metrics are wrong (item 5).
+- **Not met:** full pipeline save/load (item 4); dependency-enabled CI jobs, which the Databricks validation notebook currently stands in for.
 
 ## Later Goals
 

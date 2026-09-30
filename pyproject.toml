@@ -42,7 +42,7 @@ xgboost = [
 ]
 lightgbm = [
     "lightgbm>=3.3.0",
-    "synapse-ml-lightgbm>=1.0.0",
+    "synapseml>=1.0.0",
 ]
 catboost = [
     "catboost>=1.1.0",
