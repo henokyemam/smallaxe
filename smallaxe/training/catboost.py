@@ -1,8 +1,11 @@
 """CatBoost models for regression and classification."""
 
+import collections
+import datetime
+import enum
 import shutil
 import tempfile
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 from pyspark.sql import DataFrame
 
@@ -71,6 +74,66 @@ def catboost_install_hint() -> str:
         "pip install smallaxe[catboost] and configure Spark with "
         "ai.catboost:catboost-spark_3.5_2.12:1.2.10"
     )
+
+
+# Param value types that catboost_spark converts itself, through the ``_py2java`` it installs
+# on ``pyspark.ml.wrapper`` (e.g. its ``timedelta`` timeout defaults -> ``java.time.Duration``).
+_CATBOOST_CONVERTED_TYPES = (datetime.timedelta, enum.Enum, collections.OrderedDict)
+
+
+def _patched_by_synapseml(fn: Any) -> bool:
+    return getattr(fn, "__module__", "").startswith("synapse.")
+
+
+def _catboost_from_java() -> Optional[Callable[[Any], Any]]:
+    """Return catboost_spark's own ``JavaParams._from_java`` replacement, if available."""
+    try:
+        from catboost_spark import core
+    except ImportError:
+        return None
+    fn = getattr(core, "_from_java_patched_for_catboost", None)
+    return getattr(fn, "__func__", fn)
+
+
+def _ensure_synapseml_compat() -> None:
+    """Keep CatBoost working when SynapseML (LightGBM) is imported in the same session.
+
+    Both libraries monkeypatch PySpark's ``JavaParams`` process-wide, and SynapseML's patches
+    win whenever it is imported after catboost_spark (as smallaxe's factories do):
+
+    - ``_make_java_param_pair`` pickles values it does not know, so CatBoost's ``timedelta``
+      defaults reach the JVM as pickled objects and ``fit`` fails with a ``ClassCastException``.
+    - ``_from_java`` only resolves ``pyspark.``/``synapse.ml.`` classes, so loading a saved
+      CatBoost model fails.
+
+    Route only CatBoost's values and stages back to catboost_spark's converters; everything
+    else still goes through SynapseML. Safe to call repeatedly; a no-op without SynapseML.
+    """
+    from pyspark import SparkContext
+    from pyspark.ml import wrapper
+    from pyspark.ml.wrapper import JavaParams
+
+    make_pair = JavaParams._make_java_param_pair
+    if _patched_by_synapseml(make_pair):
+
+        def _make_java_param_pair(self: Any, param: Any, value: Any) -> Any:
+            if isinstance(value, _CATBOOST_CONVERTED_TYPES):
+                java_param = self._java_obj.getParam(self._resolveParam(param).name)
+                return java_param.w(wrapper._py2java(SparkContext._active_spark_context, value))
+            return make_pair(self, param, value)
+
+        JavaParams._make_java_param_pair = _make_java_param_pair
+
+    from_java = JavaParams._from_java
+    catboost_from_java = _catboost_from_java()
+    if _patched_by_synapseml(from_java) and catboost_from_java is not None:
+
+        def _from_java(java_stage: Any) -> Any:
+            if java_stage.getClass().getName().startswith("ai.catboost.spark."):
+                return catboost_from_java(java_stage)
+            return from_java(java_stage)
+
+        JavaParams._from_java = staticmethod(_from_java)
 
 
 class CatBoostRegressor(BaseRegressor):
@@ -169,6 +232,7 @@ class CatBoostRegressor(BaseRegressor):
         feature_cols: List[str],
     ) -> Any:
         """Fit the CatBoost Spark regressor."""
+        _ensure_synapseml_compat()
         df_with_features = self._assemble_features(df, feature_cols)
         temp_train_dir = None
         if self.get_param("train_dir") is None:
@@ -189,6 +253,7 @@ class CatBoostRegressor(BaseRegressor):
 
     def _load_artifacts(self, path: str) -> None:
         """Load the CatBoost Spark model from disk."""
+        _ensure_synapseml_compat()
         self._load_spark_model(path, SparkCatBoostRegressionModel)
 
 
@@ -289,6 +354,7 @@ class CatBoostClassifier(BaseClassifier):
         feature_cols: List[str],
     ) -> Any:
         """Fit the CatBoost Spark classifier."""
+        _ensure_synapseml_compat()
         df_with_features = self._assemble_features(df, feature_cols)
         temp_train_dir = None
         if self.get_param("train_dir") is None:
@@ -309,4 +375,5 @@ class CatBoostClassifier(BaseClassifier):
 
     def _load_artifacts(self, path: str) -> None:
         """Load the CatBoost Spark model from disk."""
+        _ensure_synapseml_compat()
         self._load_spark_model(path, SparkCatBoostClassificationModel)

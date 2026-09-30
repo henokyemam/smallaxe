@@ -304,6 +304,9 @@ class LightGBMClassifier(BaseClassifier):
             "baggingFreq": self.get_param("bagging_freq"),
             "lambdaL1": self.get_param("lambda_l1"),
             "lambdaL2": self.get_param("lambda_l2"),
+            # SynapseML defaults to "binary" even for >2 classes, which silently trains a
+            # two-class model on multiclass labels.
+            "objective": "multiclass" if self.task == "multiclass" else "binary",
             "probabilityCol": self.PROBABILITY_COL,
             "rawPredictionCol": self.RAW_PREDICTION_COL,
         }

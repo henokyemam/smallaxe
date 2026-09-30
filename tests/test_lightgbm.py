@@ -563,6 +563,8 @@ class TestLightGBMClassifierFit:
             feature_cols=["age", "income"],
         )
         assert model._is_fitted
+        probability = model.predict_proba(multiclass_df).first()["probability"]
+        assert len(probability) == 3
 
 
 class TestLightGBMClassifierPredict:

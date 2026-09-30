@@ -179,18 +179,23 @@ algorithms are installed in the current environment, with install hints for the 
 > Spark/Scala build and on native shared libraries, so they run on Linux
 > Spark/Databricks clusters rather than locally on Apple Silicon. CatBoost
 > publishes both `catboost-spark_3.5_2.12` and `catboost-spark_3.5_2.13`;
-> SynapseML (LightGBM) publishes only `synapseml_2.12`, so LightGBM is
-> unavailable on Scala 2.13 runtimes. Neither supports Spark 4.0 yet. Random
-> Forest and XGBoost have no such constraints.
+> SynapseML (LightGBM) publishes only Scala 2.12 builds for Spark 3.5, so
+> LightGBM is unavailable on Scala 2.13 runtimes. Random Forest and XGBoost have
+> no such constraints.
 >
-> **LightGBM** additionally needs SynapseML's Python API on the path — its Maven
-> jar does not expose Python, so `pip install synapseml` (version matching the
-> jar) is required in addition to the `synapseml_2.12` package.
+> **LightGBM** needs SynapseML's Python API on the path. On Databricks the
+> `synapseml-lightgbm_2.12` Maven package provides it; `smallaxe[lightgbm]` also
+> installs the `synapseml` Python package, whose version should match the jar.
 >
-> Validated end-to-end on Databricks (Spark 3.5.2): **Random Forest, XGBoost,
-> LightGBM** (Scala 2.12) and **CatBoost** (Scala 2.13) train/evaluate/predict
-> and tune via `search.optimize`. See
-> [`examples/databricks_validation.py`](examples/databricks_validation.py).
+> **CatBoost** training fails if executors join or leave mid-fit (for example,
+> cluster autoscaling), so train CatBoost on a fixed-size cluster.
+>
+> Validated end-to-end on Databricks 16.4 LTS (Spark 3.5.2, Scala 2.12) with
+> `com.microsoft.azure:synapseml-lightgbm_2.12:1.1.3` and
+> `ai.catboost:catboost-spark_3.5_2.12:1.2.10`: all four algorithms in the same
+> session, for regression, binary, and multiclass tasks (train, validate,
+> predict, save/load, and tune via `search.optimize`). See
+> [`examples/databricks_all_algorithms_validation.py`](examples/databricks_all_algorithms_validation.py).
 
 ## Development
 
