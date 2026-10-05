@@ -39,6 +39,9 @@ dependencies = [
 [project.optional-dependencies]
 xgboost = [
     "xgboost>=1.7.0",
+    # xgboost.spark imports scikit-learn and runs its pandas UDFs through pyarrow.
+    "scikit-learn>=1.0",
+    "pyarrow>=4.0",
 ]
 lightgbm = [
     "lightgbm>=3.3.0",
