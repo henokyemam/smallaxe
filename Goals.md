@@ -284,6 +284,39 @@ Rerun `examples/databricks_all_algorithms_validation.py` after each step. A step
 
 Cross-cutting: make the Databricks validation notebook a release gate. It is currently the only run that exercises LightGBM and CatBoost against their JVM packages; CI skips those tests.
 
+## Architecture Deepening (2026-10-05)
+
+An architecture review traced most of the Databricks gaps to six structural problems. Fixing each removes a class of bug instead of one instance. They overlap with the execution order above; matching steps are noted.
+
+1. **One model module with one adapter per algorithm. Implemented 2026-10-05 on `deepen-algorithm-seam`, ahead of step 1; merge gate is the Databricks validation rerun.**
+   - Found on the way: `smallaxe[xgboost]` installed only `xgboost`, but `xgboost.spark` imports scikit-learn and runs on pyarrow, so on a clean machine `Regressors.xgboost()` reported "xgboost is not installed". The extra now includes both; Databricks had them preinstalled, which is why it never showed there.
+   - Today: 8 near-identical Regressor/Classifier classes (about 420 duplicated lines), 2 factories, and availability checks in 5 places each repeat param translation, model-class choice, and loading.
+   - Per-algorithm differences have no hook. That produced the `feature_importances` gap, the LightGBM multiclass objective bug, and CatBoost's full `_fit_spark_model` override.
+   - Target: the model module owns fit, predict, save, and importances. The RF, XGBoost, LightGBM, and CatBoost adapters each declare a param table, an estimator builder, importances, and session setup.
+   - Decided design (see `GLOSSARY.md`): each algorithm is a declarative `Algorithm` record in its existing file, with a strict `Param` table, estimator and model classes per task as lazily resolved dotted paths, task-fixed params (LightGBM `objective`, CatBoost `lossFunction`), a per-algorithm importances callable, and at most two code hooks (`prepare` for the CatBoost JVM shim, `fit_context` for its temp dir). One pure translation function in `smallaxe/training/algorithm.py` serves all four. `Regressor` / `Classifier` in `base.py` replace the eight classes, which stay as deprecated aliases until v1; factories return the plain classes. New artifacts record `algorithm` + `task`; 0.8.x artifacts load through a name map, locked by fixtures saved with 0.8.1. `extra_params` pass-through is a later follow-up.
+   - Tests: one contract test parametrized over (algorithm, task) against a fake estimator module, so LightGBM and CatBoost translation runs without a JVM; per-algorithm files keep only their specifics.
+   - Stage RF + XGBoost first, and add xgboost to the CI install. CI installs only `.[dev]`, so every XGBoost, LightGBM, and CatBoost test is skipped there. One PR; the Databricks validation rerun is the merge gate.
+   - Covers the `feature_importances` half of step 5, and supplies the "needs an Encoder" flag for steps 4 and 7.
+2. **One persistence module for models, Imputer, Scaler, Encoder, and Pipeline.**
+   - Today: only models use `smallaxe._fs`. Imputer and Scaler write with `os`, the Encoder has no `save`, and Pipeline pickles it. Its Spark OneHotEncoder models cannot be pickled, and Pipeline cannot load model steps.
+   - Target: one `save(obj, path)` / `load(path)` keyed by a type tag. Each step supplies its state, and all IO goes through `_fs`.
+   - Same goal as step 2, done once for every step type.
+3. **Pipeline passes declared columns from step to step.**
+   - Today: `_get_feature_cols` hands the model every non-label column. Steps are dispatched on `type(step).__name__`, including the wrong CatBoost exemption from the Encoder.
+   - Target: each step takes and returns the numerical, categorical, and encoded column lists, and the model gets only numerical + encoded columns. Whether a model needs an Encoder comes from its adapter (needs 1).
+   - Same goal as step 4.
+4. **The Encoder owns unseen and null categories.**
+   - Today: three Spark stages apply three null policies (`error`, `skip`, `keep`). So onehot crashes on new categories, and label encoding drops rows.
+   - Target: the Encoder always reserves an unknown index and builds one-hot columns from its own mapping, and one shared assembly step carries one null policy.
+   - Same goal as step 3. It also removes the unpicklable object behind 2.
+5. **Task-aware scoring in one place.**
+   - Today: the metric functions are correct, but `base.py` calls the binary formulas for every task. `search/optimize.py` keeps its own copy of metric names, directions, and the k-fold key format.
+   - Target: `evaluate(task, df)` returns scores that both `fit` and `optimize` read.
+   - Same goal as step 1, extended to `optimize`.
+6. **Fold the five mixins into the model module.**
+   - Today: `BaseModel` is their only consumer, and they share state through implicit attributes, so following `fit` means reading seven files.
+   - Mostly falls out of 1 and 2. The caller's-cache fix (step 5) is a few lines on its own.
+
 ## v1 Acceptance Criteria
 
 - A new user can train, evaluate, save, load, and predict with Random Forest on a PySpark DataFrame in under 20 lines of code.

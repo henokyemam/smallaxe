@@ -26,19 +26,20 @@ smallaxe/
 │   │   └── scaler.py          # Feature scaling
 │   ├── search/                # Hyperparameter optimization via hyperopt
 │   ├── training/              # Model training classes
-│   │   ├── base.py            # BaseModel, BaseRegressor, BaseClassifier
-│   │   ├── catboost.py        # CatBoost wrapper
+│   │   ├── algorithm.py       # Algorithm/Param records, the translation rule, registry, 0.8.x name map
+│   │   ├── base.py            # BaseModel, Model, Regressor, Classifier
+│   │   ├── catboost.py        # CatBoost ALGORITHM record (+ deprecated class aliases)
 │   │   ├── classifiers.py     # Classifiers factory
-│   │   ├── lightgbm.py        # LightGBM wrapper
+│   │   ├── lightgbm.py        # LightGBM ALGORITHM record (+ deprecated class aliases)
 │   │   ├── mixins/            # Composable model behaviors
 │   │   │   ├── metadata_mixin.py
 │   │   │   ├── param_mixin.py
 │   │   │   ├── persistence_mixin.py
 │   │   │   ├── spark_model_mixin.py
 │   │   │   └── validation_mixin.py
-│   │   ├── random_forest.py   # Native PySpark RF wrapper
+│   │   ├── random_forest.py   # Random Forest ALGORITHM record (+ deprecated class aliases)
 │   │   ├── regressors.py      # Regressors factory
-│   │   └── xgboost.py         # XGBoost wrapper
+│   │   └── xgboost.py         # XGBoost ALGORITHM record (+ deprecated class aliases)
 │   └── viz/                   # Plotly-based visualization
 ├── tests/                     # pytest test suite (session-scoped SparkSession)
 ├── .github/workflows/
@@ -63,9 +64,24 @@ All models inherit from `BaseModel` which composes five mixins:
 
 `BaseRegressor` and `BaseClassifier` extend `BaseModel` with task-type validation.
 
+### The Algorithm Seam
+
+`Model` (and its two kinds, `Regressor` and `Classifier`, in `base.py`) is bound to one
+`Algorithm` record from `smallaxe/training/algorithm.py`. The record is declarative: the
+strict `Param` table, Spark estimator and fitted-model class paths per task (resolved
+lazily, so optional packages are never imported at load), column kwargs, task-fixed
+params (LightGBM `objective`, CatBoost `lossFunction`), a feature-importances reader,
+the optional `Dependency`, and at most two code hooks (`prepare`, `fit_context`).
+`estimator_kwargs()` is the single translation rule for all algorithms. Each algorithm
+file exports one `ALGORITHM` record; `algorithm.get(name)` is the registry. Vocabulary
+is in `GLOSSARY.md`.
+
+The eight 0.8.x classes (`XGBoostRegressor`, ...) remain as deprecated aliases until 1.0.
+Artifacts they saved load through `LEGACY_CLASS_NAMES`; new artifacts record `algorithm`.
+
 ### Factory Pattern
 
-`Regressors` and `Classifiers` classes provide static factory methods (`.xgboost()`, `.random_forest()`, `.lightgbm()`, `.catboost()`) that return configured model instances.
+`Regressors` and `Classifiers` classes provide static factory methods (`.xgboost()`, `.random_forest()`, `.lightgbm()`, `.catboost()`) that return a `Regressor` / `Classifier` bound to that algorithm.
 
 ### Pipeline
 
@@ -91,7 +107,7 @@ pip install -e ".[dev,all]"
 pytest
 ```
 
-Tests use a session-scoped `SparkSession` fixture (`local[2]` mode) defined in `tests/conftest.py`. Each algorithm has its own test file.
+Tests use a session-scoped `SparkSession` fixture (`local[2]` mode) defined in `tests/conftest.py`. `tests/test_algorithm.py` checks every algorithm's translation against fake estimators (no JVM packages needed); `tests/test_model_contract.py` runs the fit/predict/validate/save/load contract per (algorithm, task) wherever the package is installed; `tests/test_legacy_artifacts.py` loads models saved by 0.8.1. Per-algorithm files hold only behaviour unique to that algorithm.
 
 ### Code Style
 

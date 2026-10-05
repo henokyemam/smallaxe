@@ -8,11 +8,11 @@ smallaxe is a PySpark MLOps library. All model training flows through `BaseModel
 
 ### Adding a New Algorithm
 
-1. Create `smallaxe/training/<algorithm>.py` with a class extending `BaseRegressor` or `BaseClassifier`
-2. Implement `_fit_spark_model()`, `_predict_spark_model()`, and `_predict_proba_spark_model()` (classifiers only)
-3. Add factory methods to `smallaxe/training/regressors.py` and/or `smallaxe/training/classifiers.py`
+1. Create `smallaxe/training/<algorithm>.py` exporting one `ALGORITHM = Algorithm(...)` record (see `GLOSSARY.md`): the `Param` table, estimator and fitted-model class paths per task, column kwargs, task-fixed params, an importances reader, and its `Dependency`. Add `prepare` / `fit_context` hooks only for behaviour data cannot express.
+2. Register the module in `_MODULES` in `smallaxe/training/algorithm.py`
+3. Add one-line factory methods to `smallaxe/training/regressors.py` and `smallaxe/training/classifiers.py` (`Regressors._create("<algorithm>", kwargs)`)
 4. Add optional dependency in `pyproject.toml` under `[project.optional-dependencies]`
-5. Create `tests/test_<algorithm>.py` following the pattern of existing algorithm tests
+5. `tests/test_algorithm.py` and `tests/test_model_contract.py` pick the record up from the registry; add `tests/test_<algorithm>.py` only for behaviour unique to it
 
 ### Adding a Preprocessing Step
 

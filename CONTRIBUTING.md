@@ -31,7 +31,7 @@
 
 ## Adding New Features
 
-- New algorithms go in `smallaxe/training/` with factory methods in `regressors.py`/`classifiers.py`
+- New algorithms are one `ALGORITHM` record in `smallaxe/training/<algorithm>.py`, registered in `smallaxe/training/algorithm.py`, with factory methods in `regressors.py`/`classifiers.py` (see `HOWTOAI.md` and `GLOSSARY.md`)
 - New preprocessing steps go in `smallaxe/preprocessing/`
 - New metrics go in `smallaxe/metrics/`
 - All new code needs corresponding tests in `tests/`
