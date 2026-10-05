@@ -1,45 +1,19 @@
 """Regressors factory for creating regression models."""
 
 import os
-from typing import Any
+from typing import Any, Dict, List
 
 from smallaxe import _fs
-from smallaxe.exceptions import DependencyError, ValidationError
-from smallaxe.training.catboost import (
-    CatBoostRegressor,
-    catboost_install_hint,
-    is_catboost_available,
-)
-from smallaxe.training.lightgbm import (
-    LIGHTGBM_AVAILABLE,
-    LightGBMRegressor,
-)
-from smallaxe.training.random_forest import RandomForestRegressor
-from smallaxe.training.xgboost import XGBOOST_AVAILABLE, XGBoostRegressor
-
-XGBOOST_INSTALL_HINT = "pip install smallaxe[xgboost]"
-LIGHTGBM_INSTALL_HINT = (
-    "pip install smallaxe[lightgbm] and configure Spark with the SynapseML package"
-)
-CATBOOST_INSTALL_HINT = catboost_install_hint()
-
-
-def _dependency_error(model_name: str) -> DependencyError:
-    """Build an actionable dependency error for an optional regressor."""
-    if model_name == "xgboost":
-        return DependencyError(package="xgboost", install_command=XGBOOST_INSTALL_HINT)
-    if model_name == "lightgbm":
-        return DependencyError(package="synapseml", install_command=LIGHTGBM_INSTALL_HINT)
-    if model_name == "catboost":
-        return DependencyError(package="catboost_spark", install_command=CATBOOST_INSTALL_HINT)
-    return DependencyError()
+from smallaxe.exceptions import ValidationError
+from smallaxe.training import algorithm
+from smallaxe.training.base import Model, Regressor
 
 
 class Regressors:
     """Factory class for creating and loading regression models.
 
-    This class provides a convenient interface for creating regression models
-    without needing to import specific model classes directly.
+    Each factory method returns a :class:`~smallaxe.training.base.Regressor` bound
+    to one algorithm, so no algorithm-specific class needs to be imported.
 
     Example:
         >>> from smallaxe.training import Regressors
@@ -53,27 +27,15 @@ class Regressors:
         >>> loaded_model = Regressors.load('/path/to/model')
     """
 
-    # Registry of supported regressor types and their classes
-    _REGISTRY = {
-        "RandomForestRegressor": RandomForestRegressor,
-    }
-
-    # Add optional regressors to registry only when their dependencies are available.
-    if XGBOOST_AVAILABLE:
-        _REGISTRY["XGBoostRegressor"] = XGBoostRegressor
-    if LIGHTGBM_AVAILABLE:
-        _REGISTRY["LightGBMRegressor"] = LightGBMRegressor
-    if is_catboost_available():
-        _REGISTRY["CatBoostRegressor"] = CatBoostRegressor
+    @staticmethod
+    def _create(name: str, params: Dict[str, Any]) -> Regressor:
+        model = Regressor(name)
+        if params:
+            model.set_param(params)
+        return model
 
     @staticmethod
-    def _refresh_optional_registry() -> None:
-        """Add optional model classes that became available after import time."""
-        if is_catboost_available():
-            Regressors._REGISTRY["CatBoostRegressor"] = CatBoostRegressor
-
-    @staticmethod
-    def random_forest(**kwargs: Any) -> RandomForestRegressor:
+    def random_forest(**kwargs: Any) -> Regressor:
         """Create a Random Forest regressor.
 
         Args:
@@ -88,19 +50,16 @@ class Regressors:
                 - seed: Random seed for reproducibility (default: None)
 
         Returns:
-            RandomForestRegressor: A configured Random Forest regressor instance.
+            A configured Random Forest regressor.
 
         Example:
             >>> model = Regressors.random_forest(n_estimators=100, max_depth=10)
             >>> model.fit(df, label_col='target', feature_cols=['f1', 'f2'])
         """
-        model = RandomForestRegressor()
-        if kwargs:
-            model.set_param(kwargs)
-        return model
+        return Regressors._create("random_forest", kwargs)
 
     @staticmethod
-    def xgboost(**kwargs: Any) -> "XGBoostRegressor":
+    def xgboost(**kwargs: Any) -> Regressor:
         """Create an XGBoost regressor.
 
         Note:
@@ -121,7 +80,7 @@ class Regressors:
                 - seed: Random seed for reproducibility (default: None)
 
         Returns:
-            XGBoostRegressor: A configured XGBoost regressor instance.
+            A configured XGBoost regressor.
 
         Raises:
             DependencyError: If xgboost is not installed.
@@ -130,16 +89,10 @@ class Regressors:
             >>> model = Regressors.xgboost(n_estimators=100, max_depth=6)
             >>> model.fit(df, label_col='target', feature_cols=['f1', 'f2'])
         """
-        if not XGBOOST_AVAILABLE:
-            raise _dependency_error("xgboost")
-
-        model = XGBoostRegressor()
-        if kwargs:
-            model.set_param(kwargs)
-        return model
+        return Regressors._create("xgboost", kwargs)
 
     @staticmethod
-    def lightgbm(**kwargs: Any) -> "LightGBMRegressor":
+    def lightgbm(**kwargs: Any) -> Regressor:
         """Create a LightGBM regressor.
 
         Note:
@@ -156,21 +109,15 @@ class Regressors:
                 - seed: Random seed for reproducibility (default: None)
 
         Returns:
-            LightGBMRegressor: A configured LightGBM regressor instance.
+            A configured LightGBM regressor.
 
         Raises:
             DependencyError: If SynapseML LightGBM support is not installed.
         """
-        if not LIGHTGBM_AVAILABLE:
-            raise _dependency_error("lightgbm")
-
-        model = LightGBMRegressor()
-        if kwargs:
-            model.set_param(kwargs)
-        return model
+        return Regressors._create("lightgbm", kwargs)
 
     @staticmethod
-    def catboost(**kwargs: Any) -> "CatBoostRegressor":
+    def catboost(**kwargs: Any) -> Regressor:
         """Create a CatBoost regressor.
 
         Note:
@@ -186,36 +133,30 @@ class Regressors:
                 - seed: Random seed for reproducibility (default: None)
 
         Returns:
-            CatBoostRegressor: A configured CatBoost regressor instance.
+            A configured CatBoost regressor.
 
         Raises:
             DependencyError: If CatBoost Spark support is not installed.
         """
-        if not is_catboost_available():
-            raise _dependency_error("catboost")
-        Regressors._refresh_optional_registry()
-
-        model = CatBoostRegressor()
-        if kwargs:
-            model.set_param(kwargs)
-        return model
+        return Regressors._create("catboost", kwargs)
 
     @staticmethod
-    def load(path: str) -> Any:
+    def load(path: str) -> Regressor:
         """Load a regressor from disk.
 
-        This method automatically detects the model type from the saved metadata
-        and loads the appropriate model class.
+        The algorithm is read from the saved metadata, so any regressor saved by
+        smallaxe (including 0.8.x artifacts) loads through this one method.
 
         Args:
             path: Directory path where the model was saved.
 
         Returns:
-            The loaded regressor instance.
+            The loaded regressor.
 
         Raises:
-            ValidationError: If the saved model is not a supported regressor type.
             FileNotFoundError: If the model directory or metadata file doesn't exist.
+            ValidationError: If the saved model is not a regressor.
+            DependencyError: If the saved model's algorithm is not installed.
 
         Example:
             >>> model = Regressors.random_forest(n_estimators=100)
@@ -225,57 +166,40 @@ class Regressors:
             >>> loaded_model = Regressors.load('/path/to/model')
             >>> predictions = loaded_model.predict(df)
         """
-        # Read metadata to determine model type
         metadata_path = os.path.join(path, "metadata.json")
         if not _fs.exists(metadata_path):
             raise FileNotFoundError(
                 f"Model metadata not found at {metadata_path}. "
                 "Ensure the path points to a valid model directory."
             )
-
-        metadata = _fs.read_json(metadata_path)
-
-        model_class_name = metadata.get("__class__")
-        if model_class_name is None:
+        model = Model.load(path)
+        if not isinstance(model, Regressor):
+            saved = algorithm.legacy_class_name(model.algorithm.name, model.task_type)
             raise ValidationError(
-                "Model metadata does not contain '__class__'. "
-                "This may be an older model format or corrupted metadata."
+                f"Model type '{saved}' is not a supported regressor. "
+                f"Supported types are: {Regressors.list_models()}"
             )
-
-        # Check if it's a regressor
-        if model_class_name == "XGBoostRegressor" and not XGBOOST_AVAILABLE:
-            raise _dependency_error("xgboost")
-        if model_class_name == "LightGBMRegressor" and not LIGHTGBM_AVAILABLE:
-            raise _dependency_error("lightgbm")
-        if model_class_name == "CatBoostRegressor":
-            if not is_catboost_available():
-                raise _dependency_error("catboost")
-            Regressors._refresh_optional_registry()
-
-        if model_class_name not in Regressors._REGISTRY:
-            raise ValidationError(
-                f"Model type '{model_class_name}' is not a supported regressor. "
-                f"Supported types are: {list(Regressors._REGISTRY.keys())}"
-            )
-
-        model_class = Regressors._REGISTRY[model_class_name]
-        return model_class.load(path)
+        return model
 
     @staticmethod
-    def list_models() -> list:
-        """List all available regressor model types.
+    def list_models() -> List[str]:
+        """List the regressor model types available in this environment.
 
         Returns:
-            List of supported regressor model type names.
+            Class names of the regressors whose dependencies are installed.
 
         Example:
             >>> Regressors.list_models()
             ['RandomForestRegressor']
         """
-        return list(Regressors._REGISTRY.keys())
+        return [
+            algorithm.legacy_class_name(name, "regression")
+            for name in algorithm.names()
+            if algorithm.get(name).available()
+        ]
 
     @staticmethod
-    def available_models() -> dict:
+    def available_models() -> Dict[str, Dict[str, Any]]:
         """Report installed and unavailable regressor models with install hints.
 
         Returns:
@@ -283,29 +207,17 @@ class Regressors:
             implementation class name, availability status, optional dependency,
             and install hint when applicable.
         """
-        return {
-            "random_forest": {
-                "class_name": "RandomForestRegressor",
-                "available": True,
-                "dependency": None,
-                "install_hint": None,
-            },
-            "xgboost": {
-                "class_name": "XGBoostRegressor",
-                "available": XGBOOST_AVAILABLE,
-                "dependency": "xgboost",
-                "install_hint": None if XGBOOST_AVAILABLE else XGBOOST_INSTALL_HINT,
-            },
-            "lightgbm": {
-                "class_name": "LightGBMRegressor",
-                "available": LIGHTGBM_AVAILABLE,
-                "dependency": "synapseml",
-                "install_hint": None if LIGHTGBM_AVAILABLE else LIGHTGBM_INSTALL_HINT,
-            },
-            "catboost": {
-                "class_name": "CatBoostRegressor",
-                "available": is_catboost_available(),
-                "dependency": "catboost_spark",
-                "install_hint": None if is_catboost_available() else CATBOOST_INSTALL_HINT,
-            },
-        }
+        report = {}
+        for name in algorithm.names():
+            record = algorithm.get(name)
+            available = record.available()
+            dependency = record.dependency
+            report[name] = {
+                "class_name": algorithm.legacy_class_name(name, "regression"),
+                "available": available,
+                "dependency": dependency.package if dependency else None,
+                "install_hint": (
+                    None if available or dependency is None else dependency.install_hint
+                ),
+            }
+        return report

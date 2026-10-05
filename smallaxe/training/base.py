@@ -1,15 +1,21 @@
 """Base classes for training models."""
 
-from typing import Any, Dict, List, Literal, Optional
+import os
+import warnings
+from contextlib import nullcontext
+from typing import Any, Dict, List, Literal, Mapping, Optional, Union
 
 from pyspark.sql import DataFrame
 from pyspark.sql.types import NumericType
 
+from smallaxe import _fs
 from smallaxe.exceptions import (
     ColumnNotFoundError,
     ModelNotFittedError,
     ValidationError,
 )
+from smallaxe.training import algorithm as _algorithm
+from smallaxe.training.algorithm import Algorithm
 from smallaxe.training.mixins import (
     MetadataMixin,
     ParamMixin,
@@ -612,6 +618,12 @@ class BaseModel(
 
         return self._predict_spark_model(df, output_col=output_col)
 
+    def clone(self) -> "BaseModel":
+        """Return an unfitted copy with the same task and parameter values."""
+        clone = type(self)(task=self._task)
+        clone._params = dict(self._params)
+        return clone
+
     # --- PersistenceMixin abstract methods ---
 
     def _get_persistence_state(self) -> Dict[str, Any]:
@@ -755,3 +767,217 @@ class BaseClassifier(BaseModel):
             )
 
         return self._predict_proba_spark_model(df, output_col=output_col)
+
+
+class Model(BaseModel):
+    """A model bound to one :class:`~smallaxe.training.algorithm.Algorithm`.
+
+    Everything algorithm-specific (parameter table, estimator and model classes,
+    column wiring, task-fixed settings, importances, dependency, session setup) is
+    read from the algorithm record, so fit, predict, save, load, and clone are
+    written once here. Use :class:`Regressor` or :class:`Classifier`, or the
+    ``Regressors`` / ``Classifiers`` factories.
+
+    Args:
+        algorithm: Algorithm name (``"xgboost"``) or record.
+        task: The task to train.
+
+    Raises:
+        DependencyError: If the algorithm's optional package is not installed.
+        ValidationError: If the task is invalid or unsupported by the algorithm.
+    """
+
+    def __init__(self, algorithm: Union[str, Algorithm], task: str) -> None:
+        self._algorithm = _algorithm.get(algorithm) if isinstance(algorithm, str) else algorithm
+        self._algorithm.require()
+        super().__init__(task)
+        if task not in self._algorithm.tasks:
+            raise ValidationError(
+                f"Algorithm '{self._algorithm.name}' does not support task '{task}'. "
+                f"Supported tasks are: {sorted(self._algorithm.tasks)}"
+            )
+
+    @property
+    def algorithm(self) -> Algorithm:
+        """The algorithm record this model is bound to."""
+        return self._algorithm
+
+    # --- ParamMixin ---
+
+    @property
+    def params(self) -> Dict[str, str]:
+        """Parameter descriptions for this algorithm and task."""
+        return {p.name: p.description for p in self._algorithm.visible_params(self._task)}
+
+    @property
+    def default_params(self) -> Dict[str, Any]:
+        """Default parameter values for this algorithm and task."""
+        return {p.name: p.default for p in self._algorithm.visible_params(self._task)}
+
+    # --- SparkModelMixin ---
+
+    def _column_names(self, label_col: str) -> Dict[str, str]:
+        """Column role -> name handed to the estimator; classification adds probabilities."""
+        columns = {
+            "features": self.FEATURES_COL,
+            "label": label_col,
+            "prediction": self.PREDICTION_COL,
+        }
+        if self.task_type == "classification":
+            columns["probability"] = self.PROBABILITY_COL
+            columns["raw_prediction"] = self.RAW_PREDICTION_COL
+        return columns
+
+    def _build_estimator(self, label_col: str, extra: Mapping[str, Any]) -> Any:
+        """Construct the Spark estimator from the algorithm record and current params."""
+        algorithm = self._algorithm
+        ctor, setters = _algorithm.estimator_kwargs(
+            algorithm, self._task, self.get_params(), self._column_names(label_col)
+        )
+        ctor.update(extra)
+        estimator = algorithm.estimator_class(self._task)(**ctor)
+        for setter, value in setters:
+            getattr(estimator, setter)(value)
+        if algorithm.cols is None:
+            estimator.setLabelCol(label_col)
+            estimator.setFeaturesCol(self.FEATURES_COL)
+            estimator.setPredictionCol(self.PREDICTION_COL)
+        return estimator
+
+    def _create_spark_estimator(
+        self,
+        features_col: Optional[str] = None,
+        label_col: Optional[str] = None,
+        prediction_col: Optional[str] = None,
+    ) -> Any:
+        return self._build_estimator(label_col or "label", {})
+
+    def _fit_spark_model(self, df: DataFrame, label_col: str, feature_cols: List[str]) -> Any:
+        algorithm = self._algorithm
+        if algorithm.prepare is not None:
+            algorithm.prepare()
+        df_with_features = self._assemble_features(df, feature_cols)
+        context = (
+            algorithm.fit_context(self.get_params())
+            if algorithm.fit_context is not None
+            else nullcontext({})
+        )
+        with context as extra:
+            estimator = self._build_estimator(label_col, extra)
+            self._feature_cols = feature_cols
+            self._label_col = label_col
+            self._spark_model = estimator.fit(df_with_features)
+        return self._spark_model
+
+    def _get_feature_importance(self) -> Optional[List[float]]:
+        if self._spark_model is None:
+            raise ModelNotFittedError(
+                "Model has not been fitted. Call fit() before getting feature importance."
+            )
+        if self._algorithm.importances is None:
+            return None
+        return self._algorithm.importances(self._spark_model, len(self._feature_cols))
+
+    def clone(self) -> "Model":
+        """Return an unfitted copy with the same algorithm, task, and parameter values."""
+        kind = Classifier if self.task_type == "classification" else Regressor
+        clone = kind(self._algorithm, self._task)
+        clone._params = dict(self._params)
+        return clone
+
+    # --- PersistenceMixin ---
+
+    def _get_persistence_state(self) -> Dict[str, Any]:
+        state = super()._get_persistence_state()
+        state["algorithm"] = self._algorithm.name
+        return state
+
+    def _load_artifacts(self, path: str) -> None:
+        if self._algorithm.prepare is not None:
+            self._algorithm.prepare()
+        self._load_spark_model(path, self._algorithm.model_class(self._task))
+
+    @classmethod
+    def load(cls, path: str) -> "Model":
+        """Load a saved model, returning a :class:`Regressor` or :class:`Classifier`.
+
+        Reads ``algorithm`` from ``metadata.json``; artifacts written by smallaxe 0.8.x
+        record the old class name instead and are mapped through
+        :data:`~smallaxe.training.algorithm.LEGACY_CLASS_NAMES`.
+
+        Raises:
+            ValidationError: If the path or metadata is invalid, or the saved model is
+                not the kind (or algorithm) this class expects.
+            DependencyError: If the saved model's algorithm is not installed.
+        """
+        if not path or not _fs.exists(path):
+            raise ValidationError(f"Model path does not exist: {path}")
+        metadata_path = os.path.join(path, "metadata.json")
+        if not _fs.exists(metadata_path):
+            raise ValidationError(f"Invalid model directory: metadata.json not found at {path}")
+
+        state = _fs.read_json(metadata_path)
+        saved_class = state.pop("__class__", None)
+        state.pop("__module__", None)
+
+        name = state.get("algorithm")
+        if name is None:
+            if saved_class not in _algorithm.LEGACY_CLASS_NAMES:
+                raise ValidationError(
+                    "Model metadata does not contain 'algorithm'. "
+                    "This may be an older model format or corrupted metadata."
+                )
+            name = _algorithm.LEGACY_CLASS_NAMES[saved_class][0]
+        algorithm = _algorithm.get(name)
+        algorithm.require()
+
+        task = state.get("task")
+        if task in BaseModel.CLASSIFICATION_TASKS:
+            kind, task_type = Classifier, "classification"
+        else:
+            kind, task_type = Regressor, "regression"
+        saved_name = _algorithm.legacy_class_name(name, task_type)
+        expected_kind = None
+        if issubclass(cls, Regressor):
+            expected_kind = Regressor
+        elif issubclass(cls, Classifier):
+            expected_kind = Classifier
+        if expected_kind is not None and expected_kind is not kind:
+            raise ValidationError(
+                f"Model type mismatch: expected {cls.__name__}, got {saved_name}."
+            )
+        alias_algorithm = getattr(cls, "_alias_algorithm", None)
+        if alias_algorithm is not None and alias_algorithm != name:
+            raise ValidationError(
+                f"Model type mismatch: expected {cls.__name__}, got {saved_name}."
+            )
+
+        instance = kind.__new__(kind)
+        instance._algorithm = algorithm
+        instance._spark_model = None
+        instance._set_persistence_state(state)
+        instance._load_artifacts(path)
+        return instance
+
+
+class Regressor(Model, BaseRegressor):
+    """A regression model for any algorithm. Prefer ``Regressors.<algorithm>()``."""
+
+    def __init__(self, algorithm: Union[str, Algorithm], task: str = "simple_regression") -> None:
+        super().__init__(algorithm, task)
+
+
+class Classifier(Model, BaseClassifier):
+    """A classification model for any algorithm. Prefer ``Classifiers.<algorithm>()``."""
+
+    def __init__(self, algorithm: Union[str, Algorithm], task: str = "binary") -> None:
+        super().__init__(algorithm, task)
+
+
+def _warn_deprecated_alias(name: str, factory: str) -> None:
+    """Emit the deprecation warning for a 0.8.x model class alias."""
+    warnings.warn(
+        f"{name} is deprecated and will be removed in smallaxe 1.0. Use {factory} instead.",
+        DeprecationWarning,
+        stacklevel=3,
+    )

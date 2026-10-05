@@ -1,51 +1,25 @@
 """Classifiers factory for creating classification models."""
 
 import os
-from typing import Any
+from typing import Any, Dict, List
 
 from smallaxe import _fs
-from smallaxe.exceptions import DependencyError, ValidationError
-from smallaxe.training.catboost import (
-    CatBoostClassifier,
-    catboost_install_hint,
-    is_catboost_available,
-)
-from smallaxe.training.lightgbm import (
-    LIGHTGBM_AVAILABLE,
-    LightGBMClassifier,
-)
-from smallaxe.training.random_forest import RandomForestClassifier
-from smallaxe.training.xgboost import XGBOOST_AVAILABLE, XGBoostClassifier
-
-XGBOOST_INSTALL_HINT = "pip install smallaxe[xgboost]"
-LIGHTGBM_INSTALL_HINT = (
-    "pip install smallaxe[lightgbm] and configure Spark with the SynapseML package"
-)
-CATBOOST_INSTALL_HINT = catboost_install_hint()
-
-
-def _dependency_error(model_name: str) -> DependencyError:
-    """Build an actionable dependency error for an optional classifier."""
-    if model_name == "xgboost":
-        return DependencyError(package="xgboost", install_command=XGBOOST_INSTALL_HINT)
-    if model_name == "lightgbm":
-        return DependencyError(package="synapseml", install_command=LIGHTGBM_INSTALL_HINT)
-    if model_name == "catboost":
-        return DependencyError(package="catboost_spark", install_command=CATBOOST_INSTALL_HINT)
-    return DependencyError()
+from smallaxe.exceptions import ValidationError
+from smallaxe.training import algorithm
+from smallaxe.training.base import Classifier, Model
 
 
 class Classifiers:
     """Factory class for creating and loading classification models.
 
-    This class provides a convenient interface for creating classification models
-    without needing to import specific model classes directly.
+    Each factory method returns a :class:`~smallaxe.training.base.Classifier` bound
+    to one algorithm, so no algorithm-specific class needs to be imported.
 
     Example:
         >>> from smallaxe.training import Classifiers
         >>>
         >>> # Create a Random Forest classifier
-        >>> model = Classifiers.random_forest(n_estimators=100, max_depth=10)
+        >>> model = Classifiers.random_forest(task='binary', n_estimators=100)
         >>> model.fit(df, label_col='label', feature_cols=['f1', 'f2'])
         >>>
         >>> # Save and load the model
@@ -53,27 +27,15 @@ class Classifiers:
         >>> loaded_model = Classifiers.load('/path/to/model')
     """
 
-    # Registry of supported classifier types and their classes
-    _REGISTRY = {
-        "RandomForestClassifier": RandomForestClassifier,
-    }
-
-    # Add optional classifiers to registry only when their dependencies are available.
-    if XGBOOST_AVAILABLE:
-        _REGISTRY["XGBoostClassifier"] = XGBoostClassifier
-    if LIGHTGBM_AVAILABLE:
-        _REGISTRY["LightGBMClassifier"] = LightGBMClassifier
-    if is_catboost_available():
-        _REGISTRY["CatBoostClassifier"] = CatBoostClassifier
+    @staticmethod
+    def _create(name: str, task: str, params: Dict[str, Any]) -> Classifier:
+        model = Classifier(name, task=task)
+        if params:
+            model.set_param(params)
+        return model
 
     @staticmethod
-    def _refresh_optional_registry() -> None:
-        """Add optional model classes that became available after import time."""
-        if is_catboost_available():
-            Classifiers._REGISTRY["CatBoostClassifier"] = CatBoostClassifier
-
-    @staticmethod
-    def random_forest(task: str = "binary", **kwargs: Any) -> RandomForestClassifier:
+    def random_forest(task: str = "binary", **kwargs: Any) -> Classifier:
         """Create a Random Forest classifier.
 
         Args:
@@ -90,19 +52,16 @@ class Classifiers:
                 - seed: Random seed for reproducibility (default: None)
 
         Returns:
-            RandomForestClassifier: A configured Random Forest classifier instance.
+            A configured Random Forest classifier.
 
         Example:
             >>> model = Classifiers.random_forest(task='binary', n_estimators=100)
             >>> model.fit(df, label_col='label', feature_cols=['f1', 'f2'])
         """
-        model = RandomForestClassifier(task=task)
-        if kwargs:
-            model.set_param(kwargs)
-        return model
+        return Classifiers._create("random_forest", task, kwargs)
 
     @staticmethod
-    def xgboost(task: str = "binary", **kwargs: Any) -> "XGBoostClassifier":
+    def xgboost(task: str = "binary", **kwargs: Any) -> Classifier:
         """Create an XGBoost classifier.
 
         Note:
@@ -125,7 +84,7 @@ class Classifiers:
                 - seed: Random seed for reproducibility (default: None)
 
         Returns:
-            XGBoostClassifier: A configured XGBoost classifier instance.
+            A configured XGBoost classifier.
 
         Raises:
             DependencyError: If xgboost is not installed.
@@ -134,16 +93,10 @@ class Classifiers:
             >>> model = Classifiers.xgboost(task='binary', n_estimators=100)
             >>> model.fit(df, label_col='label', feature_cols=['f1', 'f2'])
         """
-        if not XGBOOST_AVAILABLE:
-            raise _dependency_error("xgboost")
-
-        model = XGBoostClassifier(task=task)
-        if kwargs:
-            model.set_param(kwargs)
-        return model
+        return Classifiers._create("xgboost", task, kwargs)
 
     @staticmethod
-    def lightgbm(task: str = "binary", **kwargs: Any) -> "LightGBMClassifier":
+    def lightgbm(task: str = "binary", **kwargs: Any) -> Classifier:
         """Create a LightGBM classifier.
 
         Note:
@@ -162,21 +115,15 @@ class Classifiers:
                 - seed: Random seed for reproducibility (default: None)
 
         Returns:
-            LightGBMClassifier: A configured LightGBM classifier instance.
+            A configured LightGBM classifier.
 
         Raises:
             DependencyError: If SynapseML LightGBM support is not installed.
         """
-        if not LIGHTGBM_AVAILABLE:
-            raise _dependency_error("lightgbm")
-
-        model = LightGBMClassifier(task=task)
-        if kwargs:
-            model.set_param(kwargs)
-        return model
+        return Classifiers._create("lightgbm", task, kwargs)
 
     @staticmethod
-    def catboost(task: str = "binary", **kwargs: Any) -> "CatBoostClassifier":
+    def catboost(task: str = "binary", **kwargs: Any) -> Classifier:
         """Create a CatBoost classifier.
 
         Note:
@@ -194,96 +141,73 @@ class Classifiers:
                 - seed: Random seed for reproducibility (default: None)
 
         Returns:
-            CatBoostClassifier: A configured CatBoost classifier instance.
+            A configured CatBoost classifier.
 
         Raises:
             DependencyError: If CatBoost Spark support is not installed.
         """
-        if not is_catboost_available():
-            raise _dependency_error("catboost")
-        Classifiers._refresh_optional_registry()
-
-        model = CatBoostClassifier(task=task)
-        if kwargs:
-            model.set_param(kwargs)
-        return model
+        return Classifiers._create("catboost", task, kwargs)
 
     @staticmethod
-    def load(path: str) -> Any:
+    def load(path: str) -> Classifier:
         """Load a classifier from disk.
 
-        This method automatically detects the model type from the saved metadata
-        and loads the appropriate model class.
+        The algorithm is read from the saved metadata, so any classifier saved by
+        smallaxe (including 0.8.x artifacts) loads through this one method.
 
         Args:
             path: Directory path where the model was saved.
 
         Returns:
-            The loaded classifier instance.
+            The loaded classifier.
 
         Raises:
-            ValidationError: If the saved model is not a supported classifier type.
             FileNotFoundError: If the model directory or metadata file doesn't exist.
+            ValidationError: If the saved model is not a classifier.
+            DependencyError: If the saved model's algorithm is not installed.
 
         Example:
-            >>> model = Classifiers.random_forest(n_estimators=100)
+            >>> model = Classifiers.random_forest(task='binary', n_estimators=100)
             >>> model.fit(df, label_col='label', feature_cols=['f1', 'f2'])
             >>> model.save('/path/to/model')
             >>>
             >>> loaded_model = Classifiers.load('/path/to/model')
             >>> predictions = loaded_model.predict(df)
         """
-        # Read metadata to determine model type
         metadata_path = os.path.join(path, "metadata.json")
         if not _fs.exists(metadata_path):
             raise FileNotFoundError(
                 f"Model metadata not found at {metadata_path}. "
                 "Ensure the path points to a valid model directory."
             )
-
-        metadata = _fs.read_json(metadata_path)
-
-        model_class_name = metadata.get("__class__")
-        if model_class_name is None:
+        model = Model.load(path)
+        if not isinstance(model, Classifier):
+            saved = algorithm.legacy_class_name(model.algorithm.name, model.task_type)
             raise ValidationError(
-                "Model metadata does not contain '__class__'. "
-                "This may be an older model format or corrupted metadata."
+                f"Model type '{saved}' is not a supported classifier. "
+                f"Supported types are: {Classifiers.list_models()}"
             )
-
-        # Check if it's a classifier
-        if model_class_name == "XGBoostClassifier" and not XGBOOST_AVAILABLE:
-            raise _dependency_error("xgboost")
-        if model_class_name == "LightGBMClassifier" and not LIGHTGBM_AVAILABLE:
-            raise _dependency_error("lightgbm")
-        if model_class_name == "CatBoostClassifier":
-            if not is_catboost_available():
-                raise _dependency_error("catboost")
-            Classifiers._refresh_optional_registry()
-
-        if model_class_name not in Classifiers._REGISTRY:
-            raise ValidationError(
-                f"Model type '{model_class_name}' is not a supported classifier. "
-                f"Supported types are: {list(Classifiers._REGISTRY.keys())}"
-            )
-
-        model_class = Classifiers._REGISTRY[model_class_name]
-        return model_class.load(path)
+        return model
 
     @staticmethod
-    def list_models() -> list:
-        """List all available classifier model types.
+    def list_models() -> List[str]:
+        """List the classifier model types available in this environment.
 
         Returns:
-            List of supported classifier model type names.
+            Class names of the classifiers whose dependencies are installed.
 
         Example:
             >>> Classifiers.list_models()
             ['RandomForestClassifier']
         """
-        return list(Classifiers._REGISTRY.keys())
+        return [
+            algorithm.legacy_class_name(name, "classification")
+            for name in algorithm.names()
+            if algorithm.get(name).available()
+        ]
 
     @staticmethod
-    def available_models() -> dict:
+    def available_models() -> Dict[str, Dict[str, Any]]:
         """Report installed and unavailable classifier models with install hints.
 
         Returns:
@@ -291,29 +215,17 @@ class Classifiers:
             implementation class name, availability status, optional dependency,
             and install hint when applicable.
         """
-        return {
-            "random_forest": {
-                "class_name": "RandomForestClassifier",
-                "available": True,
-                "dependency": None,
-                "install_hint": None,
-            },
-            "xgboost": {
-                "class_name": "XGBoostClassifier",
-                "available": XGBOOST_AVAILABLE,
-                "dependency": "xgboost",
-                "install_hint": None if XGBOOST_AVAILABLE else XGBOOST_INSTALL_HINT,
-            },
-            "lightgbm": {
-                "class_name": "LightGBMClassifier",
-                "available": LIGHTGBM_AVAILABLE,
-                "dependency": "synapseml",
-                "install_hint": None if LIGHTGBM_AVAILABLE else LIGHTGBM_INSTALL_HINT,
-            },
-            "catboost": {
-                "class_name": "CatBoostClassifier",
-                "available": is_catboost_available(),
-                "dependency": "catboost_spark",
-                "install_hint": None if is_catboost_available() else CATBOOST_INSTALL_HINT,
-            },
-        }
+        report = {}
+        for name in algorithm.names():
+            record = algorithm.get(name)
+            available = record.available()
+            dependency = record.dependency
+            report[name] = {
+                "class_name": algorithm.legacy_class_name(name, "classification"),
+                "available": available,
+                "dependency": dependency.package if dependency else None,
+                "install_hint": (
+                    None if available or dependency is None else dependency.install_hint
+                ),
+            }
+        return report
