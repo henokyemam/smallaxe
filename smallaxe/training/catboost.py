@@ -11,7 +11,7 @@ import enum
 import shutil
 import tempfile
 from contextlib import contextmanager
-from typing import Any, Callable, Dict, Iterator, List, Optional
+from typing import Any, Callable, Dict, Iterator, List, Optional, Tuple
 
 from smallaxe.training.algorithm import CLASSIFICATION_TASKS, Algorithm, Dependency, Param
 from smallaxe.training.base import Classifier, Regressor, _warn_deprecated_alias
@@ -51,23 +51,42 @@ def _catboost_from_java() -> Optional[Callable[[Any], Any]]:
     return getattr(fn, "__func__", fn)
 
 
+def _catboost_converters() -> Optional[Tuple[Callable[..., Any], Callable[..., Any]]]:
+    """Return catboost_spark's ``(_py2java, _java2py)``, which know its enums and types."""
+    try:
+        from catboost_spark import core
+    except ImportError:
+        return None
+    return core._py2java, core._java2py
+
+
+def _is_catboost_java_object(java_obj: Any) -> bool:
+    try:
+        return bool(java_obj.getClass().getName().startswith("ai.catboost.spark."))
+    except Exception:  # noqa: BLE001 - not a Java object, or the gateway is gone
+        return False
+
+
 def _ensure_synapseml_compat() -> None:
     """Keep CatBoost working when SynapseML (LightGBM) is imported in the same session.
 
-    Both libraries monkeypatch PySpark's ``JavaParams`` process-wide, and SynapseML's patches
-    win whenever it is imported after catboost_spark (as smallaxe's factories do):
+    Both libraries monkeypatch PySpark's ``JavaParams`` / ``JavaWrapper`` process-wide, and
+    SynapseML's patches win whenever it is imported after catboost_spark (as smallaxe does):
 
     - ``_make_java_param_pair`` pickles values it does not know, so CatBoost's ``timedelta``
       defaults reach the JVM as pickled objects and ``fit`` fails with a ``ClassCastException``.
     - ``_from_java`` only resolves ``pyspark.``/``synapse.ml.`` classes, so loading a saved
       CatBoost model fails.
+    - ``_call_java`` pickles CatBoost's enum arguments (``EFstrType``), so model methods such as
+      ``getFeatureImportance`` fail with a ``PickleException``.
 
-    Route only CatBoost's values and stages back to catboost_spark's converters; everything
-    else still goes through SynapseML. Safe to call repeatedly; a no-op without SynapseML.
+    Route only CatBoost's values, stages, and model calls back to catboost_spark's converters;
+    everything else still goes through SynapseML. Safe to call repeatedly; a no-op without
+    SynapseML.
     """
     from pyspark import SparkContext
     from pyspark.ml import wrapper
-    from pyspark.ml.wrapper import JavaParams
+    from pyspark.ml.wrapper import JavaParams, JavaWrapper
 
     make_pair = JavaParams._make_java_param_pair
     if _patched_by_synapseml(make_pair):
@@ -85,11 +104,25 @@ def _ensure_synapseml_compat() -> None:
     if _patched_by_synapseml(from_java) and catboost_from_java is not None:
 
         def _from_java(java_stage: Any) -> Any:
-            if java_stage.getClass().getName().startswith("ai.catboost.spark."):
+            if _is_catboost_java_object(java_stage):
                 return catboost_from_java(java_stage)
             return from_java(java_stage)
 
         JavaParams._from_java = staticmethod(_from_java)
+
+    call_java = JavaWrapper._call_java
+    converters = _catboost_converters()
+    if _patched_by_synapseml(call_java) and converters is not None:
+        py2java, java2py = converters
+
+        def _call_java(self: Any, name: str, *args: Any) -> Any:
+            if not _is_catboost_java_object(self._java_obj):
+                return call_java(self, name, *args)
+            sc = SparkContext._active_spark_context
+            java_args = [py2java(sc, arg) for arg in args]
+            return java2py(sc, getattr(self._java_obj, name)(*java_args))
+
+        JavaWrapper._call_java = _call_java
 
 
 @contextmanager

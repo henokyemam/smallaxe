@@ -35,6 +35,7 @@ class _FakeParams:
 class _FakeStage:
     def __init__(self, class_name):
         self._class_name = class_name
+        self.calls = []
 
     def getClass(self):
         stage = self
@@ -44,6 +45,17 @@ class _FakeStage:
                 return stage._class_name
 
         return _C()
+
+    def getFeatureImportance(self, *args):
+        self.calls.append(args)
+        return ("java-result", args)
+
+
+class _FakeWrapper:
+    """Stands in for a pyspark JavaWrapper (e.g. a fitted CatBoost model)."""
+
+    def __init__(self, java_obj):
+        self._java_obj = java_obj
 
 
 def _synapseml_style(fn):
@@ -70,11 +82,25 @@ class TestCatBoostSynapseMLCompat:
             calls.append(("synapse_from_java", java_stage._class_name))
             return "synapse-stage"
 
+        @_synapseml_style
+        def synapse_call_java(self, name, *args):
+            calls.append(("synapse_call_java", name))
+            return "synapse-call"
+
         monkeypatch.setattr(wrapper.JavaParams, "_make_java_param_pair", synapse_make_pair)
         monkeypatch.setattr(wrapper.JavaParams, "_from_java", staticmethod(synapse_from_java))
+        monkeypatch.setattr(wrapper.JavaWrapper, "_call_java", synapse_call_java)
         monkeypatch.setattr(wrapper, "_py2java", lambda sc, value: ("catboost_py2java", value))
         monkeypatch.setattr(
             catboost_module, "_catboost_from_java", lambda: lambda stage: "catboost-stage"
+        )
+        monkeypatch.setattr(
+            catboost_module,
+            "_catboost_converters",
+            lambda: (
+                lambda sc, value: ("cb_py2java", value),
+                lambda sc, value: ("cb_java2py", value),
+            ),
         )
         return wrapper.JavaParams, calls
 
@@ -107,23 +133,55 @@ class TestCatBoostSynapseMLCompat:
         assert java_params._from_java(lightgbm_stage) == "synapse-stage"
         assert calls == [("synapse_from_java", lightgbm_stage._class_name)]
 
+    def test_catboost_model_calls_use_catboost_converters(self, synapseml_patched):
+        """getFeatureImportance passes an EFstrType enum; SynapseML's _call_java pickles it."""
+        from pyspark.ml.wrapper import JavaWrapper
+
+        _, calls = synapseml_patched
+        _ensure_synapseml_compat()
+        model = _FakeStage("ai.catboost.spark.CatBoostClassificationModel")
+
+        result = JavaWrapper._call_java(_FakeWrapper(model), "getFeatureImportance", "enum", None)
+
+        assert model.calls == [(("cb_py2java", "enum"), ("cb_py2java", None))]
+        assert result == ("cb_java2py", ("java-result", model.calls[0]))
+        assert calls == []
+
+    def test_other_model_calls_still_use_synapseml(self, synapseml_patched):
+        from pyspark.ml.wrapper import JavaWrapper
+
+        _, calls = synapseml_patched
+        _ensure_synapseml_compat()
+        model = _FakeStage("com.microsoft.azure.synapse.ml.lightgbm.LightGBMClassificationModel")
+
+        assert (
+            JavaWrapper._call_java(_FakeWrapper(model), "getFeatureImportances") == "synapse-call"
+        )
+        assert calls == [("synapse_call_java", "getFeatureImportances")]
+
     def test_is_idempotent(self, synapseml_patched):
+        from pyspark.ml.wrapper import JavaWrapper
+
         java_params, _ = synapseml_patched
         _ensure_synapseml_compat()
         make_pair, from_java = java_params._make_java_param_pair, java_params._from_java
+        call_java = JavaWrapper._call_java
         _ensure_synapseml_compat()
 
         assert java_params._make_java_param_pair is make_pair
         assert java_params._from_java is from_java
+        assert JavaWrapper._call_java is call_java
 
     def test_noop_without_synapseml(self):
-        from pyspark.ml.wrapper import JavaParams
+        from pyspark.ml.wrapper import JavaParams, JavaWrapper
 
         make_pair, from_java = JavaParams._make_java_param_pair, JavaParams._from_java
+        call_java = JavaWrapper._call_java
         _ensure_synapseml_compat()
 
         assert JavaParams._make_java_param_pair is make_pair
         assert JavaParams._from_java is from_java
+        assert JavaWrapper._call_java is call_java
 
     def test_shim_is_the_record_prepare_hook(self):
         assert catboost_module.ALGORITHM.prepare is _ensure_synapseml_compat
