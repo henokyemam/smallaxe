@@ -249,8 +249,11 @@ For each algorithm it covers the full Pipeline, row preservation, metrics cross-
 | 1 | PyPI 0.8.0 | autoscaling 2–8 | 47 | 18 | 11 | 8 |
 | 2 | 0.8.0 + fixes above | autoscaling 2–8 | 55 | 20 | 6 | 3 |
 | 3 | 0.8.0 + fixes above | fixed 2 workers | 62 | 21 | 1 | 0 |
+| 4 | 0.8.2.dev4 (`deepen-algorithm-seam`, 2026-10-05) | fixed 2 workers | 69 | 15 | 0 | 0 |
 
 GAP means a known library gap (item status notes above); the probe starts passing once the gap is fixed.
+
+Run 4 (the algorithm-seam refactor) kept every run-3 PASS, turned the six XGBoost/LightGBM `feature_importances` probes into PASS, and the run-3 CatBoost Diamonds RMSE overflow did not recur. Its CatBoost `feature_importances` probes stayed GAP for a new reason: SynapseML also patches `JavaWrapper._call_java`, which pickles CatBoost's `EFstrType` enum argument. Fixed in 0.8.2.dev5 by routing CatBoost model calls through the compatibility shim too.
 
 Environment requirements:
 - DBR 16.4 LTS **Scala 2.12** (Spark 3.5.2) is the only LTS runtime that can host all four algorithms, because SynapseML has no Scala 2.13 or Spark 4 build.
@@ -258,7 +261,7 @@ Environment requirements:
 - A **fixed-size cluster** for CatBoost. CatBoost-Spark training fails ("Error while executing workers", worker exit 134) whenever executors join or leave mid-fit. All 13 CatBoost failures under autoscaling lined up with resize events, and there were none on a fixed cluster.
 
 Findings not covered by the items above:
-- `feature_importances` returns `None` for XGBoost, LightGBM, and CatBoost. It only reads `featureImportances`, which only Random Forest exposes. The others expose `get_feature_importances()`, `getFeatureImportances()`, and `getFeatureImportance()`.
+- `feature_importances` returned `None` for XGBoost, LightGBM, and CatBoost. It only read `featureImportances`, which only Random Forest exposes. **Fixed on `deepen-algorithm-seam`:** each algorithm record now carries its own importances reader (XGBoost gain, LightGBM split counts, CatBoost PredictionValuesChange; raw library scales, not normalised).
 - CatBoost native categoricals are not implemented. Pipeline exempts CatBoost from needing an `Encoder`, but raw string columns then fail at vector assembly.
 - Databricks MLflow autologging logs every internal Spark ML fit, including each fold, each hyperopt trial, and the StandardScaler/OneHotEncoder fits: about 250 runs per validation run. Setting `spark.databricks.mlflow.autologging.enabled=false` at runtime did not stop it.
 - The SynapseML/CatBoost shim assumes SynapseML is imported last, as smallaxe's factories do. If catboost_spark only becomes importable later (the lazy `_load_catboost_spark()` path), its `_from_java` wins instead, and loading a saved LightGBM model may break.
