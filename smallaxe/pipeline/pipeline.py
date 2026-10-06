@@ -191,7 +191,13 @@ class Pipeline:
 
         required_steps: Set[str] = set()
         if isinstance(model_step, BaseModel):
-            if "CatBoost" not in model_name:
+            algorithm = getattr(model_step, "algorithm", None)
+            accepts_raw_categoricals = (
+                algorithm.accepts_raw_categoricals
+                if algorithm is not None
+                else "CatBoost" in model_name
+            )
+            if not accepts_raw_categoricals:
                 required_steps.add("Encoder")
         elif model_name in self.MODEL_TYPES_REQUIRING_ENCODER:
             required_steps.add("Encoder")

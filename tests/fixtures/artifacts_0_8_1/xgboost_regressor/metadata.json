@@ -1,0 +1,36 @@
+{
+  "task": "simple_regression",
+  "params": {
+    "n_estimators": 5,
+    "seed": 42
+  },
+  "feature_cols": [
+    "age",
+    "income"
+  ],
+  "label_col": "target",
+  "exclude_cols": [],
+  "is_fitted": true,
+  "metadata": {
+    "training_timestamp": "2026-10-05T15:21:55.980194",
+    "spark_version": "3.5.9",
+    "smallaxe_version": "0.8.1",
+    "label_col": "target",
+    "feature_cols": [
+      "age",
+      "income"
+    ],
+    "n_samples": 120,
+    "n_features": 2,
+    "seed": null,
+    "label_min": 56.0,
+    "label_max": 651.0,
+    "label_mean": 355.48333333333335,
+    "label_stddev": 173.93686594087328,
+    "task": "simple_regression",
+    "task_type": "regression"
+  },
+  "validation_scores": null,
+  "__class__": "XGBoostRegressor",
+  "__module__": "smallaxe.training.xgboost"
+}

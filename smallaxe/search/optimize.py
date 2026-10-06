@@ -311,16 +311,13 @@ def run(
         )
 
     space = _normalize_space(param_space)
-    base_params = model.get_params()
     type_reference = model.default_params
     maximize = metric in MAXIMIZE_METRICS
-    model_cls = type(model)
-    task = model.task
 
     def _build_model(overrides: Dict[str, Any]) -> Any:
         """Create a fresh model with base params overridden by ``overrides``."""
-        candidate = model_cls(task=task)
-        candidate.set_param({**base_params, **overrides})
+        candidate = model.clone()
+        candidate.set_param(overrides)
         return candidate
 
     def objective(sampled: Dict[str, Any]) -> Dict[str, Any]:
