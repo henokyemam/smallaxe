@@ -24,3 +24,10 @@ For infrastructure status checks (clusters, pipelines, jobs), provide concise ou
 ## Data Infrastructure
 
 When encountering catalog/schema/environment mismatches (e.g., test vs prod Trino, EGAP vs EGDP clusters), immediately surface the limitation to the user rather than repeatedly retrying failing queries.
+
+## Confluence Publishing
+
+- Edit the existing page/section in place; do NOT create new sub-pages or new dashboards unless I explicitly ask.
+- Only add the specific charts/tables/content I request — do not add extra style or content improvements unprompted.
+- Never invent numbers; source all metrics from the referenced notebook or data.
+- Note that image attachment upload is not automated — flag when I need to upload manually.

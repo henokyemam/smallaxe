@@ -16,10 +16,11 @@
 
 # COMMAND ----------
 
-import smallaxe
-from smallaxe.training import Regressors, Classifiers
-from smallaxe.search import optimize
 from hyperopt import hp
+
+import smallaxe
+from smallaxe.search import optimize
+from smallaxe.training import Classifiers, Regressors
 
 smallaxe.set_seed(42)
 results = {}  # name -> "PASS" | "SKIP: reason" | "FAIL: reason"
