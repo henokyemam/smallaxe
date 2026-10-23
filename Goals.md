@@ -159,7 +159,7 @@ Still open: "tests should verify missing optional dependency behavior without be
 
 Status (2026-10-23): multiclass scoring is implemented and validated locally on `goals`. Model validation now uses macro precision/recall/F1 and exposes explicit `*_macro` and `*_weighted` scores. Search accepts these names and keeps `accuracy` as its multiclass default. Standalone metric functions retain binary defaults and accept explicit macro/weighted averaging; `metrics.multiclass_scores` computes all multiclass scores together.
 
-The full local suite passed: 662 passed, 50 skipped, 0 failed (Python 3.11, PySpark 3.5.8, OpenJDK 11). Ruff and Black also passed. The skips cover missing LightGBM/CatBoost packages and regression probability tests. Hyperopt 0.2.7 tests ran with setuptools 80.10.2 staged through `PYTHONPATH` in `/tmp/smallaxe-test-compat` to supply `pkg_resources`; the shared environment was unchanged. The Databricks gate remains pending user approval after automatic approval review rejected the cluster query as external organizational access outside recognized authorization. `evaluate()` and confusion matrix support remain open.
+The full local suite passed: 662 passed, 50 skipped, 0 failed (Python 3.11, PySpark 3.5.8, OpenJDK 11). Ruff and Black also passed. The skips cover missing LightGBM/CatBoost packages and regression probability tests. Hyperopt 0.2.7 tests ran with setuptools 80.10.2 staged through `PYTHONPATH` in `/tmp/smallaxe-test-compat` to supply `pkg_resources`; the shared environment was unchanged. The authorized Databricks attempt failed during Python initialization because of incompatible cluster packages; no smallaxe tests ran. The gate remains pending the environment repair and rerun described below. `evaluate()` and confusion matrix support remain open.
 
 ### 6. Training And Validation
 
@@ -254,6 +254,10 @@ For each algorithm it covers the full Pipeline, row preservation, metrics cross-
 | 2 | 0.8.0 + fixes above | autoscaling 2–8 | 55 | 20 | 6 | 3 |
 | 3 | 0.8.0 + fixes above | fixed 2 workers | 62 | 21 | 1 | 0 |
 | 4 | 0.8.2.dev4 (`deepen-algorithm-seam`, 2026-10-05) | fixed 2 workers | 69 | 15 | 0 | 0 |
+
+Attempt (2026-10-23): commit `bcd19f7`, wheel `0.8.2.dev9`, was submitted to cluster `0930-055344-77703nyo` (DBR 16.4, Scala 2.12, two fixed workers) as run `209928883416188`. Python initialization failed before the notebook ran, so this attempt produced no smallaxe test results. The cluster's PyArrow 26.0.0 requires NumPy 2+, but the runtime has NumPy 1.26.4; its datasets 5.1.0 also requires PyArrow 24+.
+
+An isolated scratch-package probe (`739798416523194`, task `737776552756351`) passed with NumPy 1.26.4, PyArrow 21.0.0, and datasets 4.1.1, including Arrow-to-pandas conversion. This combination satisfies the inspected text-dedup and MLflow constraints. No shared cluster libraries were changed. Approval to pin PyArrow 21.0.0 and datasets 4.1.1 on the shared cluster and rerun validation is pending.
 
 GAP means a known library gap (item status notes above); the probe starts passing once the gap is fixed.
 
