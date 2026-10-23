@@ -1,12 +1,18 @@
 """Classification metrics for evaluating model predictions."""
 
-from typing import List
+from typing import Dict, List
 
 from pyspark.ml.evaluation import BinaryClassificationEvaluator
 from pyspark.sql import DataFrame
 from pyspark.sql import functions as F
 
-from smallaxe.exceptions import ColumnNotFoundError
+from smallaxe.exceptions import ColumnNotFoundError, ValidationError
+
+MULTICLASS_AVERAGED_METRICS = {
+    f"{metric}_{average}"
+    for metric in ("precision", "recall", "f1_score")
+    for average in ("macro", "weighted")
+}
 
 
 def _validate_columns(df: DataFrame, *cols: str) -> None:
@@ -54,24 +60,34 @@ def accuracy(
 
 
 def precision(
-    df: DataFrame, label_col: str = "label", prediction_col: str = "predict_label"
+    df: DataFrame,
+    label_col: str = "label",
+    prediction_col: str = "predict_label",
+    *,
+    average: str = "binary",
 ) -> float:
-    """Compute precision for binary classification.
+    """Compute precision with binary, macro, or support-weighted averaging.
 
     Precision = TP / (TP + FP)
 
     Args:
         df: PySpark DataFrame containing true and predicted labels.
-        label_col: Name of the column containing true labels (0 or 1). Default is 'label'.
-        prediction_col: Name of the column containing predictions (0 or 1). Default is 'predict_label'.
+        label_col: Name of the column containing true labels. Default is 'label'.
+        prediction_col: Name of the column containing predictions. Default is 'predict_label'.
+        average: 'binary' scores class 1 (default); 'macro' averages all classes
+            equally; 'weighted' weights each class by its true-label count.
+            Undefined per-class scores are zero.
 
     Returns:
         Precision as a float between 0 and 1.
-        Returns 0.0 if there are no positive predictions.
+        Undefined per-class precision is 0.0.
 
     Raises:
         ColumnNotFoundError: If label_col or prediction_col is not in the DataFrame.
+        ValidationError: If average is not 'binary', 'macro', or 'weighted'.
     """
+    if average != "binary":
+        return _averaged_score(df, label_col, prediction_col, "precision", average)
     _validate_columns(df, label_col, prediction_col)
 
     # Count true positives (predicted positive and actually positive)
@@ -86,23 +102,35 @@ def precision(
     return float(true_positives / predicted_positives)
 
 
-def recall(df: DataFrame, label_col: str = "label", prediction_col: str = "predict_label") -> float:
-    """Compute recall (sensitivity, true positive rate) for binary classification.
+def recall(
+    df: DataFrame,
+    label_col: str = "label",
+    prediction_col: str = "predict_label",
+    *,
+    average: str = "binary",
+) -> float:
+    """Compute recall with binary, macro, or support-weighted averaging.
 
     Recall = TP / (TP + FN)
 
     Args:
         df: PySpark DataFrame containing true and predicted labels.
-        label_col: Name of the column containing true labels (0 or 1). Default is 'label'.
-        prediction_col: Name of the column containing predictions (0 or 1). Default is 'predict_label'.
+        label_col: Name of the column containing true labels. Default is 'label'.
+        prediction_col: Name of the column containing predictions. Default is 'predict_label'.
+        average: 'binary' scores class 1 (default); 'macro' averages all classes
+            equally; 'weighted' weights each class by its true-label count.
+            Undefined per-class scores are zero.
 
     Returns:
         Recall as a float between 0 and 1.
-        Returns 0.0 if there are no actual positive labels.
+        Undefined per-class recall is 0.0.
 
     Raises:
         ColumnNotFoundError: If label_col or prediction_col is not in the DataFrame.
+        ValidationError: If average is not 'binary', 'macro', or 'weighted'.
     """
+    if average != "binary":
+        return _averaged_score(df, label_col, prediction_col, "recall", average)
     _validate_columns(df, label_col, prediction_col)
 
     # Count true positives (predicted positive and actually positive)
@@ -118,24 +146,34 @@ def recall(df: DataFrame, label_col: str = "label", prediction_col: str = "predi
 
 
 def f1_score(
-    df: DataFrame, label_col: str = "label", prediction_col: str = "predict_label"
+    df: DataFrame,
+    label_col: str = "label",
+    prediction_col: str = "predict_label",
+    *,
+    average: str = "binary",
 ) -> float:
-    """Compute F1 score for binary classification.
+    """Compute F1 with binary, macro, or support-weighted averaging.
 
     F1 = 2 * (precision * recall) / (precision + recall)
 
     Args:
         df: PySpark DataFrame containing true and predicted labels.
-        label_col: Name of the column containing true labels (0 or 1). Default is 'label'.
-        prediction_col: Name of the column containing predictions (0 or 1). Default is 'predict_label'.
+        label_col: Name of the column containing true labels. Default is 'label'.
+        prediction_col: Name of the column containing predictions. Default is 'predict_label'.
+        average: 'binary' scores class 1 (default); 'macro' averages per-class
+            F1 equally; 'weighted' weights each class by its true-label count.
+            Undefined per-class scores are zero.
 
     Returns:
         F1 score as a float between 0 and 1.
-        Returns 0.0 if precision + recall = 0.
+        Undefined per-class F1 is 0.0.
 
     Raises:
         ColumnNotFoundError: If label_col or prediction_col is not in the DataFrame.
+        ValidationError: If average is not 'binary', 'macro', or 'weighted'.
     """
+    if average != "binary":
+        return _averaged_score(df, label_col, prediction_col, "f1_score", average)
     _validate_columns(df, label_col, prediction_col)
 
     prec = precision(df, label_col, prediction_col)
@@ -145,6 +183,85 @@ def f1_score(
         return 0.0
 
     return float(2 * (prec * rec) / (prec + rec))
+
+
+def _averaged_score(
+    df: DataFrame, label_col: str, prediction_col: str, metric: str, average: str
+) -> float:
+    if average not in {"macro", "weighted"}:
+        raise ValidationError("average must be 'binary', 'macro', or 'weighted'.")
+    return multiclass_scores(df, label_col, prediction_col)[f"{metric}_{average}"]
+
+
+def multiclass_scores(
+    df: DataFrame, label_col: str = "label", prediction_col: str = "predict_label"
+) -> Dict[str, float]:
+    """Compute accuracy and macro/weighted precision, recall, and F1 together.
+
+    Classes are the union of true and predicted labels. Macro scores give each
+    class equal weight; weighted scores use true-label support. Undefined
+    per-class scores and scores on an empty frame are zero. The unsuffixed
+    ``precision``, ``recall``, and ``f1_score`` keys alias the macro scores.
+
+    Counts and averages stay distributed in Spark; only the final scores are
+    collected. F1 is averaged per class, rather than computed from averaged
+    precision and recall.
+    """
+    _validate_columns(df, label_col, prediction_col)
+    # Each input row contributes one actual and one predicted class count.
+    # This also retains classes that appear only in predictions or true labels.
+    counts = df.select(
+        F.explode(
+            F.array(
+                F.struct(
+                    F.col(label_col).alias("class"),
+                    F.lit(1).alias("support"),
+                    F.lit(0).alias("predicted"),
+                    F.lit(0).alias("tp"),
+                ),
+                F.struct(
+                    F.col(prediction_col).alias("class"),
+                    F.lit(0).alias("support"),
+                    F.lit(1).alias("predicted"),
+                    (F.col(label_col) == F.col(prediction_col)).cast("int").alias("tp"),
+                ),
+            )
+        ).alias("count")
+    )
+    per_class = (
+        counts.select("count.*")
+        .groupBy("class")
+        .agg(
+            F.sum("support").alias("support"),
+            F.sum("predicted").alias("predicted"),
+            F.sum("tp").alias("tp"),
+        )
+    )
+    for name, numerator, denominator in (
+        ("precision", F.col("tp"), F.col("predicted")),
+        ("recall", F.col("tp"), F.col("support")),
+        ("f1_score", 2 * F.col("tp"), F.col("support") + F.col("predicted")),
+    ):
+        per_class = per_class.withColumn(
+            name, F.when(denominator > 0, numerator / denominator).otherwise(0.0)
+        )
+    total = F.sum("support")
+    averages = [F.when(total > 0, F.sum("tp") / total).otherwise(0.0).alias("accuracy")]
+    for name in ("precision", "recall", "f1_score"):
+        averages.extend(
+            [
+                F.coalesce(F.avg(name), F.lit(0.0)).alias(f"{name}_macro"),
+                F.when(total > 0, F.sum(F.col(name) * F.col("support")) / total)
+                .otherwise(0.0)
+                .alias(f"{name}_weighted"),
+            ]
+        )
+    scores = {
+        name: float(value) for name, value in per_class.agg(*averages).first().asDict().items()
+    }
+    for name in ("precision", "recall", "f1_score"):
+        scores[name] = scores[f"{name}_macro"]
+    return scores
 
 
 def auc_roc(df: DataFrame, label_col: str = "label", probability_col: str = "probability") -> float:

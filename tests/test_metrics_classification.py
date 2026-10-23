@@ -4,16 +4,84 @@ import math
 
 import pytest
 
-from smallaxe.exceptions import ColumnNotFoundError
+from smallaxe.exceptions import ColumnNotFoundError, ValidationError
 from smallaxe.metrics.classification import (
     accuracy,
     auc_pr,
     auc_roc,
     f1_score,
     log_loss,
+    multiclass_scores,
     precision,
     recall,
 )
+
+
+class TestMulticlassMetrics:
+    def test_known_imbalanced_scores(self, spark_session):
+        # Per-class (precision, recall, F1): (1, 1/2, 2/3),
+        # (1/3, 1/2, 2/5), (1/2, 1, 2/3); supports are 4, 2, 1.
+        rows = [(0, 0), (0, 0), (0, 1), (0, 1), (1, 1), (1, 2), (2, 2)]
+        df = spark_session.createDataFrame(rows, ["label", "predict_label"])
+        scores = multiclass_scores(df)
+        assert scores["accuracy"] == pytest.approx(4 / 7)
+        assert scores["precision"] == pytest.approx(11 / 18)
+        assert scores["recall"] == pytest.approx(2 / 3)
+        assert scores["f1_score"] == pytest.approx(26 / 45)
+        assert scores["precision_weighted"] == pytest.approx(31 / 42)
+        assert scores["recall_weighted"] == pytest.approx(4 / 7)
+        assert scores["f1_score_weighted"] == pytest.approx(62 / 105)
+
+    @pytest.mark.parametrize(
+        "labels,predictions",
+        [
+            ([0, 0, 0, 0, 1, 1, 2], [0, 0, 1, 1, 1, 2, 2]),
+            # Class 1 is never predicted; class 3 appears only in predictions.
+            ([0, 0, 1, 1, 2], [0, 3, 0, 2, 2]),
+            ([2, 2, 2], [2, 2, 2]),
+            ([0, 1, 2], [1, 2, 0]),
+        ],
+    )
+    def test_matches_sklearn(self, spark_session, labels, predictions):
+        sk = pytest.importorskip("sklearn.metrics")
+        df = spark_session.createDataFrame(zip(labels, predictions), ["actual", "predicted"])
+        scores = multiclass_scores(df, "actual", "predicted")
+        assert scores["accuracy"] == pytest.approx(sk.accuracy_score(labels, predictions))
+        for average in ("macro", "weighted"):
+            for name, metric in (
+                ("precision", sk.precision_score),
+                ("recall", sk.recall_score),
+                ("f1_score", sk.f1_score),
+            ):
+                expected = metric(labels, predictions, average=average, zero_division=0)
+                assert scores[f"{name}_{average}"] == pytest.approx(expected)
+                if average == "macro":
+                    assert scores[name] == scores[f"{name}_macro"]
+
+    @pytest.mark.parametrize("metric", [precision, recall, f1_score])
+    @pytest.mark.parametrize("average", ["macro", "weighted"])
+    def test_explicit_average(self, spark_session, metric, average):
+        sk = pytest.importorskip("sklearn.metrics")
+        labels, predictions = [0, 0, 1, 2], [0, 1, 1, 1]
+        df = spark_session.createDataFrame(zip(labels, predictions), ["label", "predict_label"])
+        sk_name = "f1_score" if metric is f1_score else f"{metric.__name__}_score"
+        expected = getattr(sk, sk_name)(labels, predictions, average=average, zero_division=0)
+        assert metric(df, average=average) == pytest.approx(expected)
+
+    def test_empty_frame(self, spark_session):
+        df = spark_session.createDataFrame([], "label int, predict_label double")
+        assert set(multiclass_scores(df).values()) == {0.0}
+
+    def test_missing_column(self, spark_session):
+        df = spark_session.createDataFrame([(0, 1)], ["label", "predict_label"])
+        with pytest.raises(ColumnNotFoundError, match="missing"):
+            multiclass_scores(df, prediction_col="missing")
+
+    @pytest.mark.parametrize("metric", [precision, recall, f1_score])
+    def test_invalid_average(self, spark_session, metric):
+        df = spark_session.createDataFrame([(0, 1)], ["label", "predict_label"])
+        with pytest.raises(ValidationError, match="average"):
+            metric(df, average="micro")
 
 
 @pytest.fixture

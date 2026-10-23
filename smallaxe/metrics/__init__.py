@@ -6,6 +6,7 @@ from smallaxe.metrics.classification import (
     auc_roc,
     f1_score,
     log_loss,
+    multiclass_scores,
     precision,
     recall,
 )
@@ -32,4 +33,5 @@ __all__ = [
     "auc_roc",
     "auc_pr",
     "log_loss",
+    "multiclass_scores",
 ]

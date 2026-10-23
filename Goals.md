@@ -157,6 +157,10 @@ Still open: "tests should verify missing optional dependency behavior without be
 
 **Status (2026-09-30):** open, and the multiclass metrics are actively wrong. For `task="multiclass"`, the precision, recall, and F1 in `validation_scores` equal class 1's one-vs-rest values, not an average. This was checked against scikit-learn on 7-class Covertype for all four algorithms. For example, Random Forest reported F1 0.754 against a macro F1 of 0.373. It also affects `search.optimize` when it optimizes those metrics. Regression and binary metrics match scikit-learn exactly. There is no `evaluate()` and no confusion matrix yet.
 
+Status (2026-10-23): multiclass scoring is implemented and validated locally on `goals`. Model validation now uses macro precision/recall/F1 and exposes explicit `*_macro` and `*_weighted` scores. Search accepts these names and keeps `accuracy` as its multiclass default. Standalone metric functions retain binary defaults and accept explicit macro/weighted averaging; `metrics.multiclass_scores` computes all multiclass scores together.
+
+The full local suite passed: 662 passed, 50 skipped, 0 failed (Python 3.11, PySpark 3.5.8, OpenJDK 11). Ruff and Black also passed. The skips cover missing LightGBM/CatBoost packages and regression probability tests. Hyperopt 0.2.7 tests ran with setuptools 80.10.2 staged through `PYTHONPATH` in `/tmp/smallaxe-test-compat` to supply `pkg_resources`; the shared environment was unchanged. The Databricks gate remains pending user approval after automatic approval review rejected the cluster query as external organizational access outside recognized authorization. `evaluate()` and confusion matrix support remain open.
+
 ### 6. Training And Validation
 
 - Move train/test split and k-fold logic into a dedicated validation module.
@@ -273,7 +277,7 @@ Findings not covered by the items above:
 
 Rerun `examples/databricks_all_algorithms_validation.py` after each step. A step is done when its GAP probes become PASS with no new FAIL, and the local suite still passes.
 
-1. **Multiclass metrics (item 5).** Add macro and weighted precision, recall, and F1 for `task="multiclass"`, and keep the binary formulas for binary only. This comes first because it silently reports wrong numbers today, including inside `search.optimize`. Done when the four multiclass metric probes match scikit-learn.
+1. **Multiclass metrics (item 5).** Local implementation and validation completed 2026-10-23; the Databricks gate is pending (see section 5 above). Macro and weighted precision, recall, and F1 now score `task="multiclass"`, including inside `search.optimize`; binary scoring is unchanged. Done when the four Databricks multiclass metric probes match scikit-learn.
 2. **Pipeline persistence (items 4 and 7).** Give `Encoder` its own `save` / `load`, load model steps through the `Regressors` / `Classifiers` factories, and route pipeline IO through `smallaxe._fs`. This is a v1 acceptance criterion. Done when all three pipeline save/load probes pass and a reloaded pipeline predicts identically, locally and on `dbfs:/`.
 3. **Unseen categories and row preservation (item 3).** Map unseen categories to an all-zeros vector or `__OTHER__` instead of crashing, and stop dropping rows at assembly: keep them, or fail loudly. Done when the unseen-category and null-row probes pass.
 4. **Pipeline owns its feature columns (item 4).** Build the model's features from `numerical_cols` and the Encoder's output columns, and ignore unlisted columns. Done when the ID-column probe passes.

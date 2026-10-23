@@ -38,6 +38,7 @@ from typing import Any, Dict, List, Optional
 from pyspark.sql import DataFrame
 
 from smallaxe.exceptions import DependencyError, ValidationError
+from smallaxe.metrics.classification import MULTICLASS_AVERAGED_METRICS
 
 # hyperopt is an optional dependency. Guard the import so the module remains
 # importable (and the rest of smallaxe keeps working) when it is absent.
@@ -62,7 +63,7 @@ MAXIMIZE_METRICS = {
     "f1_score",
     "auc_roc",
     "auc_pr",
-}
+} | MULTICLASS_AVERAGED_METRICS
 MINIMIZE_METRICS = {
     "mse",
     "rmse",
@@ -135,12 +136,7 @@ class SearchResult:
 
 
 def _default_metric(model: Any) -> str:
-    """Pick a sensible default metric for the model's task type.
-
-    Note: precision/recall/f1_score are computed with binary semantics (they
-    score only the positive class), so multiclass defaults to ``accuracy``,
-    which is the only task-agnostic classification metric available.
-    """
+    """Pick RMSE for regression, ROC AUC for binary, and accuracy for multiclass."""
     if model.task_type == "regression":
         return "rmse"
     if getattr(model, "task", None) == "binary":
@@ -260,8 +256,10 @@ def run(
             choices (auto-wrapped in ``hp.choice``). Parameter names must be
             valid for the model.
         metric: Metric to optimize. Defaults to ``'rmse'`` for regression,
-            ``'auc_roc'`` for binary classification, and ``'f1_score'`` for
-            multiclass. Must be one of :data:`VALID_METRICS`.
+            ``'auc_roc'`` for binary classification, and ``'accuracy'`` for
+            multiclass. Multiclass precision/recall/f1_score use macro averages;
+            explicit ``*_macro`` and ``*_weighted`` names are also supported.
+            Must be one of :data:`VALID_METRICS`.
         max_evals: Maximum number of hyperparameter evaluations. Default 20.
         validation: Validation strategy used to score each trial. One of
             ``'train_test'`` (default) or ``'kfold'``. ``'none'`` is rejected

@@ -405,18 +405,22 @@ def crosscheck(pred, ds):
         }
     else:
         pdf = pred.select(y, yhat).toPandas()
-        sm = {
-            "accuracy": M.accuracy(pred, y, yhat),
-            "precision": M.precision(pred, y, yhat),
-            "recall": M.recall(pred, y, yhat),
-            "f1_score": M.f1_score(pred, y, yhat),
-        }
+        sm = M.multiclass_scores(pred, y, yhat)
         sk = {
             "accuracy": SK.accuracy_score(pdf[y], pdf[yhat]),
             "precision": SK.precision_score(pdf[y], pdf[yhat], average="macro", zero_division=0),
             "recall": SK.recall_score(pdf[y], pdf[yhat], average="macro", zero_division=0),
             "f1_score": SK.f1_score(pdf[y], pdf[yhat], average="macro", zero_division=0),
         }
+        for average in ("macro", "weighted"):
+            for name, metric in (
+                ("precision", SK.precision_score),
+                ("recall", SK.recall_score),
+                ("f1_score", SK.f1_score),
+            ):
+                sk[f"{name}_{average}"] = metric(
+                    pdf[y], pdf[yhat], average=average, zero_division=0
+                )
         # What smallaxe's binary formulas actually measure on multiclass data: class 1 one-vs-rest.
         pos = (pdf[y] == 1).astype(int), (pdf[yhat] == 1).astype(int)
         sk_class1 = {
@@ -552,6 +556,25 @@ def train_test_check(algo, ds):
     assert sorted(m._feature_cols) == sorted(
         ds.feats
     ), "inferred features differ from encoded columns"
+    if ds.task == "multiclass":
+        # Reproduce the seeded holdout to verify the validation scores themselves.
+        _, holdout = m._train_test_split(
+            ds.train_p, test_size=0.2, stratified=True, label_col=ds.label
+        )
+        pdf = m.predict(holdout).select(ds.label, "predict_label").toPandas()
+        for average in ("macro", "weighted"):
+            for name, metric in (
+                ("precision", SK.precision_score),
+                ("recall", SK.recall_score),
+                ("f1_score", SK.f1_score),
+            ):
+                key = f"{name}_{average}"
+                expected = metric(
+                    pdf[ds.label], pdf["predict_label"], average=average, zero_division=0
+                )
+                assert close(s[key], expected, 1e-9), f"{key}: {s[key]} != {expected}"
+                if average == "macro":
+                    assert s[name] == s[key]
     MODELS[(algo, ds.key)] = m
     keys = (
         ["rmse", "r2", "mape"]

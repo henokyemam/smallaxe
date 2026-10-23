@@ -535,6 +535,7 @@ class BaseModel(
             auc_roc,
             f1_score,
             log_loss,
+            multiclass_scores,
             precision,
             recall,
         )
@@ -542,6 +543,9 @@ class BaseModel(
         # Single transform pass produces predictions AND probabilities
         df_with_features = self._assemble_features(df, self._feature_cols)
         full_df = self._spark_model.transform(df_with_features)
+
+        if self._task == "multiclass":
+            return multiclass_scores(full_df, label_col, self.PREDICTION_COL)
 
         # Basic metrics using class predictions
         metrics = {
