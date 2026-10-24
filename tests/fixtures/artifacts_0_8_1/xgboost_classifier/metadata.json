@@ -1,0 +1,37 @@
+{
+  "task": "binary",
+  "params": {
+    "n_estimators": 5,
+    "seed": 42
+  },
+  "feature_cols": [
+    "age",
+    "income"
+  ],
+  "label_col": "binary",
+  "exclude_cols": [],
+  "is_fitted": true,
+  "metadata": {
+    "training_timestamp": "2026-10-05T15:22:01.026411",
+    "spark_version": "3.5.9",
+    "smallaxe_version": "0.8.1",
+    "label_col": "binary",
+    "feature_cols": [
+      "age",
+      "income"
+    ],
+    "n_samples": 120,
+    "n_features": 2,
+    "seed": null,
+    "class_counts": {
+      "0": 60,
+      "1": 60
+    },
+    "n_classes": 2,
+    "task": "binary",
+    "task_type": "classification"
+  },
+  "validation_scores": null,
+  "__class__": "XGBoostClassifier",
+  "__module__": "smallaxe.training.xgboost"
+}

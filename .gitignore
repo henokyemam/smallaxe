@@ -131,3 +131,6 @@ temp/
 
 # Claude Code - track settings but ignore other .claude files
 !.claude/settings.json
+
+# Keep the tiny Spark models saved by smallaxe 0.8.1 that the legacy-load tests read.
+!tests/fixtures/**/*.parquet

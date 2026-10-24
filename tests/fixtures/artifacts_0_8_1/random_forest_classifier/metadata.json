@@ -1,0 +1,38 @@
+{
+  "task": "multiclass",
+  "params": {
+    "n_estimators": 5,
+    "seed": 42
+  },
+  "feature_cols": [
+    "age",
+    "income"
+  ],
+  "label_col": "multiclass",
+  "exclude_cols": [],
+  "is_fitted": true,
+  "metadata": {
+    "training_timestamp": "2026-10-05T15:21:49.494712",
+    "spark_version": "3.5.9",
+    "smallaxe_version": "0.8.1",
+    "label_col": "multiclass",
+    "feature_cols": [
+      "age",
+      "income"
+    ],
+    "n_samples": 120,
+    "n_features": 2,
+    "seed": null,
+    "class_counts": {
+      "0": 40,
+      "1": 40,
+      "2": 40
+    },
+    "n_classes": 3,
+    "task": "multiclass",
+    "task_type": "classification"
+  },
+  "validation_scores": null,
+  "__class__": "RandomForestClassifier",
+  "__module__": "smallaxe.training.random_forest"
+}

@@ -1,55 +1,42 @@
-"""Training module - model classes and factories."""
+"""Training module - model classes, algorithm records, and factories."""
 
-from smallaxe.training.base import BaseClassifier, BaseModel, BaseRegressor
+from smallaxe.training import algorithm
+from smallaxe.training.base import (
+    BaseClassifier,
+    BaseModel,
+    BaseRegressor,
+    Classifier,
+    Model,
+    Regressor,
+)
+
+# The CatBoost record is imported before LightGBM's on purpose: both JVM packages
+# patch pyspark.ml.wrapper.JavaParams process-wide, and the CatBoost compatibility
+# shim assumes SynapseML's patch was applied last.
+from smallaxe.training.catboost import CatBoostClassifier, CatBoostRegressor
 from smallaxe.training.classifiers import Classifiers
+from smallaxe.training.lightgbm import LightGBMClassifier, LightGBMRegressor
 from smallaxe.training.random_forest import RandomForestClassifier, RandomForestRegressor
 from smallaxe.training.regressors import Regressors
+from smallaxe.training.xgboost import XGBoostClassifier, XGBoostRegressor
 
 __all__ = [
+    "algorithm",
     "BaseModel",
     "BaseRegressor",
     "BaseClassifier",
-    "RandomForestRegressor",
-    "RandomForestClassifier",
+    "Model",
+    "Regressor",
+    "Classifier",
     "Regressors",
     "Classifiers",
+    # Deprecated 0.8.x class aliases, removed in 1.0.
+    "RandomForestRegressor",
+    "RandomForestClassifier",
+    "XGBoostRegressor",
+    "XGBoostClassifier",
+    "LightGBMRegressor",
+    "LightGBMClassifier",
+    "CatBoostRegressor",
+    "CatBoostClassifier",
 ]
-
-# Import XGBoost classes if available (optional dependency)
-try:
-    from smallaxe.training.xgboost import (
-        XGBoostClassifier as XGBoostClassifier,
-    )
-    from smallaxe.training.xgboost import (
-        XGBoostRegressor as XGBoostRegressor,
-    )
-
-    __all__.extend(["XGBoostRegressor", "XGBoostClassifier"])
-except ImportError:
-    pass
-
-# Import LightGBM classes if available (optional dependency)
-try:
-    from smallaxe.training.lightgbm import (
-        LightGBMClassifier as LightGBMClassifier,
-    )
-    from smallaxe.training.lightgbm import (
-        LightGBMRegressor as LightGBMRegressor,
-    )
-
-    __all__.extend(["LightGBMRegressor", "LightGBMClassifier"])
-except ImportError:
-    pass
-
-# Import CatBoost classes if available (optional dependency)
-try:
-    from smallaxe.training.catboost import (
-        CatBoostClassifier as CatBoostClassifier,
-    )
-    from smallaxe.training.catboost import (
-        CatBoostRegressor as CatBoostRegressor,
-    )
-
-    __all__.extend(["CatBoostRegressor", "CatBoostClassifier"])
-except ImportError:
-    pass
