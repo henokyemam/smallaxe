@@ -84,11 +84,12 @@ For `task="multiclass"`, validation `precision`, `recall`, and `f1_score` use ma
 averages: each class has equal weight. Scores also include explicit `*_macro` and
 `*_weighted` keys, where weighted averages use each class's true-label count.
 Undefined per-class scores are zero, and classes include all true and predicted labels.
+Label and prediction columns must be numeric; rows where either is null are ignored.
 
 > **Changed since 0.8.x:** multiclass `precision`, `recall`, and `f1_score` in
 > `validation_scores` were class 1's one-vs-rest scores, not averages. Models saved by
 > 0.8.x keep those old values under the same keys, so loading one warns; refit it to get
-> macro and weighted scores.
+> macro and weighted scores. See [CHANGELOG.md](CHANGELOG.md).
 
 Standalone `smallaxe.metrics.precision`, `recall`, and `f1_score` accept
 `average="macro"` or `average="weighted"`; their default remains `average="binary"`

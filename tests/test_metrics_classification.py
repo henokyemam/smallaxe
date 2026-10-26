@@ -77,6 +77,35 @@ class TestMulticlassMetrics:
         with pytest.raises(ColumnNotFoundError, match="missing"):
             multiclass_scores(df, prediction_col="missing")
 
+    def test_integer_labels_match_double_predictions(self, spark_session):
+        rows = [(0, 0.0), (0, 1.0), (1, 1.0), (1, 1.0), (2, 2.0), (2, 0.0)]
+        as_int = spark_session.createDataFrame(rows, "label int, predict_label double")
+        as_double = spark_session.createDataFrame(
+            [(float(label), prediction) for label, prediction in rows],
+            "label double, predict_label double",
+        )
+        assert multiclass_scores(as_int) == multiclass_scores(as_double)
+
+    @pytest.mark.parametrize(
+        "column,row,schema",
+        [
+            ("label", ("1", 1.0), "label string, predict_label double"),
+            ("predict_label", (1.0, "1"), "label double, predict_label string"),
+        ],
+    )
+    def test_non_numeric_column_rejected(self, spark_session, column, row, schema):
+        df = spark_session.createDataFrame([row], schema)
+        with pytest.raises(ValidationError, match=f"'{column}' must be numeric"):
+            multiclass_scores(df)
+        with pytest.raises(ValidationError, match="must be numeric"):
+            f1_score(df, average="macro")
+
+    def test_rows_with_null_label_or_prediction_are_ignored(self, spark_session):
+        rows = [(0, 0.0), (1, 1.0), (2, 0.0), (None, 1.0), (2, None)]
+        df = spark_session.createDataFrame(rows, "label int, predict_label double")
+        complete = spark_session.createDataFrame(rows[:3], "label int, predict_label double")
+        assert multiclass_scores(df) == multiclass_scores(complete)
+
     @pytest.mark.parametrize("metric", [precision, recall, f1_score])
     def test_invalid_average(self, spark_session, metric):
         df = spark_session.createDataFrame([(0, 1)], ["label", "predict_label"])
