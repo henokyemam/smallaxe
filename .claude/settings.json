@@ -1,17 +1,4 @@
 {
-  "hooks": {
-    "PostToolUse": [
-      {
-        "matcher": "Edit|Write",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "/Users/hyemam/Desktop/basic/bin/ruff check --fix $CLAUDE_FILE_PATHS && /Users/hyemam/Desktop/basic/bin/ruff format $CLAUDE_FILE_PATHS"
-          }
-        ]
-      }
-    ]
-  },
   "extraKnownMarketplaces": {
     "eg-skills": {
       "source": {
