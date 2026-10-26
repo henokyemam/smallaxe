@@ -5,6 +5,7 @@ from typing import Dict, List
 from pyspark.ml.evaluation import BinaryClassificationEvaluator
 from pyspark.sql import DataFrame
 from pyspark.sql import functions as F
+from pyspark.sql.types import NumericType
 
 from smallaxe.exceptions import ColumnNotFoundError, ValidationError
 
@@ -84,7 +85,8 @@ def precision(
 
     Raises:
         ColumnNotFoundError: If label_col or prediction_col is not in the DataFrame.
-        ValidationError: If average is not 'binary', 'macro', or 'weighted'.
+        ValidationError: If average is not 'binary', 'macro', or 'weighted', or if
+            average is 'macro' or 'weighted' and a column is not numeric.
     """
     if average != "binary":
         return _averaged_score(df, label_col, prediction_col, "precision", average)
@@ -127,7 +129,8 @@ def recall(
 
     Raises:
         ColumnNotFoundError: If label_col or prediction_col is not in the DataFrame.
-        ValidationError: If average is not 'binary', 'macro', or 'weighted'.
+        ValidationError: If average is not 'binary', 'macro', or 'weighted', or if
+            average is 'macro' or 'weighted' and a column is not numeric.
     """
     if average != "binary":
         return _averaged_score(df, label_col, prediction_col, "recall", average)
@@ -170,7 +173,8 @@ def f1_score(
 
     Raises:
         ColumnNotFoundError: If label_col or prediction_col is not in the DataFrame.
-        ValidationError: If average is not 'binary', 'macro', or 'weighted'.
+        ValidationError: If average is not 'binary', 'macro', or 'weighted', or if
+            average is 'macro' or 'weighted' and a column is not numeric.
     """
     if average != "binary":
         return _averaged_score(df, label_col, prediction_col, "f1_score", average)
@@ -198,32 +202,57 @@ def multiclass_scores(
 ) -> Dict[str, float]:
     """Compute accuracy and macro/weighted precision, recall, and F1 together.
 
-    Classes are the union of true and predicted labels. Macro scores give each
-    class equal weight; weighted scores use true-label support. Undefined
-    per-class scores and scores on an empty frame are zero. The unsuffixed
-    ``precision``, ``recall``, and ``f1_score`` keys alias the macro scores.
+    Classes are the union of true and predicted labels, compared as numbers, so
+    a label ``1`` and a prediction ``1.0`` are the same class. Rows with a null
+    label or prediction are ignored. Macro scores give each class equal weight;
+    weighted scores use true-label support. Undefined per-class scores and
+    scores on an empty frame are zero. The unsuffixed ``precision``,
+    ``recall``, and ``f1_score`` keys alias the macro scores.
 
     Counts and averages stay distributed in Spark; only the final scores are
     collected. F1 is averaged per class, rather than computed from averaged
     precision and recall.
+
+    Args:
+        df: PySpark DataFrame containing true and predicted labels.
+        label_col: Name of the numeric column containing true labels. Default is 'label'.
+        prediction_col: Name of the numeric column containing predictions.
+            Default is 'predict_label'.
+
+    Returns:
+        Dict with ``accuracy``, ``precision``, ``recall``, ``f1_score``, and
+        their ``*_macro`` and ``*_weighted`` variants, each a float in [0, 1].
+
+    Raises:
+        ColumnNotFoundError: If label_col or prediction_col is not in the DataFrame.
+        ValidationError: If label_col or prediction_col is not numeric.
     """
     _validate_columns(df, label_col, prediction_col)
+    for col in (label_col, prediction_col):
+        data_type = df.schema[col].dataType
+        if not isinstance(data_type, NumericType):
+            raise ValidationError(
+                f"Column '{col}' must be numeric for multiclass scoring, "
+                f"got {data_type.simpleString()}."
+            )
+    label = F.col(label_col).cast("double")
+    prediction = F.col(prediction_col).cast("double")
     # Each input row contributes one actual and one predicted class count.
     # This also retains classes that appear only in predictions or true labels.
-    counts = df.select(
+    counts = df.where(label.isNotNull() & prediction.isNotNull()).select(
         F.explode(
             F.array(
                 F.struct(
-                    F.col(label_col).alias("class"),
+                    label.alias("class"),
                     F.lit(1).alias("support"),
                     F.lit(0).alias("predicted"),
                     F.lit(0).alias("tp"),
                 ),
                 F.struct(
-                    F.col(prediction_col).alias("class"),
+                    prediction.alias("class"),
                     F.lit(0).alias("support"),
                     F.lit(1).alias("predicted"),
-                    (F.col(label_col) == F.col(prediction_col)).cast("int").alias("tp"),
+                    (label == prediction).cast("int").alias("tp"),
                 ),
             )
         ).alias("count")
