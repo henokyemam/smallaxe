@@ -33,7 +33,7 @@ Example:
     >>> predictions = result.best_model.predict(df)
 """
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Set
 
 from pyspark.sql import DataFrame
 
@@ -72,6 +72,12 @@ MINIMIZE_METRICS = {
     "log_loss",
 }
 VALID_METRICS = MAXIMIZE_METRICS | MINIMIZE_METRICS
+
+# The scores each task's validation produces; a metric outside its task's set
+# would fail every trial only after fitting it.
+REGRESSION_METRICS = {"mse", "rmse", "mae", "r2", "mape"}
+BINARY_METRICS = {"accuracy", "precision", "recall", "f1_score", "auc_roc", "auc_pr", "log_loss"}
+MULTICLASS_METRICS = {"accuracy", "precision", "recall", "f1_score"} | MULTICLASS_AVERAGED_METRICS
 
 
 def _check_hyperopt_available() -> None:
@@ -142,6 +148,15 @@ def _default_metric(model: Any) -> str:
     if getattr(model, "task", None) == "binary":
         return "auc_roc"
     return "accuracy"
+
+
+def _task_metrics(model: Any) -> Set[str]:
+    """Return the metrics the model's validation scores contain for its task."""
+    if model.task_type == "regression":
+        return REGRESSION_METRICS
+    if getattr(model, "task", None) == "binary":
+        return BINARY_METRICS
+    return MULTICLASS_METRICS
 
 
 def _normalize_space(param_space: Dict[str, Any]) -> Dict[str, Any]:
@@ -259,7 +274,8 @@ def run(
             ``'auc_roc'`` for binary classification, and ``'accuracy'`` for
             multiclass. Multiclass precision/recall/f1_score use macro averages;
             explicit ``*_macro`` and ``*_weighted`` names are also supported.
-            Must be one of :data:`VALID_METRICS`.
+            Must be one of :data:`VALID_METRICS` and produced for the model's
+            task (e.g. ``auc_roc`` is binary-only, ``*_macro`` multiclass-only).
         max_evals: Maximum number of hyperparameter evaluations. Default 20.
         validation: Validation strategy used to score each trial. One of
             ``'train_test'`` (default) or ``'kfold'``. ``'none'`` is rejected
@@ -284,8 +300,8 @@ def run(
 
     Raises:
         DependencyError: If hyperopt is not installed.
-        ValidationError: If arguments are invalid (bad metric, empty space,
-            validation='none', etc.).
+        ValidationError: If arguments are invalid (bad metric, a metric the
+            model's task does not produce, empty space, validation='none', etc.).
     """
     _check_hyperopt_available()
 
@@ -306,6 +322,12 @@ def run(
     if metric not in VALID_METRICS:
         raise ValidationError(
             f"Invalid metric '{metric}'. Supported metrics are: {sorted(VALID_METRICS)}."
+        )
+    task_metrics = _task_metrics(model)
+    if metric not in task_metrics:
+        raise ValidationError(
+            f"Metric '{metric}' is not available for task '{model.task}'. "
+            f"Supported metrics for this task are: {sorted(task_metrics)}."
         )
 
     space = _normalize_space(param_space)

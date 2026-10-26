@@ -118,6 +118,37 @@ class TestOptimizeArgumentValidation:
                 max_evals=2,
             )
 
+    @pytest.mark.parametrize(
+        "task,metric",
+        [
+            ("binary", "f1_score_macro"),
+            ("binary", "rmse"),
+            ("multiclass", "auc_roc"),
+            ("simple_regression", "accuracy"),
+        ],
+    )
+    def test_metric_from_another_task_rejected_before_any_trial(
+        self, monkeypatch, classification_df, task, metric
+    ):
+        if task == "simple_regression":
+            model = Regressors.random_forest()
+        else:
+            model = Classifiers.random_forest(task=task)
+        monkeypatch.setattr(optimize, "fmin", lambda **kwargs: pytest.fail("trials ran"))
+        with pytest.raises(ValidationError, match=f"not available for task '{task}'"):
+            optimize.run(
+                model,
+                classification_df,
+                label_col="label",
+                param_space={"max_depth": [3, 5]},
+                metric=metric,
+                max_evals=2,
+            )
+
+    def test_every_metric_belongs_to_a_task(self):
+        tasks = optimize.REGRESSION_METRICS | optimize.BINARY_METRICS | optimize.MULTICLASS_METRICS
+        assert tasks == optimize.VALID_METRICS
+
     def test_validation_none_rejected(self, regression_df):
         model = Regressors.random_forest(seed=42)
         with pytest.raises(ValidationError, match="train_test' or 'kfold'"):
