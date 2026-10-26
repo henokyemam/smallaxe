@@ -6,6 +6,8 @@ the released 0.8.1 (their ``metadata.json`` records the old class name, not
 """
 
 import json
+import shutil
+import warnings
 from pathlib import Path
 
 import pytest
@@ -62,3 +64,48 @@ def test_resaved_legacy_artifact_uses_the_new_format(frame, name, tmp_path):
     assert metadata["__class__"] == type(model).__name__
     reloaded = type(model).load(path)
     assert reloaded.predict(frame).count() == frame.count()
+
+
+def _multiclass_artifact_with_scores(tmp_path, validation_scores):
+    path = tmp_path / "random_forest_classifier"
+    shutil.copytree(FIXTURES / "random_forest_classifier", path)
+    metadata = json.loads((path / "metadata.json").read_text())
+    assert metadata["task"] == "multiclass"
+    metadata["validation_scores"] = validation_scores
+    (path / "metadata.json").write_text(json.dumps(metadata))
+    return str(path)
+
+
+@pytest.mark.parametrize(
+    "scores",
+    [
+        {"accuracy": 0.5, "precision": 0.4, "recall": 0.3, "f1_score": 0.35},
+        {"mean_accuracy": 0.5, "mean_precision": 0.4, "fold_scores": []},
+    ],
+    ids=["train_test", "kfold"],
+)
+def test_class1_multiclass_scores_warn_on_load(tmp_path, scores):
+    path = _multiclass_artifact_with_scores(tmp_path, scores)
+
+    with pytest.warns(UserWarning, match="class 1 only") as record:
+        model = Classifiers.load(path)
+
+    assert record[0].filename == __file__
+    assert model.validation_scores == scores
+
+
+@pytest.mark.parametrize(
+    "scores",
+    [
+        None,
+        {"precision": 0.4, "precision_macro": 0.4, "precision_weighted": 0.5},
+        {"mean_precision": 0.4, "mean_precision_macro": 0.4, "fold_scores": []},
+    ],
+    ids=["no-validation", "train_test", "kfold"],
+)
+def test_macro_multiclass_scores_load_without_warning(tmp_path, scores):
+    path = _multiclass_artifact_with_scores(tmp_path, scores)
+
+    with warnings.catch_warnings():
+        warnings.filterwarnings("error", message=".*class 1 only")
+        Classifiers.load(path)

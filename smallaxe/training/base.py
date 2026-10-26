@@ -961,6 +961,8 @@ class Model(BaseModel):
         instance._spark_model = None
         instance._set_persistence_state(state)
         instance._load_artifacts(path)
+        if task == "multiclass" and instance._validation_scores:
+            _warn_if_class1_scores(instance._validation_scores)
         return instance
 
 
@@ -976,6 +978,19 @@ class Classifier(Model, BaseClassifier):
 
     def __init__(self, algorithm: Union[str, Algorithm], task: str = "binary") -> None:
         super().__init__(algorithm, task)
+
+
+def _warn_if_class1_scores(validation_scores: Dict[str, Any]) -> None:
+    """Warn when multiclass scores were saved before macro averaging (smallaxe <= 0.8.x)."""
+    if any(key.endswith("precision_macro") for key in validation_scores):
+        return
+    warnings.warn(
+        "This multiclass model was saved by a smallaxe version that scored validation "
+        "precision, recall, and f1_score for class 1 only (one-vs-rest), not as macro "
+        "averages. Refit it to get macro and weighted scores.",
+        UserWarning,
+        stacklevel=4,
+    )
 
 
 def _warn_deprecated_alias(name: str, factory: str) -> None:

@@ -85,6 +85,11 @@ averages: each class has equal weight. Scores also include explicit `*_macro` an
 `*_weighted` keys, where weighted averages use each class's true-label count.
 Undefined per-class scores are zero, and classes include all true and predicted labels.
 
+> **Changed since 0.8.x:** multiclass `precision`, `recall`, and `f1_score` in
+> `validation_scores` were class 1's one-vs-rest scores, not averages. Models saved by
+> 0.8.x keep those old values under the same keys, so loading one warns; refit it to get
+> macro and weighted scores.
+
 Standalone `smallaxe.metrics.precision`, `recall`, and `f1_score` accept
 `average="macro"` or `average="weighted"`; their default remains `average="binary"`
 (class 1). Use `smallaxe.metrics.multiclass_scores(df, label_col, prediction_col)`
