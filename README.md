@@ -80,12 +80,30 @@ model.fit(
 print(model.validation_scores)   # includes mean_/std_ per metric across folds
 ```
 
+For `task="multiclass"`, validation `precision`, `recall`, and `f1_score` use macro
+averages: each class has equal weight. Scores also include explicit `*_macro` and
+`*_weighted` keys, where weighted averages use each class's true-label count.
+Undefined per-class scores are zero, and classes include all true and predicted labels.
+
+> **Changed since 0.8.x:** multiclass `precision`, `recall`, and `f1_score` in
+> `validation_scores` were class 1's one-vs-rest scores, not averages. Models saved by
+> 0.8.x keep those old values under the same keys, so loading one warns; refit it to get
+> macro and weighted scores.
+
+Standalone `smallaxe.metrics.precision`, `recall`, and `f1_score` accept
+`average="macro"` or `average="weighted"`; their default remains `average="binary"`
+(class 1). Use `smallaxe.metrics.multiclass_scores(df, label_col, prediction_col)`
+to compute accuracy and all macro/weighted scores together.
+
 ### Hyperparameter Optimization
 
 `smallaxe.search.optimize` tunes any model using [hyperopt](https://github.com/hyperopt/hyperopt).
 You pass a model template, a search space, and the metric to optimize; it returns
 the best params, the best validation score, a refit `best_model`, and the full
 trial history.
+
+Multiclass search defaults to `accuracy`. You can select `precision`, `recall`, or
+`f1_score` for macro averaging, or an explicit name such as `f1_score_weighted`.
 
 ```python
 from hyperopt import hp

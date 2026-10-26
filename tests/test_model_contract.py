@@ -83,6 +83,11 @@ class TestModelContract:
         )
         assert expected <= set(scores)
         assert scores["validation_type"] == "train_test"
+        if task == "multiclass":
+            for metric in ("precision", "recall", "f1_score"):
+                assert scores[metric] == scores[f"{metric}_macro"]
+                assert 0 <= scores[f"{metric}_weighted"] <= 1
+            assert "auc_roc" not in scores
 
     def test_kfold_validation_scores(self, frame, name, task):
         model = _fit(name, task, frame, validation="kfold", n_folds=3)
@@ -91,6 +96,13 @@ class TestModelContract:
         metric = "mean_rmse" if task == "simple_regression" else "mean_accuracy"
         assert metric in scores
         assert len(scores["fold_scores"]) == 3
+        if task == "multiclass":
+            for name in ("precision", "recall", "f1_score"):
+                assert scores[f"mean_{name}"] == scores[f"mean_{name}_macro"]
+                for average in ("macro", "weighted"):
+                    key = f"{name}_{average}"
+                    expected = sum(fold[key] for fold in scores["fold_scores"]) / 3
+                    assert scores[f"mean_{key}"] == pytest.approx(expected)
 
     def test_feature_importances_cover_every_feature(self, frame, name, task):
         importances = _fit(name, task, frame).feature_importances

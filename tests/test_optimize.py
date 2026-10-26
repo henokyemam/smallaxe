@@ -57,9 +57,33 @@ class TestDefaultMetric:
         assert optimize._default_metric(model) == "auc_roc"
 
     def test_multiclass_defaults_to_accuracy(self):
-        # f1/precision/recall are binary-only; multiclass must use accuracy.
         model = Classifiers.random_forest(task="multiclass")
         assert optimize._default_metric(model) == "accuracy"
+
+
+@pytest.mark.parametrize("validation", ["train_test", "kfold"])
+@pytest.mark.parametrize("metric", ["f1_score_macro", "f1_score_weighted"])
+def test_multiclass_search_uses_averaged_scores(spark_session, seeded, metric, validation):
+    rows = [(float(i % 7), float(i % 11), i % 3) for i in range(90)]
+    df = spark_session.createDataFrame(rows, ["x1", "x2", "label"])
+    result = optimize.run(
+        Classifiers.random_forest(task="multiclass", n_estimators=2, seed=42),
+        df,
+        label_col="label",
+        param_space={"max_depth": [1, 3]},
+        metric=metric,
+        validation=validation,
+        n_folds=2,
+        max_evals=2,
+        seed=42,
+        refit=False,
+        verbose=False,
+    )
+    assert result.n_successful_trials == 2
+    assert result.best_score == max(trial["score"] for trial in result.trials_history)
+    for trial in result.trials_history:
+        assert 0 <= trial["score"] <= 1
+        assert trial["loss"] == -trial["score"]
 
 
 class TestOptimizeDependencyGating:
@@ -93,6 +117,37 @@ class TestOptimizeArgumentValidation:
                 metric="not_a_metric",
                 max_evals=2,
             )
+
+    @pytest.mark.parametrize(
+        "task,metric",
+        [
+            ("binary", "f1_score_macro"),
+            ("binary", "rmse"),
+            ("multiclass", "auc_roc"),
+            ("simple_regression", "accuracy"),
+        ],
+    )
+    def test_metric_from_another_task_rejected_before_any_trial(
+        self, monkeypatch, classification_df, task, metric
+    ):
+        if task == "simple_regression":
+            model = Regressors.random_forest()
+        else:
+            model = Classifiers.random_forest(task=task)
+        monkeypatch.setattr(optimize, "fmin", lambda **kwargs: pytest.fail("trials ran"))
+        with pytest.raises(ValidationError, match=f"not available for task '{task}'"):
+            optimize.run(
+                model,
+                classification_df,
+                label_col="label",
+                param_space={"max_depth": [3, 5]},
+                metric=metric,
+                max_evals=2,
+            )
+
+    def test_every_metric_belongs_to_a_task(self):
+        tasks = optimize.REGRESSION_METRICS | optimize.BINARY_METRICS | optimize.MULTICLASS_METRICS
+        assert tasks == optimize.VALID_METRICS
 
     def test_validation_none_rejected(self, regression_df):
         model = Regressors.random_forest(seed=42)

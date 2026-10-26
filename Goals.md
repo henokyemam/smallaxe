@@ -157,6 +157,10 @@ Still open: "tests should verify missing optional dependency behavior without be
 
 **Status (2026-09-30):** open, and the multiclass metrics are actively wrong. For `task="multiclass"`, the precision, recall, and F1 in `validation_scores` equal class 1's one-vs-rest values, not an average. This was checked against scikit-learn on 7-class Covertype for all four algorithms. For example, Random Forest reported F1 0.754 against a macro F1 of 0.373. It also affects `search.optimize` when it optimizes those metrics. Regression and binary metrics match scikit-learn exactly. There is no `evaluate()` and no confusion matrix yet.
 
+Status (2026-10-23): multiclass scoring is implemented and validated locally on `goals`. Model validation now uses macro precision/recall/F1 and exposes explicit `*_macro` and `*_weighted` scores. Search accepts these names and keeps `accuracy` as its multiclass default. Standalone metric functions retain binary defaults and accept explicit macro/weighted averaging; `metrics.multiclass_scores` computes all multiclass scores together.
+
+The full local suite passed: 662 passed, 50 skipped, 0 failed (Python 3.11, PySpark 3.5.8, OpenJDK 11). Ruff and Black also passed. The skips cover missing LightGBM/CatBoost packages and regression probability tests. Hyperopt 0.2.7 tests ran with setuptools 80.10.2 staged through `PYTHONPATH` in `/tmp/smallaxe-test-compat` to supply `pkg_resources`; the local shared environment was unchanged. Databricks validation completed on 2026-10-24 UTC using the checkpoint continuation described below: all four algorithms passed macro/weighted metric comparisons and held-out `validation_scores` comparisons against scikit-learn. The multiclass metrics gate is met. `evaluate()` and confusion matrix support remain open.
+
 ### 6. Training And Validation
 
 - Move train/test split and k-fold logic into a dedicated validation module.
@@ -250,8 +254,17 @@ For each algorithm it covers the full Pipeline, row preservation, metrics cross-
 | 2 | 0.8.0 + fixes above | autoscaling 2–8 | 55 | 20 | 6 | 3 |
 | 3 | 0.8.0 + fixes above | fixed 2 workers | 62 | 21 | 1 | 0 |
 | 4 | 0.8.2.dev4 (`deepen-algorithm-seam`, 2026-10-05) | fixed 2 workers | 69 | 15 | 0 | 0 |
+| 5 (checkpoint-combined, two executions) | 0.8.2.dev9 (`bcd19f7`, 2026-10-24 UTC) | fixed 2 workers | 76 | 8 | 0 | 0 |
 
-GAP means a known library gap (item status notes above); the probe starts passing once the gap is fixed.
+Run 5 validated wheel `0.8.2.dev9` from commit `bcd19f7d99b2236d3fda78768cf34bdfeec2c535`, with source hashes verified. Run `1066101167503652` reached its two-hour timeout after 75 passing checks and no failures. The [successful checkpoint continuation](https://eg-unified-egdataplatform-corp-exp-us-east-1.cloud.databricks.com/?o=3339765375848139#job/733735013666822/run/230122390792453) reused those exact 75 rows with `source_run_id` provenance and executed the nine unfinished checks. The original rows were independently verified as unaltered. The combined report contains all 84 checks: 76 PASS, 8 known GAP, 0 FAIL, 0 BLOCKED, 0 SKIP. Artifact: `dbfs:/tmp/smallaxe_validation/results/20261024_011106_resume_bcd19f7.json`.
+
+All four `A_metrics` multiclass macro/weighted comparisons and all four `B_validation` held-out multiclass score comparisons matched scikit-learn. For Random Forest on Covertype, macro F1 was 0.37302 and weighted F1 was 0.67888. All 12 model save/load checks passed; CatBoost's three feature-importance probes also passed.
+
+Eight probes remain classified GAP: local Encoder/model serialization, numeric-only pipeline model loading, `/dbfs` pipeline saving, CatBoost native categoricals, null-row dropping, unlisted string IDs, unseen categories, and caller-cache unpersisting. The `/dbfs` probe was blocked by an S3 `AccessDeniedException` while saving Scaler metadata, so it does not establish serialization behavior on that path. Local Encoder serialization failed with `TypeError` on an RLock; numeric-only pipeline model loading failed with `ValueError`.
+
+The cluster environment was repaired with approval before Run 5: PyArrow 21.0.0 and datasets 4.1.1 replaced incompatible packages on cluster `0930-055344-77703nyo`. Driver and worker Pandas UDF smoke run `895656793751669` passed. Validation used NumPy 1.26.4, Spark 3.5.2, Python 3.12.3, Scala 2.12, and two fixed workers on DBR 16.4. The earlier attempt `209928883416188` failed during Python initialization, before any smallaxe checks, because PyArrow 26.0.0 required NumPy 2+ while the runtime had NumPy 1.26.4.
+
+GAP marks an unmet known-gap probe. Its detail identifies whether library behavior or the environment blocked it.
 
 Run 4 (the algorithm-seam refactor) kept every run-3 PASS, turned the six XGBoost/LightGBM `feature_importances` probes into PASS, and the run-3 CatBoost Diamonds RMSE overflow did not recur. Its CatBoost `feature_importances` probes stayed GAP for a new reason: SynapseML also patches `JavaWrapper._call_java`, which pickles CatBoost's `EFstrType` enum argument. Fixed in 0.8.2.dev5 by routing CatBoost model calls through the compatibility shim too.
 
@@ -273,8 +286,8 @@ Findings not covered by the items above:
 
 Rerun `examples/databricks_all_algorithms_validation.py` after each step. A step is done when its GAP probes become PASS with no new FAIL, and the local suite still passes.
 
-1. **Multiclass metrics (item 5).** Add macro and weighted precision, recall, and F1 for `task="multiclass"`, and keep the binary formulas for binary only. This comes first because it silently reports wrong numbers today, including inside `search.optimize`. Done when the four multiclass metric probes match scikit-learn.
-2. **Pipeline persistence (items 4 and 7).** Give `Encoder` its own `save` / `load`, load model steps through the `Regressors` / `Classifiers` factories, and route pipeline IO through `smallaxe._fs`. This is a v1 acceptance criterion. Done when all three pipeline save/load probes pass and a reloaded pipeline predicts identically, locally and on `dbfs:/`.
+1. **Multiclass metrics (item 5).** Done 2026-10-24 UTC. Local tests and all four algorithms' Databricks multiclass metric and held-out validation-score comparisons pass against scikit-learn. Macro and weighted precision, recall, and F1 now score `task="multiclass"`, including inside `search.optimize`; binary scoring is unchanged.
+2. **Pipeline persistence (items 4 and 7).** Next: give `Encoder` its own `save` / `load`, load model steps through the `Regressors` / `Classifiers` factories, and route pipeline IO through `smallaxe._fs`. This is a v1 acceptance criterion. Done when all three pipeline save/load probes pass and a reloaded pipeline predicts identically, locally and on `dbfs:/`.
 3. **Unseen categories and row preservation (item 3).** Map unseen categories to an all-zeros vector or `__OTHER__` instead of crashing, and stop dropping rows at assembly: keep them, or fail loudly. Done when the unseen-category and null-row probes pass.
 4. **Pipeline owns its feature columns (item 4).** Build the model's features from `numerical_cols` and the Encoder's output columns, and ignore unlisted columns. Done when the ID-column probe passes.
 5. **Small correctness fixes.** Stop `fit(cache_strategy=...)` from unpersisting the caller's DataFrame (item 6), and implement `feature_importances` for XGBoost, LightGBM, and CatBoost.

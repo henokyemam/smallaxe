@@ -12,6 +12,7 @@ import sys
 from contextlib import contextmanager
 
 import pytest
+from pyspark.sql import functions as F
 
 from smallaxe.exceptions import DependencyError, ModelNotFittedError, ValidationError
 from smallaxe.training import (
@@ -165,6 +166,50 @@ class TestFitWiring:
         assert model._is_fitted
         assert isinstance(model._spark_model, FakeModel)
         assert model.metadata["task"] == "binary"
+
+
+@pytest.mark.parametrize("name", algorithm.names())
+@pytest.mark.parametrize("task", ["binary", "multiclass"])
+def test_classification_scoring_matches_task(monkeypatch, spark_session, name, task):
+    """All algorithm records use task-aware scoring without their JVM packages."""
+    sk = pytest.importorskip("sklearn.metrics")
+    record = algorithm.get(name)
+    install_fake_modules(monkeypatch, record)
+    model = Classifier(record, task)
+    labels = [0, 0, 0, 0, 1, 1, 2] if task == "multiclass" else [0, 0, 0, 0, 1, 1, 1]
+    predictions = [0, 0, 1, 1, 1, 2, 2] if task == "multiclass" else [0, 0, 1, 1, 1, 0, 1]
+    rows = [
+        (float(i), label, float(pred)) for i, (label, pred) in enumerate(zip(labels, predictions))
+    ]
+    df = spark_session.createDataFrame(rows, ["x", "actual", "expected"])
+
+    class PredictedModel:
+        def __init__(self):
+            self.calls = 0
+
+        def transform(self, frame):
+            self.calls += 1
+            return frame.withColumn(model.PREDICTION_COL, F.col("expected"))
+
+    model._feature_cols = ["x"]
+    model._spark_model = PredictedModel()
+    scores = model._evaluate(df, "actual")
+
+    assert model._spark_model.calls == 1
+    averages = ("macro", "weighted") if task == "multiclass" else ("binary",)
+    for average in averages:
+        for metric, reference in (
+            ("precision", sk.precision_score),
+            ("recall", sk.recall_score),
+            ("f1_score", sk.f1_score),
+        ):
+            expected = reference(labels, predictions, average=average, zero_division=0)
+            key = metric if average == "binary" else f"{metric}_{average}"
+            assert scores[key] == pytest.approx(expected)
+            if average == "macro":
+                assert scores[metric] == scores[key]
+    if task == "multiclass":
+        assert "auc_roc" not in scores
 
 
 class TestImportancesWiring:
