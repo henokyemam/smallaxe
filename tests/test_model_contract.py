@@ -10,6 +10,7 @@ import pytest
 from pyspark.ml.functions import vector_to_array
 
 from smallaxe.exceptions import ModelNotFittedError
+from smallaxe.metrics import TASK_METRICS
 from smallaxe.training import Classifier, Classifiers, Regressor, Regressors, algorithm
 
 TASKS = ("simple_regression", "binary", "multiclass")
@@ -78,10 +79,7 @@ class TestModelContract:
         model = _fit(name, task, frame, validation="train_test", test_size=0.25)
         scores = model.validation_scores
 
-        expected = (
-            {"rmse", "r2", "mae"} if task == "simple_regression" else {"accuracy", "f1_score"}
-        )
-        assert expected <= set(scores)
+        assert set(scores) - {"validation_type", "test_size"} == TASK_METRICS[task]
         assert scores["validation_type"] == "train_test"
         if task == "multiclass":
             for metric in ("precision", "recall", "f1_score"):

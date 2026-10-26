@@ -33,11 +33,12 @@ Example:
     >>> predictions = result.best_model.predict(df)
 """
 
-from typing import Any, Dict, List, Optional, Set
+from typing import Any, Dict, List, Optional
 
 from pyspark.sql import DataFrame
 
 from smallaxe.exceptions import DependencyError, ValidationError
+from smallaxe.metrics import TASK_METRICS
 from smallaxe.metrics.classification import MULTICLASS_AVERAGED_METRICS
 
 # hyperopt is an optional dependency. Guard the import so the module remains
@@ -72,12 +73,6 @@ MINIMIZE_METRICS = {
     "log_loss",
 }
 VALID_METRICS = MAXIMIZE_METRICS | MINIMIZE_METRICS
-
-# The scores each task's validation produces; a metric outside its task's set
-# would fail every trial only after fitting it.
-REGRESSION_METRICS = {"mse", "rmse", "mae", "r2", "mape"}
-BINARY_METRICS = {"accuracy", "precision", "recall", "f1_score", "auc_roc", "auc_pr", "log_loss"}
-MULTICLASS_METRICS = {"accuracy", "precision", "recall", "f1_score"} | MULTICLASS_AVERAGED_METRICS
 
 
 def _check_hyperopt_available() -> None:
@@ -148,15 +143,6 @@ def _default_metric(model: Any) -> str:
     if getattr(model, "task", None) == "binary":
         return "auc_roc"
     return "accuracy"
-
-
-def _task_metrics(model: Any) -> Set[str]:
-    """Return the metrics the model's validation scores contain for its task."""
-    if model.task_type == "regression":
-        return REGRESSION_METRICS
-    if getattr(model, "task", None) == "binary":
-        return BINARY_METRICS
-    return MULTICLASS_METRICS
 
 
 def _normalize_space(param_space: Dict[str, Any]) -> Dict[str, Any]:
@@ -323,7 +309,8 @@ def run(
         raise ValidationError(
             f"Invalid metric '{metric}'. Supported metrics are: {sorted(VALID_METRICS)}."
         )
-    task_metrics = _task_metrics(model)
+    # A metric the task's validation never produces would fail every trial only after fitting it.
+    task_metrics = TASK_METRICS[model.task]
     if metric not in task_metrics:
         raise ValidationError(
             f"Metric '{metric}' is not available for task '{model.task}'. "

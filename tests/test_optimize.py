@@ -3,6 +3,7 @@
 import pytest
 
 from smallaxe.exceptions import DependencyError, ValidationError
+from smallaxe.metrics import TASK_METRICS
 from smallaxe.search import optimize
 from smallaxe.search.optimize import SearchResult
 from smallaxe.training import Classifiers, Regressors
@@ -146,8 +147,7 @@ class TestOptimizeArgumentValidation:
             )
 
     def test_every_metric_belongs_to_a_task(self):
-        tasks = optimize.REGRESSION_METRICS | optimize.BINARY_METRICS | optimize.MULTICLASS_METRICS
-        assert tasks == optimize.VALID_METRICS
+        assert set().union(*TASK_METRICS.values()) == optimize.VALID_METRICS
 
     def test_validation_none_rejected(self, regression_df):
         model = Regressors.random_forest(seed=42)
