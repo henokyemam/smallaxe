@@ -8,7 +8,7 @@ Behavior that surprises users today, and the fix for each. `Goals.md` links here
 passing (`tests/test_validation.py`, `test_user_columns.py`, `test_missing_values.py`,
 `test_fit_behavior.py`) and Databricks validation runs 6 and 6b passing (see `Goals.md`):
 the null-row and caller-cache probes are PASS. Item 3's "Open" question is still open.
-Changelog entries are under 0.9.0. One finding from run 6: catboost-spark does not persist
+Changelog entries are under 0.10.0. One finding from run 6: catboost-spark does not persist
 `featuresCol`, so `load` now reads the vector column name from the loaded Spark model.
 
 Each item was reviewed on 2026-10-30 against the library's goal (scikit-learn simplicity,
