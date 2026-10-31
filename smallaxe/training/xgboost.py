@@ -45,6 +45,8 @@ ALGORITHM = Algorithm(
     },
     importances=_importances,
     dependency=Dependency("xgboost", "pip install smallaxe[xgboost]"),
+    # xgboost.spark trains with ``missing=nan`` and scores every row.
+    accepts_missing=True,
 )
 
 XGBOOST_AVAILABLE = ALGORITHM.available()

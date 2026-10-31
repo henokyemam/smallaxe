@@ -204,6 +204,8 @@ ALGORITHM = Algorithm(
     importances=_importances,
     dependency=Dependency("catboost_spark", _INSTALL_HINT),
     accepts_raw_categoricals=True,
+    # catboost-spark treats NaN as missing (``nan_mode=Min``).
+    accepts_missing=True,
     prepare=_ensure_synapseml_compat,
     fit_context=_training_dir,
 )

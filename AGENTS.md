@@ -118,9 +118,9 @@ Tests use a session-scoped `SparkSession` fixture (`local[2]` mode) defined in `
 ### Key Conventions
 
 - All model classes follow the `fit(df, label_col, ...)` / `predict(df)` API pattern
-- Feature columns are auto-inferred from numeric columns if not specified
+- Feature columns are auto-inferred from numeric and boolean columns if not specified; other columns are reported in one `UserWarning` and in `metadata["ignored_cols"]`
 - Validation strategies: `'none'`, `'train_test'`, `'kfold'`
-- Cache strategies: `'none'`, `'memory'`, `'disk'`
+- Cache strategies (per `fit` call): `None` (default: cache only when fit reads the data more than once), `'none'`, `'memory'`, `'disk'`. The global `set_cache_strategy` is deprecated and has no effect.
 - Task types: `'simple_regression'`, `'binary'`, `'multiclass'`
 - Optional algorithm deps are extras: `smallaxe[xgboost]`, `smallaxe[lightgbm]`, `smallaxe[catboost]`, `smallaxe[all]`
 

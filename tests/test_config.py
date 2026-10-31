@@ -107,28 +107,19 @@ class TestVerbosityContextManager:
 
 
 class TestSparkSession:
-    """Tests for Spark session configuration."""
+    """set_spark_session / get_spark_session are deprecated and warn."""
 
     def test_get_spark_session_default(self):
-        """Test that default spark session is None."""
-        assert smallaxe.get_spark_session() is None
+        with pytest.warns(DeprecationWarning):
+            assert smallaxe.get_spark_session() is None
 
-    def test_set_spark_session(self, spark_session):
-        """Test setting a Spark session."""
-        smallaxe.set_spark_session(spark_session)
-        assert smallaxe.get_spark_session() is spark_session
-
-    def test_set_spark_session_none(self):
-        """Test setting spark session to None."""
-        smallaxe.set_spark_session("mock_session")
-        smallaxe.set_spark_session(None)
-        assert smallaxe.get_spark_session() is None
-
-    def test_set_spark_session_accepts_any_object(self):
-        """Test that set_spark_session accepts any object (duck typing)."""
-        mock_session = object()
-        smallaxe.set_spark_session(mock_session)
-        assert smallaxe.get_spark_session() is mock_session
+    def test_set_spark_session_warns_and_stores(self, spark_session):
+        with pytest.warns(DeprecationWarning, match="no effect"):
+            smallaxe.set_spark_session(spark_session)
+        with pytest.warns(DeprecationWarning):
+            assert smallaxe.get_spark_session() is spark_session
+        with pytest.warns(DeprecationWarning):
+            smallaxe.set_spark_session(None)
 
 
 class TestSeed:
@@ -180,43 +171,24 @@ class TestSeed:
 
 
 class TestCacheStrategy:
-    """Tests for cache strategy configuration."""
+    """set_cache_strategy / get_cache_strategy are deprecated and warn."""
 
     def test_get_cache_strategy_default(self):
-        """Test that default cache strategy is 'auto'."""
-        assert smallaxe.get_cache_strategy() == "auto"
+        with pytest.warns(DeprecationWarning):
+            assert smallaxe.get_cache_strategy() == "auto"
 
-    def test_set_cache_strategy_auto(self):
-        """Test setting cache strategy to 'auto'."""
-        smallaxe.set_cache_strategy("never")  # Change first
-        smallaxe.set_cache_strategy("auto")
-        assert smallaxe.get_cache_strategy() == "auto"
-
-    def test_set_cache_strategy_always(self):
-        """Test setting cache strategy to 'always'."""
-        smallaxe.set_cache_strategy("always")
-        assert smallaxe.get_cache_strategy() == "always"
-
-    def test_set_cache_strategy_never(self):
-        """Test setting cache strategy to 'never'."""
-        smallaxe.set_cache_strategy("never")
-        assert smallaxe.get_cache_strategy() == "never"
+    def test_set_cache_strategy_warns_and_stores(self):
+        with pytest.warns(DeprecationWarning, match="no effect"):
+            smallaxe.set_cache_strategy("never")
+        with pytest.warns(DeprecationWarning):
+            assert smallaxe.get_cache_strategy() == "never"
 
     def test_set_cache_strategy_invalid_raises_error(self):
-        """Test that invalid cache strategy raises ConfigurationError."""
-        with pytest.raises(ConfigurationError) as exc_info:
+        with pytest.warns(DeprecationWarning), pytest.raises(ConfigurationError) as exc_info:
             smallaxe.set_cache_strategy("invalid")
 
         assert exc_info.value.setting == "cache_strategy"
         assert exc_info.value.value == "invalid"
-        assert "auto" in str(exc_info.value.allowed_values)
-        assert "always" in str(exc_info.value.allowed_values)
-        assert "never" in str(exc_info.value.allowed_values)
-
-    def test_set_cache_strategy_none_raises_error(self):
-        """Test that None cache strategy raises ConfigurationError."""
-        with pytest.raises(ConfigurationError):
-            smallaxe.set_cache_strategy(None)
 
 
 class TestConfigReset:
@@ -226,15 +198,16 @@ class TestConfigReset:
         """Test that reset restores all defaults."""
         # Change all settings
         smallaxe.set_verbosity("quiet")
-        smallaxe.set_cache_strategy("never")
         smallaxe.set_seed(42)
-        smallaxe.set_spark_session("mock")
+        with pytest.warns(DeprecationWarning):
+            smallaxe.set_cache_strategy("never")
+            smallaxe.set_spark_session("mock")
 
         # Reset
         _config.reset()
 
         # Verify defaults
         assert smallaxe.get_verbosity() == "normal"
-        assert smallaxe.get_cache_strategy() == "auto"
         assert smallaxe.get_seed() is None
-        assert smallaxe.get_spark_session() is None
+        assert _config._cache_strategy == "auto"
+        assert _config._spark_session is None

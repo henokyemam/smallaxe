@@ -191,7 +191,7 @@ class TestRecordTranslation:
         assert all(call in estimator.calls for call in setters)
         if record.cols is None:
             assert ("setLabelCol", "y") in estimator.calls
-            assert ("setFeaturesCol", "features") in estimator.calls
+            assert ("setFeaturesCol", Model.FEATURES_COL) in estimator.calls
             assert ("setPredictionCol", "prediction") in estimator.calls
 
 

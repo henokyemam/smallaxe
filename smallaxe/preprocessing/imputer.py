@@ -4,7 +4,7 @@ import json
 import os
 from typing import Dict, List, Optional, Union
 
-from pyspark.sql import DataFrame
+from pyspark.sql import Column, DataFrame
 from pyspark.sql import functions as F
 
 from smallaxe.exceptions import (
@@ -15,6 +15,11 @@ from smallaxe.exceptions import (
 
 VALID_NUMERICAL_STRATEGIES = {"mean", "median", "mode"}
 VALID_CATEGORICAL_STRATEGIES = {"most_frequent"}
+
+
+def _present(col: str) -> Column:
+    """``col`` with NaN turned into null, so aggregates skip both."""
+    return F.when(F.isnan(F.col(col)), None).otherwise(F.col(col))
 
 
 class Imputer:
@@ -154,8 +159,8 @@ class Imputer:
             for col in numerical_cols:
                 self._numerical_fill_values[col] = float(self._numerical_strategy)
         elif self._numerical_strategy == "mean":
-            # Compute mean for each column
-            agg_exprs = [F.mean(F.col(col)).alias(col) for col in numerical_cols]
+            # Compute mean for each column, ignoring NaN as well as null
+            agg_exprs = [F.mean(_present(col)).alias(col) for col in numerical_cols]
             stats = df.select(agg_exprs).first()
             if stats:
                 for col in numerical_cols:
@@ -164,7 +169,7 @@ class Imputer:
         elif self._numerical_strategy == "median":
             # Compute median for each column using approx_percentile
             for col in numerical_cols:
-                median_value = df.select(F.expr(f"percentile_approx({col}, 0.5)")).first()[0]
+                median_value = df.select(F.percentile_approx(_present(col), 0.5)).first()[0]
                 self._numerical_fill_values[col] = (
                     float(median_value) if median_value is not None else 0.0
                 )
@@ -172,7 +177,7 @@ class Imputer:
             # Compute mode for each column
             for col in numerical_cols:
                 mode_row = (
-                    df.filter(F.col(col).isNotNull())
+                    df.filter(_present(col).isNotNull())
                     .groupBy(col)
                     .count()
                     .orderBy(F.col("count").desc())
