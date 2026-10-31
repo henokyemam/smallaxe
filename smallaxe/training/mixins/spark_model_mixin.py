@@ -77,7 +77,7 @@ class SparkModelMixin(ABC):
     def _features_col_name(self) -> str:
         """The vector column the fitted Spark model reads.
 
-        Models saved before 0.9.0 read ``features``; everything else reads
+        Models saved before 0.10.0 read ``features``; everything else reads
         :attr:`FEATURES_COL`.
         """
         return getattr(self, "_features_col", None) or self.FEATURES_COL

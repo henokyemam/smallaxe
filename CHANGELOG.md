@@ -1,8 +1,9 @@
 # Changelog
 
-## 0.9.0 (2026-10-31)
+## 0.10.0 (2026-10-31)
 
-A minor release rather than 0.8.2: multiclass validation scores, fold assignment, row handling, and the kept model all change meaning. See each entry.
+A minor release rather than 0.9.1: fold assignment, row handling, the kept model, and the
+default caching all change behavior. See each entry.
 
 ### Changed
 
@@ -46,6 +47,22 @@ A minor release rather than 0.8.2: multiclass validation scores, fold assignment
   `metadata["ignored_cols"]` record the outcome. `optimize.run` infers once and passes
   explicit `feature_cols` to every trial.
 - `optimize.run(verbose=None)` follows the global verbosity: `quiet` hides the progress bar.
+
+### Deprecated
+
+- `set_cache_strategy` / `get_cache_strategy` and `set_spark_session` /
+  `get_spark_session` warn and have no effect; they will be removed in 1.0. Caching is
+  set per `fit` call, and the Spark session comes from the DataFrame.
+
+### Fixed
+
+- `Imputer` ignores NaN when computing the mean, median, or mode, so it no longer fills
+  nulls with NaN.
+
+## 0.9.0 (2026-10-26)
+
+### Changed
+
 - **Multiclass `validation_scores` now use macro averages.** For `task="multiclass"`,
   `precision`, `recall`, and `f1_score` (and their k-fold `mean_` / `std_` keys) were
   class 1's one-vs-rest scores in 0.8.x. They are now macro averages. Models saved by
@@ -73,9 +90,6 @@ A minor release rather than 0.8.2: multiclass validation scores, fold assignment
 
 ### Deprecated
 
-- `set_cache_strategy` / `get_cache_strategy` and `set_spark_session` /
-  `get_spark_session` warn and have no effect; they will be removed in 1.0. Caching is
-  set per `fit` call, and the Spark session comes from the DataFrame.
 - `XGBoostRegressor`, `XGBoostClassifier`, `LightGBMRegressor`, `LightGBMClassifier`,
   `CatBoostRegressor`, `CatBoostClassifier`, `RandomForestRegressor`, and
   `RandomForestClassifier` warn on construction and will be removed in 1.0. Use the
@@ -90,6 +104,4 @@ A minor release rather than 0.8.2: multiclass validation scores, fold assignment
 
 ### Fixed
 
-- `Imputer` ignores NaN when computing the mean, median, or mode, so it no longer fills
-  nulls with NaN.
 - CatBoost model calls no longer break when SynapseML patches `JavaWrapper._call_java`.

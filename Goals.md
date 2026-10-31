@@ -304,7 +304,7 @@ A review on 2026-10-30 found seven behaviors that give wrong or surprising resul
 6. **Three of four global settings have no effect.** Wire `set_seed` through splits, estimators, and `optimize.run`; wire verbosity into search progress; deprecate `set_cache_strategy` and `set_spark_session` for removal at 1.0.
 7. **Feature inference skips boolean and string columns silently.** Include booleans, warn once per `fit` naming the ignored columns, infer once per search, and record `ignored_cols` in the metadata.
 
-Items 1 to 4, 6, and 7 change trained models or scores; item 5 only changes speed and memory. Every item gets a `CHANGELOG.md` entry under 0.9.0. Items 1 and 2 need no Databricks run; their "Done when" checks are local tests. After item 3 the null-row probe should turn PASS, and after item 5 the caller-cache probe should. Items 4 and 5 both touch `optimize.run` trials; land them together or in sequence, not in parallel.
+Items 1 to 4, 6, and 7 change trained models or scores; item 5 only changes speed and memory. Every item gets a `CHANGELOG.md` entry under 0.10.0. Items 1 and 2 need no Databricks run; their "Done when" checks are local tests. After item 3 the null-row probe should turn PASS, and after item 5 the caller-cache probe should. Items 4 and 5 both touch `optimize.run` trials; land them together or in sequence, not in parallel.
 
 ### Main list
 

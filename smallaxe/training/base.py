@@ -904,7 +904,7 @@ class BaseModel(
         self._task = state.get("task", "simple_regression")
         self._params = state.get("params", {})
         self._feature_cols = state.get("feature_cols", [])
-        # Artifacts saved before 0.9.0 read the vector from a column named "features".
+        # Artifacts saved before 0.10.0 read the vector from a column named "features".
         self._features_col = state.get("features_col") or "features"
         self._label_col = state.get("label_col")
         self._exclude_cols = state.get("exclude_cols", [])
