@@ -83,6 +83,31 @@ def _write_legacy_artifact(path, state=LEGACY_STATE):
     return str(path)
 
 
+class TestLoadFeaturesCol:
+    def test_load_reads_the_features_col_from_the_spark_model(
+        self, monkeypatch, fake_xgboost, df, tmp_path
+    ):
+        """catboost-spark drops featuresCol on save, so the loaded model names the column."""
+        model = Regressor("xgboost")
+        model.fit(df, label_col="y", feature_cols=["a", "b"])
+        model.save(str(tmp_path / "m"))
+
+        monkeypatch.setattr(FakeModel, "getFeaturesCol", lambda self: "features", raising=False)
+        loaded = Regressor.load(str(tmp_path / "m"))
+
+        assert loaded._features_col == "features"
+        assert loaded._assemble_features(df, ["a", "b"]).columns[-1] == "features"
+
+    def test_load_keeps_the_recorded_name_without_a_getter(self, fake_xgboost, df, tmp_path):
+        model = Regressor("xgboost")
+        model.fit(df, label_col="y", feature_cols=["a", "b"])
+        model.save(str(tmp_path / "m"))
+
+        loaded = Regressor.load(str(tmp_path / "m"))
+
+        assert loaded._features_col == Model.FEATURES_COL
+
+
 class TestFitWiring:
     def test_fit_assembles_features_and_builds_the_estimator(self, monkeypatch, df):
         record = _record()
@@ -93,10 +118,10 @@ class TestFitWiring:
 
         estimator = model._spark_model.estimator
         assert estimator.kwargs["labelCol"] == "y"
-        assert estimator.kwargs["featuresCol"] == "features"
+        assert estimator.kwargs["featuresCol"] == Model.FEATURES_COL
         assert "probabilityCol" not in estimator.kwargs
         assert ("setSeed", 5) in estimator.calls
-        assert "features" in estimator.fitted_on.columns
+        assert Model.FEATURES_COL in estimator.fitted_on.columns
         assert model._feature_cols == ["a", "b"]
         assert model._label_col == "y"
 

@@ -483,7 +483,7 @@ class TestSparkModelMixin:
             feature_cols=["age", "income"],
         )
 
-        assert "features" in result.columns
+        assert mixin.FEATURES_COL in result.columns
 
     def test_assemble_features_custom_output_col(self, regression_df):
         """Test _assemble_features with custom output column."""
@@ -496,14 +496,14 @@ class TestSparkModelMixin:
 
         assert "my_features" in result.columns
 
-    def test_assemble_features_idempotent(self, regression_df):
-        """Test _assemble_features doesn't duplicate features column."""
+    def test_assemble_features_replaces_an_existing_vector(self, regression_df):
+        """A column with the output name is never reused; it is assembled again."""
         mixin = ConcreteSparkModelMixin()
-        result1 = mixin._assemble_features(regression_df, ["age", "income"])
+        result1 = mixin._assemble_features(regression_df, ["age"])
         result2 = mixin._assemble_features(result1, ["age", "income"])
 
-        # Should only have one features column
-        assert result2.columns.count("features") == 1
+        assert result2.columns.count(mixin.FEATURES_COL) == 1
+        assert result2.select(mixin.FEATURES_COL).first()[0].size == 2
 
     def test_fit_spark_model(self, regression_df):
         """Test _fit_spark_model trains a model."""
@@ -517,8 +517,8 @@ class TestSparkModelMixin:
         assert model is not None
         assert mixin._spark_model is not None
 
-    def test_fit_spark_model_skips_null_feature_rows(self, spark_session):
-        """Test model fitting preserves the existing null-feature skip behavior."""
+    def test_fit_spark_model_rejects_null_feature_rows(self, spark_session):
+        """Assembly uses handleInvalid='error' by default: rows are never dropped."""
         df = spark_session.createDataFrame(
             [
                 (1, 20.0, 100.0),
@@ -529,14 +529,8 @@ class TestSparkModelMixin:
         )
 
         mixin = ConcreteSparkModelMixin()
-        model = mixin._fit_spark_model(
-            df,
-            label_col="target",
-            feature_cols=["age"],
-        )
-
-        assert model is not None
-        assert mixin._spark_model is not None
+        with pytest.raises(Exception, match="null|NaN|invalid"):
+            mixin._fit_spark_model(df, label_col="target", feature_cols=["age"])
 
     def test_predict_spark_model(self, regression_df):
         """Test _predict_spark_model generates predictions."""

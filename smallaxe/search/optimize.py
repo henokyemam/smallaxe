@@ -37,9 +37,11 @@ from typing import Any, Dict, List, Optional
 
 from pyspark.sql import DataFrame
 
+import smallaxe
 from smallaxe.exceptions import DependencyError, ValidationError
 from smallaxe.metrics import TASK_METRICS
 from smallaxe.metrics.classification import MULTICLASS_AVERAGED_METRICS
+from smallaxe.training.base import check_training_data, infer_feature_cols, warn_ignored_cols
 
 # hyperopt is an optional dependency. Guard the import so the module remains
 # importable (and the rest of smallaxe keeps working) when it is absent.
@@ -231,9 +233,10 @@ def run(
     feature_cols: Optional[List[str]] = None,
     exclude_cols: Optional[List[str]] = None,
     stratified: Optional[bool] = None,
+    fold_key: Optional[str] = None,
     seed: Optional[int] = None,
     refit: bool = True,
-    verbose: bool = True,
+    verbose: Optional[bool] = None,
     early_stopping: bool = False,
     early_stopping_rounds: int = 10,
 ) -> SearchResult:
@@ -272,11 +275,15 @@ def run(
         exclude_cols: Columns to exclude from inferred features.
         stratified: Whether to stratify splits. If None, defaults to True for
             classification and False for regression (matching ``fit``).
-        seed: Seed for hyperopt's sampler, for reproducible searches. Note that
-            data-split reproducibility is governed by ``smallaxe.set_seed``.
+        fold_key: Column whose value alone decides a row's fold or split, as in
+            ``fit``. Every trial scores on the same folds either way.
+        seed: Seed for hyperopt's sampler and for the data splits. Defaults to
+            the global ``smallaxe.set_seed`` value; with neither, the search is
+            unseeded. Every trial scores on the same folds either way.
         refit: If True (default), refit a final model on the full dataset with
             the best params and expose it as ``best_model``.
-        verbose: If True, show hyperopt's progress bar.
+        verbose: If True, show hyperopt's progress bar. Defaults to the global
+            verbosity: quiet hides it.
         early_stopping: If True, stop early when no improvement is seen for
             ``early_stopping_rounds`` consecutive trials.
         early_stopping_rounds: Patience (in trials) for early stopping.
@@ -321,10 +328,29 @@ def run(
     type_reference = model.default_params
     maximize = metric in MAXIMIZE_METRICS
 
+    # Infer features once and check the data once, so bad data fails here rather
+    # than in every trial, and the inference warning is given at most once.
+    if feature_cols is None:
+        feature_cols, ignored = infer_feature_cols(dataframe, label_col, exclude_cols or [])
+        warn_ignored_cols(feature_cols, ignored, stacklevel=2)
+    model._validate_columns(dataframe, label_col, feature_cols)
+    check_training_data(dataframe, label_col, feature_cols, model._accepts_missing())
+
+    if seed is None:
+        seed = smallaxe.get_seed()
+    if verbose is None:
+        verbose = smallaxe.get_verbosity() != "quiet"
+
     def _build_model(overrides: Dict[str, Any]) -> Any:
         """Create a fresh model with base params overridden by ``overrides``."""
         candidate = model.clone()
         candidate.set_param(overrides)
+        if (
+            seed is not None
+            and "seed" in type_reference
+            and candidate.get_params().get("seed") is None
+        ):
+            candidate.set_param({"seed": seed})
         return candidate
 
     def objective(sampled: Dict[str, Any]) -> Dict[str, Any]:
@@ -340,6 +366,9 @@ def run(
                 n_folds=n_folds,
                 test_size=test_size,
                 stratified=stratified,
+                fold_key=fold_key,
+                cache_strategy="none",
+                refit=False,
             )
             score = _extract_metric(trial_model.validation_scores, metric, validation)
         except Exception as exc:  # noqa: BLE001 - a bad config must not kill the search
@@ -373,12 +402,17 @@ def run(
     if early_stopping:
         fmin_kwargs["early_stop_fn"] = no_progress_loss(early_stopping_rounds)
 
+    # Persist once for the whole search; each trial runs with cache_strategy="none".
+    dataframe, persisted = model._apply_cache_strategy(dataframe, None, "kfold", True)
     try:
         fmin(**fmin_kwargs)
     except AllTrialsFailed:
         # Every trial errored; the friendly "all trials failed" guard below
         # surfaces the per-trial error messages from trials_history.
         pass
+    finally:
+        if persisted:
+            dataframe.unpersist()
 
     # --- Collect trial history in submission order. ---
     trials_history: List[Dict[str, Any]] = []

@@ -94,6 +94,9 @@ class Algorithm:
         dependency: Optional package; ``None`` for algorithms shipped with PySpark.
         accepts_raw_categoricals: Whether the estimator handles string columns itself,
             so a Pipeline need not add an Encoder.
+        accepts_missing: Whether the estimator treats NaN as a missing value. If so,
+            null and NaN features are kept and handed to it as NaN; otherwise ``fit``
+            rejects them with a ``ValidationError``.
         prepare: Runs before every fit and load (CatBoost's JVM compatibility shim).
         fit_context: See :data:`FitContext` (CatBoost's temporary training directory).
     """
@@ -107,6 +110,7 @@ class Algorithm:
     importances: Optional[Importances] = None
     dependency: Optional[Dependency] = None
     accepts_raw_categoricals: bool = False
+    accepts_missing: bool = False
     prepare: Optional[Callable[[], None]] = None
     fit_context: Optional[FitContext] = None
 
