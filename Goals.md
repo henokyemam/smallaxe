@@ -255,6 +255,10 @@ For each algorithm it covers the full Pipeline, row preservation, metrics cross-
 | 3 | 0.8.0 + fixes above | fixed 2 workers | 62 | 21 | 1 | 0 |
 | 4 | 0.8.2.dev4 (`deepen-algorithm-seam`, 2026-10-05) | fixed 2 workers | 69 | 15 | 0 | 0 |
 | 5 (checkpoint-combined, two executions) | 0.8.2.dev9 (`bcd19f7`, 2026-10-24 UTC) | fixed 2 workers | 76 | 8 | 0 | 0 |
+| 6 | 0.8.2.dev18 (`goals` working tree, GOTCHAS 1–7, 2026-10-31 UTC) | fixed 2 workers | 80 | 5 | 3 | 0 |
+| 6b (persistence only) | 0.8.2.dev19 (run 6 + CatBoost load fix) | fixed 2 workers | 24 | 0 | 0 | 0 |
+
+Run 6 validated the seven `GOTCHAS.md` fixes with 88 checks. The three FAILs were CatBoost save/load: catboost-spark does not persist `featuresCol`, so a reloaded model looked for the old `features` column after item 2 renamed the vector. Fixed in 0.8.2.dev19 by reading `featuresCol` from the loaded Spark model; run 6b repeated the fit and all 12 save/load checks and they all pass. Probes that moved from GAP to PASS: null rows (Random Forest `fit` raises `ValidationError` naming `carat (2123)`; XGBoost, LightGBM, and CatBoost predict all 10,892 rows with no null predictions; a null label raises), unseen category at predict time, and the caller-cache probe under both an explicit and the default `cache_strategy`. A new probe confirms a null label is rejected. The five remaining GAPs are the three pipeline save/load probes (step 2), CatBoost native categoricals (step 7), and the unlisted string ID column (step 4). The multiclass held-out comparison now fits with `refit=False` and reproduces the holdout from `metadata["split_seed"]`, because by default the kept model is retrained on all rows.
 
 Run 5 validated wheel `0.8.2.dev9` from commit `bcd19f7d99b2236d3fda78768cf34bdfeec2c535`, with source hashes verified. The first execution reached its two-hour timeout after 75 passing checks and no failures. A checkpoint continuation reused those exact 75 rows with `source_run_id` provenance and executed the nine unfinished checks. The original rows were independently verified as unaltered. The combined report contains all 84 checks: 76 PASS, 8 known GAP, 0 FAIL, 0 BLOCKED, 0 SKIP.
 
@@ -286,14 +290,32 @@ Findings not covered by the items above:
 
 Rerun `examples/databricks_all_algorithms_validation.py` after each step. A step is done when its GAP probes become PASS with no new FAIL, and the local suite still passes.
 
+### Next: `GOTCHAS.md` items 1–7, in order, before step 2
+
+**Status (2026-10-31):** all seven implemented on `goals` and validated on Databricks (runs 6 and 6b above): the null-row, unseen-category, and caller-cache probes are PASS, with no FAIL. Still open: the two "Open" questions in items 3 and 7.
+
+A review on 2026-10-30 found seven behaviors that give wrong or surprising results today. They are specified in [`GOTCHAS.md`](GOTCHAS.md), each with a "Do", a "Breaking" note, and a "Done when" check. The numbering below is the `GOTCHAS.md` numbering. Steps 3 and 5 of the main list change as noted.
+
+1. **Folds and splits that change when Spark reads the source again.** Assign folds and the train/test split from `hash(<row content>, seed)`, with an optional `fold_key=` for entity-level grouping. First because overlapping folds make every cross-validation score too optimistic, and `optimize` then compares noise.
+2. **A user `features` column replaces the model's features.** Assemble into an internal column name and leave user columns named `features`, `prediction`, `probability`, or `rawPrediction` in the output.
+3. **Rows with null or NaN features are dropped.** Add `accepts_missing` to the `Algorithm` record (true for the three boosting algorithms, false for Random Forest), replace `handleInvalid="skip"` with `keep` or `error`, check the data once at the top of `fit` and `optimize.run`, and make `Imputer` ignore NaN. Replaces the row-preservation half of step 3.
+4. **`train_test` keeps the 80% model.** Add `refit=True` so both validation modes keep a model trained on all rows; search trials use `refit=False`. The true-holdout workflow needs the split utilities and `evaluate()` from steps 6 and 9.
+5. **`fit` uncaches the caller's DataFrame, and k-fold rereads the source.** Detect an existing cache with `storageLevel`, unpersist only what smallaxe persisted, default to `cache_strategy=None` (cache only when `fit` reads the data more than once), and persist once around a search. Replaces the caller-cache half of step 5.
+6. **Three of four global settings have no effect.** Wire `set_seed` through splits, estimators, and `optimize.run`; wire verbosity into search progress; deprecate `set_cache_strategy` and `set_spark_session` for removal at 1.0.
+7. **Feature inference skips boolean and string columns silently.** Include booleans, warn once per `fit` naming the ignored columns, infer once per search, and record `ignored_cols` in the metadata.
+
+Items 1 to 4, 6, and 7 change trained models or scores; item 5 only changes speed and memory. Every item gets a `CHANGELOG.md` entry under 0.9.0. Items 1 and 2 need no Databricks run; their "Done when" checks are local tests. After item 3 the null-row probe should turn PASS, and after item 5 the caller-cache probe should. Items 4 and 5 both touch `optimize.run` trials; land them together or in sequence, not in parallel.
+
+### Main list
+
 1. **Multiclass metrics (item 5).** Done 2026-10-24 UTC. Local tests and all four algorithms' Databricks multiclass metric and held-out validation-score comparisons pass against scikit-learn. Macro and weighted precision, recall, and F1 now score `task="multiclass"`, including inside `search.optimize`; binary scoring is unchanged.
-2. **Pipeline persistence (items 4 and 7).** Next: give `Encoder` its own `save` / `load`, load model steps through the `Regressors` / `Classifiers` factories, and route pipeline IO through `smallaxe._fs`. This is a v1 acceptance criterion. Done when all three pipeline save/load probes pass and a reloaded pipeline predicts identically, locally and on `dbfs:/`.
-3. **Unseen categories and row preservation (item 3).** Map unseen categories to an all-zeros vector or `__OTHER__` instead of crashing, and stop dropping rows at assembly: keep them, or fail loudly. Done when the unseen-category and null-row probes pass.
-4. **Pipeline owns its feature columns (item 4).** Build the model's features from `numerical_cols` and the Encoder's output columns, and ignore unlisted columns. Done when the ID-column probe passes.
-5. **Small correctness fixes.** Stop `fit(cache_strategy=...)` from unpersisting the caller's DataFrame (item 6), and implement `feature_importances` for XGBoost, LightGBM, and CatBoost.
-6. **Evaluation API (item 5).** Model- and pipeline-level `evaluate()`, plus a confusion matrix.
-7. **CatBoost categoricals.** Either implement native categorical handling or remove the Pipeline's CatBoost exemption from the Encoder requirement.
-8. **Databricks ergonomics.** An option to suppress MLflow autologging during internal fits, a warning when CatBoost trains on an autoscaling cluster, and hardening of the SynapseML/CatBoost shim for the reverse import order.
+2. **Pipeline persistence (items 4 and 7).** After `GOTCHAS.md`: one `save(obj, path)` / `load(path)` for models, Imputer, Scaler, Encoder, and Pipeline (Architecture Deepening 2), so `Encoder` gets its own `save` / `load`, model steps load through the `Regressors` / `Classifiers` factories, and all pipeline IO goes through `smallaxe._fs`. This is a v1 acceptance criterion. Done when all three pipeline save/load probes pass and a reloaded pipeline predicts identically, locally and on `dbfs:/`.
+3. **Unseen categories (item 3).** The Encoder reserves an unknown index at fit time and builds its one-hot columns from its own mapping (Architecture Deepening 4), so an unseen category maps to that index instead of crashing one-hot encoding or turning into a null under label encoding. Row preservation moved to `GOTCHAS.md` item 3. Done when the unseen-category probe passes, and label encoding an unseen category never produces a null.
+4. **Pipeline owns its feature columns (item 4).** Build the model's features from `numerical_cols` and the Encoder's output columns, ignore unlisted columns, and dispatch on the `Algorithm` record's `accepts_raw_categoricals` instead of `type(step).__name__`. Done when the ID-column probe passes.
+5. **Small correctness fixes.** Both halves have moved. `feature_importances` for XGBoost, LightGBM, and CatBoost shipped with the algorithm seam (validation run 4, 0.8.2.dev5). The caller-cache fix is `GOTCHAS.md` item 5. Nothing remains under this step.
+6. **Evaluation API (item 5).** Model- and pipeline-level `evaluate()`, plus a confusion matrix. Together with step 9 this gives the holdout workflow that `GOTCHAS.md` item 4 points users to: split, `fit(train, validation="none")`, `evaluate(test)`.
+7. **CatBoost categoricals.** The `Algorithm` record already carries `accepts_raw_categoricals` (false for every algorithm today). Either implement native categorical handling for CatBoost and set it true, or keep it false and remove the Pipeline's CatBoost exemption from the Encoder requirement. Removing the exemption is the smaller change and is enough for v1.
+8. **Databricks ergonomics.** An option to suppress MLflow autologging during internal fits, a warning when CatBoost trains on an autoscaling cluster, hardening of the SynapseML/CatBoost shim for the reverse import order, and model IO that works on Spark Connect and serverless sessions (`_fs._spark()` calls `spark._jvm`, which they do not have).
 9. **Validation module and artifact layout (items 6 and 7).** Public split utilities, a versioned artifact layout, and `load_model` / `load_pipeline`.
 10. **AutomatedTraining (item 8), then visualization.**
 11. **Spark 4 support.** Relax `pyspark<4.0` once RF, XGBoost, and CatBoost (`catboost-spark_4.0_2.13`) pass the validation notebook on DBR 17.x. LightGBM stays Spark 3.5-only until SynapseML ships a Spark 4 build.
@@ -325,13 +347,13 @@ An architecture review traced most of the Databricks gaps to six structural prob
    - Today: three Spark stages apply three null policies (`error`, `skip`, `keep`). So onehot crashes on new categories, and label encoding drops rows.
    - Target: the Encoder always reserves an unknown index and builds one-hot columns from its own mapping, and one shared assembly step carries one null policy.
    - Same goal as step 3. It also removes the unpicklable object behind 2.
-5. **Task-aware scoring in one place.**
+5. **Task-aware scoring in one place. Implemented 2026-10-24 on `goals`: `smallaxe.metrics` defines the scores each task produces once, and `fit` and `optimize` both read them. `evaluate()` is step 6.**
    - Today: the metric functions are correct, but `base.py` calls the binary formulas for every task. `search/optimize.py` keeps its own copy of metric names, directions, and the k-fold key format.
    - Target: `evaluate(task, df)` returns scores that both `fit` and `optimize` read.
    - Same goal as step 1, extended to `optimize`.
 6. **Fold the five mixins into the model module.**
    - Today: `BaseModel` is their only consumer, and they share state through implicit attributes, so following `fit` means reading seven files.
-   - Mostly falls out of 1 and 2. The caller's-cache fix (step 5) is a few lines on its own.
+   - Mostly falls out of 1 and 2. The caller's-cache fix is `GOTCHAS.md` item 5.
 
 ## v1 Acceptance Criteria
 
@@ -347,6 +369,8 @@ Status (2026-09-30):
 - **Met:** the Random Forest workflow in under 20 lines; the same workflow for XGBoost, LightGBM, and CatBoost, on the runtime and cluster described above; actionable install errors; README advertises only implemented APIs.
 - **Met for binary and regression only:** clear metrics and stable output schemas. Multiclass metrics are wrong (item 5).
 - **Not met:** full pipeline save/load (item 4); dependency-enabled CI jobs, which the Databricks validation notebook currently stands in for.
+
+Status (2026-10-30): multiclass metrics are now met (validation run 5). Still not met: full pipeline save/load, and dependency-enabled CI jobs. The `GOTCHAS.md` items are prerequisites for "stable output schemas": today `predict` can return fewer rows than it was given, and `train_test` keeps a model the scores do not describe.
 
 ## Later Goals
 

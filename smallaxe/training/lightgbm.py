@@ -75,6 +75,8 @@ ALGORITHM = Algorithm(
         "multiclass": {"objective": "multiclass"},
     },
     importances=_importances,
+    # SynapseML LightGBM defaults to ``useMissing=true``.
+    accepts_missing=True,
     dependency=Dependency(
         "synapseml",
         "pip install smallaxe[lightgbm] and configure Spark with the SynapseML package",

@@ -3,11 +3,13 @@
 import os
 import warnings
 from contextlib import nullcontext
-from typing import Any, Dict, List, Literal, Mapping, Optional, Union
+from typing import Any, Dict, List, Literal, Mapping, Optional, Tuple, Union
 
 from pyspark.sql import DataFrame
-from pyspark.sql.types import NumericType
+from pyspark.sql import functions as F
+from pyspark.sql.types import BooleanType, DoubleType, FloatType, NumericType
 
+import smallaxe
 from smallaxe import _fs
 from smallaxe.exceptions import (
     ColumnNotFoundError,
@@ -23,6 +25,111 @@ from smallaxe.training.mixins import (
     SparkModelMixin,
     ValidationMixin,
 )
+from smallaxe.training.mixins.validation_mixin import resolve_split_seed
+
+
+def infer_feature_cols(
+    df: DataFrame, label_col: str, exclude_cols: List[str]
+) -> Tuple[List[str], Dict[str, str]]:
+    """Numeric and boolean columns as features; everything else is reported.
+
+    Returns:
+        ``(feature_cols, ignored)`` where ``ignored`` maps each column that is not
+        a feature, other than the label and ``exclude_cols``, to its type name.
+    """
+    excluded = set(exclude_cols) | {label_col}
+    feature_cols: List[str] = []
+    ignored: Dict[str, str] = {}
+    for field in df.schema.fields:
+        if field.name in excluded:
+            continue
+        if isinstance(field.dataType, (NumericType, BooleanType)):
+            feature_cols.append(field.name)
+        else:
+            ignored[field.name] = field.dataType.simpleString()
+    return feature_cols, ignored
+
+
+def warn_ignored_cols(feature_cols: List[str], ignored: Dict[str, str], stacklevel: int) -> None:
+    """One ``UserWarning`` naming the columns feature inference left out."""
+    if not ignored:
+        return
+    listed = ", ".join(f"{name} ({kind})" for name, kind in ignored.items())
+    warnings.warn(
+        f"Feature inference used {feature_cols} and ignored non-numeric columns: {listed}. "
+        "Encode them, or list them in exclude_cols to silence this warning.",
+        UserWarning,
+        stacklevel=stacklevel,
+    )
+
+
+def check_training_data(
+    df: DataFrame,
+    label_col: str,
+    feature_cols: List[str],
+    accepts_missing: bool,
+) -> Dict[str, Any]:
+    """Count rows, missing features, and null labels in one pass, and reject bad data.
+
+    Args:
+        df: Training DataFrame.
+        label_col: Label column; null labels are always an error.
+        feature_cols: Feature columns to inspect.
+        accepts_missing: Whether the model treats NaN as missing. If not, null, NaN,
+            and infinite features are errors and the user is told to add an Imputer.
+
+    Returns:
+        ``{"n_samples": int, "missing_counts": {col: int}}``. ``missing_counts``
+        counts null and NaN per feature column.
+
+    Raises:
+        ValidationError: On null labels, or on missing or infinite features the
+            model cannot accept.
+    """
+    types = {field.name: field.dataType for field in df.schema.fields}
+
+    def is_float(col: str) -> bool:
+        return isinstance(types.get(col), (FloatType, DoubleType))
+
+    aggregates = [F.count(F.lit(1)).alias("__n__")]
+    aggregates.append(F.sum(F.col(label_col).isNull().cast("long")).alias("__label_null__"))
+    for col in feature_cols:
+        missing = F.col(col).isNull()
+        if is_float(col):
+            missing = missing | F.isnan(F.col(col))
+        aggregates.append(F.sum(missing.cast("long")).alias(f"__missing__{col}"))
+        if is_float(col) and not accepts_missing:
+            infinite = F.abs(F.col(col)) == float("inf")
+            aggregates.append(F.sum(infinite.cast("long")).alias(f"__inf__{col}"))
+
+    row = df.select(*aggregates).first()
+    assert row is not None  # an aggregate without GROUP BY always yields one row
+    n_samples = int(row["__n__"])
+    missing_counts = {col: int(row[f"__missing__{col}"] or 0) for col in feature_cols}
+
+    if row["__label_null__"]:
+        raise ValidationError(
+            f"Label column '{label_col}' has {int(row['__label_null__'])} null values. "
+            "Drop or fill those rows before fitting."
+        )
+
+    if not accepts_missing:
+        bad = [col for col, count in missing_counts.items() if count]
+        if bad:
+            detail = ", ".join(f"{col} ({missing_counts[col]})" for col in bad)
+            raise ValidationError(
+                f"Feature columns have null or NaN values: {detail}. This algorithm "
+                "cannot treat them as missing. Fill them first, for example with "
+                "smallaxe.preprocessing.Imputer."
+            )
+        infinite_cols = [col for col in feature_cols if is_float(col) and row[f"__inf__{col}"]]
+        if infinite_cols:
+            detail = ", ".join(f"{col} ({int(row[f'__inf__{col}'])})" for col in infinite_cols)
+            raise ValidationError(
+                f"Feature columns have infinite values: {detail}. Replace them before fitting."
+            )
+
+    return {"n_samples": n_samples, "missing_counts": missing_counts}
 
 
 class BaseModel(
@@ -61,8 +168,8 @@ class BaseModel(
     # Valid validation strategies
     VALID_VALIDATION = {"none", "train_test", "kfold"}
 
-    # Valid cache strategies
-    VALID_CACHE_STRATEGIES = {"none", "memory", "disk"}
+    # Valid cache strategies; None means "cache when fit reads the data more than once"
+    VALID_CACHE_STRATEGIES = {None, "none", "memory", "disk"}
 
     def __init__(self, task: str) -> None:
         """Initialize the base model.
@@ -80,6 +187,7 @@ class BaseModel(
         self._task = task
         self._params: Dict[str, Any] = {}
         self._spark_model = None
+        self._features_col: str = self.FEATURES_COL
         self._feature_cols: List[str] = []
         self._label_col: Optional[str] = None
         self._exclude_cols: List[str] = []
@@ -129,7 +237,9 @@ class BaseModel(
         test_size: float = 0.2,
         n_folds: int = 5,
         stratified: Optional[bool] = None,
-        cache_strategy: str = "none",
+        cache_strategy: Optional[str] = None,
+        fold_key: Optional[str] = None,
+        refit: bool = True,
     ) -> "BaseModel":
         """Fit the model to training data.
 
@@ -137,7 +247,8 @@ class BaseModel(
             df: PySpark DataFrame containing training data.
             label_col: Name of the label/target column.
             feature_cols: List of feature column names. If None, uses all
-                numeric columns except label_col and exclude_cols.
+                numeric and boolean columns except label_col and exclude_cols,
+                and warns once about the columns it leaves out.
             exclude_cols: List of columns to exclude from features.
                 Typically includes ID columns, timestamps, etc.
             validation: Validation strategy. Options:
@@ -149,10 +260,21 @@ class BaseModel(
             n_folds: Number of folds when validation='kfold'. Default is 5.
             stratified: Whether to use stratified splitting. If None, uses
                 stratified for classification tasks and non-stratified for regression.
-            cache_strategy: DataFrame caching strategy. Options:
-                - 'none': No caching (default)
+            cache_strategy: DataFrame caching for the duration of fit. Options:
+                - None (default): persist with MEMORY_AND_DISK when fit reads the
+                  data more than once (k-fold, or train_test with refit) and the
+                  DataFrame is not already cached
+                - 'none': Never cache
                 - 'memory': Cache in memory (MEMORY_ONLY)
                 - 'disk': Cache with disk spillover (MEMORY_AND_DISK)
+                A DataFrame the caller already cached is left as it is.
+            fold_key: Column whose value alone decides a row's fold or split, so all
+                rows of one entity (a customer, a session) validate together. By
+                default the whole row's content is hashed.
+            refit: If True (default), the kept model is trained on all rows after
+                validation scored it. If False, the kept model is the one from the
+                last training split: the train split for 'train_test', the last
+                fold for 'kfold'. Use False to save a training pass in a search.
 
         Returns:
             self: The fitted model instance.
@@ -160,6 +282,8 @@ class BaseModel(
         Raises:
             ValidationError: If validation strategy is invalid.
             ValidationError: If cache_strategy is invalid.
+            ValidationError: If a feature has missing values the algorithm cannot
+                accept, or the label has nulls.
             ColumnNotFoundError: If label_col or feature_cols are not found.
         """
         # Validate parameters
@@ -176,8 +300,11 @@ class BaseModel(
         self._exclude_cols = exclude_cols or []
 
         # Determine feature columns
+        inferred = feature_cols is None
+        ignored: Dict[str, str] = {}
         if feature_cols is None:
-            feature_cols = self._infer_feature_cols(df, label_col, self._exclude_cols)
+            feature_cols, ignored = infer_feature_cols(df, label_col, self._exclude_cols)
+            warn_ignored_cols(feature_cols, ignored, stacklevel=3)
 
         # Validate columns exist
         self._validate_columns(df, label_col, feature_cols)
@@ -189,30 +316,75 @@ class BaseModel(
         if stratified is None:
             stratified = self.task_type == "classification"
 
+        # Seeds: the model's seed parameter, then the global seed, then random.
+        split_seed = resolve_split_seed(self._seed_param())
+
         # Apply caching
-        cached_df = self._apply_cache_strategy(df, cache_strategy)
+        cached_df, persisted = self._apply_cache_strategy(df, cache_strategy, validation, refit)
 
         try:
+            # One pass over the data: row count, missing features, null labels.
+            data_stats = check_training_data(
+                cached_df, label_col, feature_cols, self._accepts_missing()
+            )
+            data_stats.update(
+                {
+                    "feature_cols_inferred": inferred,
+                    "ignored_cols": ignored,
+                    "split_seed": split_seed if validation != "none" else None,
+                    "refit": refit,
+                }
+            )
+
             # Perform training with validation
             if validation == "none":
                 self._fit_no_validation(cached_df, label_col, feature_cols)
+                data_stats["kept_model"] = "full"
+                data_stats["n_training_rows"] = data_stats["n_samples"]
             elif validation == "train_test":
-                self._fit_train_test(cached_df, label_col, feature_cols, test_size, stratified)
+                self._fit_train_test(
+                    cached_df,
+                    label_col,
+                    feature_cols,
+                    test_size,
+                    stratified,
+                    fold_key,
+                    split_seed,
+                    refit,
+                    data_stats,
+                )
             elif validation == "kfold":
-                self._fit_kfold(cached_df, label_col, feature_cols, n_folds, stratified)
+                self._fit_kfold(
+                    cached_df,
+                    label_col,
+                    feature_cols,
+                    n_folds,
+                    stratified,
+                    fold_key,
+                    split_seed,
+                    refit,
+                    data_stats,
+                )
 
             # Capture metadata
-            self._capture_training_metadata(cached_df, label_col, feature_cols)
+            self._capture_training_metadata(cached_df, label_col, feature_cols, data_stats)
 
             # Mark as fitted
             self._is_fitted = True
 
         finally:
-            # Unpersist if we cached
-            if cache_strategy != "none" and cached_df is not None:
+            # Unpersist only what this call persisted
+            if persisted:
                 cached_df.unpersist()
 
         return self
+
+    def _seed_param(self) -> Optional[int]:
+        """The model's own ``seed`` parameter, if it has one and it is set."""
+        try:
+            return self.get_params().get("seed")
+        except Exception:
+            return None
 
     def _validate_fit_params(
         self,
@@ -221,7 +393,7 @@ class BaseModel(
         feature_cols: Optional[List[str]],
         exclude_cols: Optional[List[str]],
         validation: str,
-        cache_strategy: str,
+        cache_strategy: Optional[str],
     ) -> None:
         """Validate fit parameters.
 
@@ -248,7 +420,7 @@ class BaseModel(
         if cache_strategy not in self.VALID_CACHE_STRATEGIES:
             raise ValidationError(
                 f"Invalid cache_strategy '{cache_strategy}'. "
-                f"Valid options are: {sorted(self.VALID_CACHE_STRATEGIES)}"
+                "Valid options are: None, 'disk', 'memory', 'none'"
             )
 
     def _infer_feature_cols(
@@ -259,24 +431,10 @@ class BaseModel(
     ) -> List[str]:
         """Infer feature columns from DataFrame schema.
 
-        Args:
-            df: DataFrame to infer columns from.
-            label_col: Label column to exclude.
-            exclude_cols: Additional columns to exclude.
-
-        Returns:
-            List of inferred feature column names.
+        Numeric and boolean columns are features. See :func:`infer_feature_cols`
+        for the columns left out.
         """
-        excluded = set(exclude_cols) | {label_col}
-        feature_cols = []
-
-        for field in df.schema.fields:
-            if field.name not in excluded:
-                # Only include numeric columns
-                if isinstance(field.dataType, NumericType):
-                    feature_cols.append(field.name)
-
-        return feature_cols
+        return infer_feature_cols(df, label_col, exclude_cols)[0]
 
     def _validate_columns(
         self,
@@ -316,31 +474,66 @@ class BaseModel(
                     available_columns=list(available),
                 )
 
+    def _accepts_missing(self) -> bool:
+        """Whether the estimator treats NaN features as missing values."""
+        return False
+
+    def _effective_seed(self) -> Optional[int]:
+        """The seed the estimator trains with: the model's parameter, else the global seed."""
+        seed = self._seed_param()
+        return smallaxe.get_seed() if seed is None else seed
+
+    def _handle_invalid(self) -> str:
+        return "keep" if self._accepts_missing() else "error"
+
     def _apply_cache_strategy(
         self,
         df: DataFrame,
-        cache_strategy: str,
-    ) -> DataFrame:
-        """Apply caching strategy to DataFrame.
+        cache_strategy: Optional[str],
+        validation: str = "none",
+        refit: bool = True,
+    ) -> Tuple[DataFrame, bool]:
+        """Persist ``df`` for the duration of fit when that helps.
 
         Args:
             df: DataFrame to cache.
-            cache_strategy: Caching strategy.
+            cache_strategy: See :meth:`fit`.
+            validation: The validation strategy, which decides how often fit reads
+                the data when ``cache_strategy`` is None.
+            refit: Whether a final training pass follows validation.
 
         Returns:
-            Cached or uncached DataFrame.
+            ``(df, persisted)``: ``persisted`` is True only when this call persisted
+            the DataFrame, so the caller unpersists exactly that.
         """
+        from pyspark import StorageLevel
+
         if cache_strategy == "none":
-            return df
+            return df, False
+        if df.storageLevel != StorageLevel.NONE:
+            # The caller cached it; leave it alone.
+            return df, False
+
+        if cache_strategy is None:
+            reads_twice = validation == "kfold" or (validation == "train_test" and refit)
+            if not reads_twice:
+                return df, False
+            level = StorageLevel.MEMORY_AND_DISK
         elif cache_strategy == "memory":
-            from pyspark import StorageLevel
+            level = StorageLevel.MEMORY_ONLY
+        else:
+            level = StorageLevel.MEMORY_AND_DISK
 
-            return df.persist(StorageLevel.MEMORY_ONLY)
-        elif cache_strategy == "disk":
-            from pyspark import StorageLevel
-
-            return df.persist(StorageLevel.MEMORY_AND_DISK)
-        return df
+        try:
+            return df.persist(level), True
+        except Exception as exc:  # noqa: BLE001 - caching is an optimisation only
+            warnings.warn(
+                f"Could not cache the training DataFrame ({type(exc).__name__}: {exc}). "
+                "Continuing without a cache.",
+                UserWarning,
+                stacklevel=3,
+            )
+            return df, False
 
     def _fit_no_validation(
         self,
@@ -365,6 +558,10 @@ class BaseModel(
         feature_cols: List[str],
         test_size: float,
         stratified: bool,
+        fold_key: Optional[str] = None,
+        seed: Optional[int] = None,
+        refit: bool = True,
+        data_stats: Optional[Dict[str, Any]] = None,
     ) -> None:
         """Fit model with train/test validation.
 
@@ -374,6 +571,10 @@ class BaseModel(
             feature_cols: Feature column names.
             test_size: Proportion for test set.
             stratified: Whether to use stratified split.
+            fold_key: Column to hash instead of the whole row.
+            seed: Seed for the split.
+            refit: Train the kept model on all rows after scoring.
+            data_stats: Receives ``kept_model`` and ``n_training_rows``.
         """
         # Split data
         train_df, test_df = self._train_test_split(
@@ -381,6 +582,8 @@ class BaseModel(
             test_size=test_size,
             stratified=stratified,
             label_col=label_col if stratified else None,
+            seed=seed,
+            fold_key=fold_key,
         )
 
         # Fit on training data
@@ -391,6 +594,25 @@ class BaseModel(
         self._validation_scores["validation_type"] = "train_test"
         self._validation_scores["test_size"] = test_size
 
+        self._keep_model(df, train_df, "train_split", refit, data_stats)
+
+    def _keep_model(
+        self,
+        df: DataFrame,
+        split_df: DataFrame,
+        split_name: str,
+        refit: bool,
+        data_stats: Optional[Dict[str, Any]],
+    ) -> None:
+        """Refit on all rows, or keep the last split's model, and record which."""
+        if refit:
+            self._fit_spark_model(df, self._label_col or "", self._feature_cols)
+        if data_stats is not None:
+            data_stats["kept_model"] = "full" if refit else split_name
+            data_stats["n_training_rows"] = (
+                data_stats.get("n_samples") if refit else split_df.count()
+            )
+
     def _fit_kfold(
         self,
         df: DataFrame,
@@ -398,6 +620,10 @@ class BaseModel(
         feature_cols: List[str],
         n_folds: int,
         stratified: bool,
+        fold_key: Optional[str] = None,
+        seed: Optional[int] = None,
+        refit: bool = True,
+        data_stats: Optional[Dict[str, Any]] = None,
     ) -> None:
         """Fit model with k-fold cross-validation.
 
@@ -407,8 +633,13 @@ class BaseModel(
             feature_cols: Feature column names.
             n_folds: Number of folds.
             stratified: Whether to use stratified split.
+            fold_key: Column to hash instead of the whole row.
+            seed: Seed for the fold assignment.
+            refit: Train the kept model on all rows after scoring.
+            data_stats: Receives ``kept_model`` and ``n_training_rows``.
         """
         fold_scores: List[Dict[str, Any]] = []
+        train_df = df
 
         # Iterate through folds
         for fold_idx, (train_df, val_df) in enumerate(
@@ -417,6 +648,8 @@ class BaseModel(
                 n_folds=n_folds,
                 stratified=stratified,
                 label_col=label_col if stratified else None,
+                seed=seed,
+                fold_key=fold_key,
             )
         ):
             # Fit on this fold's training data
@@ -427,8 +660,7 @@ class BaseModel(
             scores["fold"] = fold_idx
             fold_scores.append(scores)
 
-        # Fit final model on all data
-        self._fit_spark_model(df, label_col, feature_cols)
+        self._keep_model(df, train_df, "last_fold", refit, data_stats)
 
         # Aggregate scores
         self._validation_scores = self._aggregate_fold_scores(fold_scores, n_folds)
@@ -541,8 +773,7 @@ class BaseModel(
         )
 
         # Single transform pass produces predictions AND probabilities
-        df_with_features = self._assemble_features(df, self._feature_cols)
-        full_df = self._spark_model.transform(df_with_features)
+        full_df, _ = self._transform_for_prediction(df, self._feature_cols)
 
         if self._task == "multiclass":
             return multiclass_scores(full_df, label_col, self.PREDICTION_COL)
@@ -580,6 +811,7 @@ class BaseModel(
         df: DataFrame,
         label_col: str,
         feature_cols: List[str],
+        data_stats: Optional[Dict[str, Any]] = None,
     ) -> None:
         """Capture metadata from training.
 
@@ -587,9 +819,24 @@ class BaseModel(
             df: Training DataFrame.
             label_col: Label column name.
             feature_cols: Feature column names.
+            data_stats: Output of :func:`check_training_data`, so the row count
+                is not computed again.
         """
         # Capture base metadata
-        self._capture_metadata(df, label_col, feature_cols)
+        data_stats = data_stats or {}
+        self._capture_metadata(df, label_col, feature_cols, n_samples=data_stats.get("n_samples"))
+        for key in (
+            "missing_counts",
+            "feature_cols_inferred",
+            "ignored_cols",
+            "split_seed",
+            "refit",
+            "kept_model",
+            "n_training_rows",
+        ):
+            if key in data_stats:
+                self._update_metadata(key, data_stats[key])
+        self._update_metadata("seed", self._effective_seed())
 
         # Capture label statistics
         label_stats = self._capture_label_stats(df, label_col, self.task_type)
@@ -640,6 +887,7 @@ class BaseModel(
             "task": self._task,
             "params": self._params,
             "feature_cols": self._feature_cols,
+            "features_col": self._features_col,
             "label_col": self._label_col,
             "exclude_cols": self._exclude_cols,
             "is_fitted": self._is_fitted,
@@ -656,6 +904,8 @@ class BaseModel(
         self._task = state.get("task", "simple_regression")
         self._params = state.get("params", {})
         self._feature_cols = state.get("feature_cols", [])
+        # Artifacts saved before 0.9.0 read the vector from a column named "features".
+        self._features_col = state.get("features_col") or "features"
         self._label_col = state.get("label_col")
         self._exclude_cols = state.get("exclude_cols", [])
         self._is_fitted = state.get("is_fitted", False)
@@ -806,6 +1056,9 @@ class Model(BaseModel):
         """The algorithm record this model is bound to."""
         return self._algorithm
 
+    def _accepts_missing(self) -> bool:
+        return self._algorithm.accepts_missing
+
     # --- ParamMixin ---
 
     @property
@@ -835,8 +1088,11 @@ class Model(BaseModel):
     def _build_estimator(self, label_col: str, extra: Mapping[str, Any]) -> Any:
         """Construct the Spark estimator from the algorithm record and current params."""
         algorithm = self._algorithm
+        params = dict(self.get_params())
+        if "seed" in params and params["seed"] is None:
+            params["seed"] = smallaxe.get_seed()
         ctor, setters = _algorithm.estimator_kwargs(
-            algorithm, self._task, self.get_params(), self._column_names(label_col)
+            algorithm, self._task, params, self._column_names(label_col)
         )
         ctor.update(extra)
         estimator = algorithm.estimator_class(self._task)(**ctor)
@@ -860,6 +1116,8 @@ class Model(BaseModel):
         algorithm = self._algorithm
         if algorithm.prepare is not None:
             algorithm.prepare()
+        self._features_col = self.FEATURES_COL
+        df, _ = self._shield_user_columns(df)
         df_with_features = self._assemble_features(df, feature_cols)
         context = (
             algorithm.fit_context(self.get_params())
@@ -900,6 +1158,14 @@ class Model(BaseModel):
         if self._algorithm.prepare is not None:
             self._algorithm.prepare()
         self._load_spark_model(path, self._algorithm.model_class(self._task))
+        # The loaded Spark model decides which vector column it reads. catboost-spark does
+        # not persist featuresCol, so a reloaded model falls back to "features".
+        get_features_col = getattr(self._spark_model, "getFeaturesCol", None)
+        if callable(get_features_col):
+            try:
+                self._features_col = get_features_col() or self._features_col
+            except Exception:  # noqa: BLE001 - keep the recorded name if the model cannot say
+                pass
 
     @classmethod
     def load(cls, path: str) -> "Model":

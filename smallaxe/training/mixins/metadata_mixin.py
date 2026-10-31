@@ -44,6 +44,7 @@ class MetadataMixin:
         label_col: str,
         feature_cols: List[str],
         extra_metadata: Optional[Dict[str, Any]] = None,
+        n_samples: Optional[int] = None,
     ) -> None:
         """Capture metadata from the training process.
 
@@ -52,6 +53,7 @@ class MetadataMixin:
             label_col: Name of the label column.
             feature_cols: List of feature column names.
             extra_metadata: Additional metadata to include.
+            n_samples: Row count, if already known; otherwise ``df`` is counted.
         """
         # Get Spark version
         spark_version = None
@@ -68,7 +70,7 @@ class MetadataMixin:
             "smallaxe_version": smallaxe.__version__,
             "label_col": label_col,
             "feature_cols": feature_cols,
-            "n_samples": df.count(),
+            "n_samples": df.count() if n_samples is None else n_samples,
             "n_features": len(feature_cols),
             "seed": smallaxe.get_seed(),
         }
