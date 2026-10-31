@@ -65,7 +65,7 @@ from sklearn import metrics as SK
 
 import smallaxe
 from smallaxe import metrics as M
-from smallaxe.exceptions import DependencyError
+from smallaxe.exceptions import DependencyError, ValidationError
 from smallaxe.pipeline import Pipeline
 from smallaxe.preprocessing import Encoder, Imputer, Scaler
 from smallaxe.search import optimize
@@ -549,9 +549,18 @@ MODELS = {}
 
 def train_test_check(algo, ds):
     m = make(algo, ds)
-    # feature_cols omitted on purpose: exercises numeric feature inference from the encoded frame
-    m.fit(ds.train_p, label_col=ds.label, validation="train_test", test_size=0.2)
+    # feature_cols omitted on purpose: exercises numeric feature inference from the encoded frame.
+    # refit=False for multiclass so the kept model is the one the holdout scores describe.
+    m.fit(
+        ds.train_p,
+        label_col=ds.label,
+        validation="train_test",
+        test_size=0.2,
+        refit=ds.task != "multiclass",
+    )
     s = m.validation_scores
+    assert m.metadata["kept_model"] == ("train_split" if ds.task == "multiclass" else "full")
+    assert m.metadata["ignored_cols"] == {}, m.metadata["ignored_cols"]
     assert s["validation_type"] == "train_test" and s["test_size"] == 0.2
     assert sorted(m._feature_cols) == sorted(
         ds.feats
@@ -559,7 +568,11 @@ def train_test_check(algo, ds):
     if ds.task == "multiclass":
         # Reproduce the seeded holdout to verify the validation scores themselves.
         _, holdout = m._train_test_split(
-            ds.train_p, test_size=0.2, stratified=True, label_col=ds.label
+            ds.train_p,
+            test_size=0.2,
+            stratified=True,
+            label_col=ds.label,
+            seed=m.metadata["split_seed"],
         )
         pdf = m.predict(holdout).select(ds.label, "predict_label").toPandas()
         for average in ("macro", "weighted"):
@@ -921,22 +934,69 @@ step(
 )
 
 
-def null_rows_probe():
-    m = make("random_forest", REG).fit(REG.train, label_col="price", feature_cols=REG.num)
-    holey = REG.test.withColumn(
+def rf_null_rows_fit_probe():
+    holey = REG.train.withColumn(
         "carat", F.when(F.rand(SEED) < 0.05, None).otherwise(F.col("carat"))
     )
-    n_in, n_out = holey.count(), m.predict(holey).count()
-    assert n_out == n_in, f"predict silently dropped {n_in - n_out} of {n_in} rows containing nulls"
-    return "rows preserved"
+    try:
+        make("random_forest", REG).fit(holey, label_col="price", feature_cols=REG.num)
+    except ValidationError as exc:
+        assert "carat" in str(exc) and "Imputer" in str(exc), str(exc)
+        return f"ValidationError names the column: {str(exc)[:120]}"
+    raise AssertionError("fit accepted null features without an error")
 
 
 step(
     "G_gaps",
     "random_forest",
     "regression",
-    "predict on rows with nulls (no Imputer)",
-    null_rows_probe,
+    "fit on rows with nulls raises ValidationError (no Imputer)",
+    rf_null_rows_fit_probe,
+    probe=True,
+)
+
+
+def null_rows_probe(algo):
+    m = make(algo, REG).fit(REG.train, label_col="price", feature_cols=REG.num)
+    holey = REG.test.withColumn(
+        "carat", F.when(F.rand(SEED) < 0.05, None).otherwise(F.col("carat"))
+    )
+    pred = m.predict(holey).cache()
+    n_in, n_out = holey.count(), pred.count()
+    n_null = pred.filter(F.col("predict_label").isNull()).count()
+    assert n_out == n_in, f"predict silently dropped {n_in - n_out} of {n_in} rows containing nulls"
+    assert n_null == 0, f"{n_null} predictions are null"
+    return f"{n_out} rows preserved, no null predictions"
+
+
+for _algo in ["xgboost", "lightgbm", "catboost"]:
+    step(
+        "G_gaps",
+        _algo,
+        "regression",
+        "predict on rows with nulls (no Imputer)",
+        lambda algo=_algo: null_rows_probe(algo),
+        probe=True,
+    )
+
+
+def null_label_probe():
+    holey = REG.train.withColumn(
+        "price", F.when(F.rand(SEED) < 0.01, None).otherwise(F.col("price"))
+    )
+    try:
+        make("xgboost", REG).fit(holey, label_col="price", feature_cols=REG.num)
+    except ValidationError as exc:
+        return f"ValidationError: {str(exc)[:120]}"
+    raise AssertionError("fit accepted null labels without an error")
+
+
+step(
+    "G_gaps",
+    "xgboost",
+    "regression",
+    "null labels raise ValidationError",
+    null_label_probe,
     probe=True,
 )
 
@@ -997,7 +1057,13 @@ def cache_side_effect_probe():
     assert (
         lvl.useMemory or lvl.useDisk
     ), "fit(cache_strategy='memory') unpersisted the caller's own cached DataFrame"
-    return "caller cache intact"
+    make("random_forest", BIN).fit(
+        df, label_col=BIN.label, feature_cols=BIN.feats, validation="kfold", n_folds=2
+    )
+    lvl = df.storageLevel
+    assert lvl.useMemory or lvl.useDisk, "default cache_strategy unpersisted the caller's DataFrame"
+    df.unpersist()
+    return "caller cache intact (explicit and default strategy)"
 
 
 step(
