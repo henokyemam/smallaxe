@@ -1,8 +1,8 @@
 # Changelog
 
-## 0.9.0 (unreleased)
+## 0.9.0 (2026-10-31)
 
-Release this as 0.9.0, not 0.8.2: multiclass validation scores change meaning.
+A minor release rather than 0.8.2: multiclass validation scores, fold assignment, row handling, and the kept model all change meaning. See each entry.
 
 ### Changed
 
