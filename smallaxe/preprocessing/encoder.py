@@ -1,20 +1,32 @@
 """Encoder for categorical feature encoding in PySpark DataFrames."""
 
-from typing import Dict, List
+from typing import Dict, List, Set, Tuple
 
-from pyspark.ml.feature import OneHotEncoder as SparkOneHotEncoder
-from pyspark.ml.functions import vector_to_array
-from pyspark.sql import DataFrame
+from pyspark.sql import Column, DataFrame
 from pyspark.sql import functions as F
 
+from smallaxe import _artifact
 from smallaxe.exceptions import (
     ColumnNotFoundError,
     ModelNotFittedError,
     ValidationError,
 )
+from smallaxe.preprocessing._common import (
+    column_ref,
+    read_step_metadata,
+    require_keys,
+    unique_column_name,
+)
 
 VALID_METHODS = {"onehot", "label"}
 VALID_HANDLE_RARE = {"other", "keep", "error"}
+
+OTHER = "__OTHER__"
+UNKNOWN = "__UNKNOWN__"
+_RESERVED = (OTHER, UNKNOWN)
+_RESERVED_SUFFIX = {OTHER: "OTHER", UNKNOWN: "UNKNOWN"}
+
+ARTIFACT_KIND = "encoder"
 
 
 class Encoder:
@@ -22,6 +34,28 @@ class Encoder:
 
     Supports OneHot encoding (creates binary columns for each category) and
     Label encoding (converts categories to numeric indices).
+
+    Categories are the column's values cast to string by Spark (so a boolean column has
+    the categories ``"true"`` and ``"false"``), ranked by count descending and then by
+    the category string ascending. Their rank is their index.
+
+    Every fitted column has an index for values not in its mapping: the ``"__OTHER__"``
+    bucket when ``handle_rare='other'`` created one, otherwise a reserved
+    ``"__UNKNOWN__"`` entry appended as the last index. At transform time:
+
+    - an unseen category maps to that index (label) or sets ``{col}_OTHER`` /
+      ``{col}_UNKNOWN`` to 1.0 (one-hot), whatever ``handle_rare`` is;
+    - a null stays null (label) or yields 0.0 in every column of that feature (one-hot);
+    - no row is dropped, and no data value raises.
+
+    Output columns:
+
+    - ``'label'``: the input columns in their order, each encoded column replaced in
+      place by an integer index.
+    - ``'onehot'``: the input's other columns in their order, then, for each column in
+      ``categorical_cols`` order, one double column per index in index order, named
+      ``{col}_{category}`` (spaces and hyphens become underscores; a name already
+      used gets ``_{index}`` appended), and ``{col}_OTHER`` or ``{col}_UNKNOWN`` last.
 
     Args:
         method: Encoding method. One of 'onehot', 'label'. Default is 'onehot'.
@@ -55,8 +89,6 @@ class Encoder:
         self._handle_rare = handle_rare
         self._categorical_cols: List[str] = []
         self._category_mappings: Dict[str, Dict[str, int]] = {}
-        self._indexer_models: Dict[str, any] = {}
-        self._onehot_models: Dict[str, any] = {}
         self._is_fitted = False
 
     def _validate_method(self, method: str) -> None:
@@ -97,17 +129,21 @@ class Encoder:
         df: DataFrame,
         col: str,
     ) -> List[str]:
-        """Get the top N categories by frequency for a column."""
+        """Return the column's categories, most frequent first.
+
+        The key is Spark's ``cast("string")`` of the value, the same expression transform
+        looks up, so booleans, doubles and dates match. Ties are broken by the key, so the
+        order does not depend on partitioning.
+        """
         category_counts = (
-            df.filter(F.col(col).isNotNull())
-            .groupBy(col)
+            df.select(column_ref(col).cast("string").alias("category"))
+            .filter(F.col("category").isNotNull())
+            .groupBy("category")
             .count()
-            .orderBy(F.col("count").desc())
+            .orderBy(F.col("count").desc(), F.col("category").asc())
             .collect()
         )
-
-        categories = [row[col] for row in category_counts]
-        return categories
+        return [row["category"] for row in category_counts]
 
     def _build_category_mapping(
         self,
@@ -116,6 +152,13 @@ class Encoder:
     ) -> Dict[str, int]:
         """Build category to index mapping for a column."""
         categories = self._get_top_categories(df, col)
+        reserved = [cat for cat in categories if cat in _RESERVED]
+        if reserved:
+            raise ValidationError(
+                f"Column '{col}' contains the value {reserved[0]!r}, which the Encoder "
+                f"reserves for its {_RESERVED_SUFFIX[reserved[0]]} bucket. Rename that "
+                "value before encoding."
+            )
         num_categories = len(categories)
 
         if self._handle_rare == "error" and num_categories > self._max_categories:
@@ -127,13 +170,15 @@ class Encoder:
             )
 
         if self._handle_rare == "keep":
-            mapping = {str(cat): idx for idx, cat in enumerate(categories)}
+            kept = categories
         else:
-            top_categories = categories[: self._max_categories]
-            mapping = {str(cat): idx for idx, cat in enumerate(top_categories)}
+            kept = categories[: self._max_categories]
+        mapping = {cat: idx for idx, cat in enumerate(kept)}
 
-            if num_categories > self._max_categories:
-                mapping["__OTHER__"] = len(top_categories)
+        if len(kept) < num_categories:
+            mapping[OTHER] = len(kept)
+        if OTHER not in mapping:
+            mapping[UNKNOWN] = len(mapping)
 
         return mapping
 
@@ -152,86 +197,79 @@ class Encoder:
             self: The fitted Encoder instance.
 
         Raises:
-            ValidationError: If categorical_cols is empty or max_categories exceeded
-                with handle_rare='error'.
+            ValidationError: If categorical_cols is empty, max_categories is exceeded
+                with handle_rare='error', or a column holds a reserved value
+                ('__OTHER__' or '__UNKNOWN__').
             ColumnNotFoundError: If any specified column is not in the DataFrame.
         """
         if not categorical_cols:
             raise ValidationError("categorical_cols cannot be empty for Encoder.")
 
         self._validate_columns(df, categorical_cols)
-        self._categorical_cols = categorical_cols
-        self._category_mappings = {}
-        self._indexer_models = {}
-        self._onehot_models = {}
+        mappings = {col: self._build_category_mapping(df, col) for col in categorical_cols}
 
-        for col in categorical_cols:
-            self._category_mappings[col] = self._build_category_mapping(df, col)
-
-        if self._method == "onehot":
-            self._fit_onehot_encoders(df)
-
+        self._categorical_cols = list(categorical_cols)
+        self._category_mappings = mappings
         self._is_fitted = True
         return self
 
-    def _fit_onehot_encoders(self, df: DataFrame) -> None:
-        """Fit OneHotEncoder models for each categorical column."""
-        indexed_df = self._apply_label_encoding(df)
+    @staticmethod
+    def _fallback_index(mapping: Dict[str, int]) -> int:
+        """The index an unseen category maps to: OTHER if present, else UNKNOWN."""
+        return mapping[OTHER] if OTHER in mapping else mapping[UNKNOWN]
 
-        for col in self._categorical_cols:
-            indexed_col = f"__{col}_indexed"
-            onehot_col = f"__{col}_onehot"
+    def _index_expr(self, col: str) -> Column:
+        """Integer index of ``col``: null for null, the fallback index for unseen values."""
+        mapping = self._category_mappings[col]
+        source = column_ref(col)
 
-            if not self._category_mappings[col]:
+        map_args = []
+        for category, idx in mapping.items():
+            if category in _RESERVED:
                 continue
+            map_args.append(F.lit(category))
+            map_args.append(F.lit(int(idx)))
 
-            encoder = SparkOneHotEncoder(
-                inputCol=indexed_col,
-                outputCol=onehot_col,
-                dropLast=False,
-            )
-            self._onehot_models[col] = encoder.fit(indexed_df)
+        if map_args:
+            lookup = F.create_map(*map_args)[source.cast("string")]
+        else:
+            lookup = F.lit(None).cast("int")
 
-    def _apply_label_encoding(self, df: DataFrame) -> DataFrame:
-        """Apply label encoding using native Spark SQL map lookups."""
-        result_df = df
+        fallback = F.lit(int(self._fallback_index(mapping)))
+        index = F.when(source.isNull(), F.lit(None)).otherwise(F.coalesce(lookup, fallback))
+        return index.cast("int")
 
+    def _onehot_layout(self) -> Dict[str, List[Tuple[str, int]]]:
+        """``(output column name, index)`` per fitted column, each in index order.
+
+        The OTHER / UNKNOWN buckets always get ``{col}_OTHER`` / ``{col}_UNKNOWN``. A
+        category whose sanitised name is already taken (compared case-insensitively, as
+        Spark resolves names) gets ``_{index}`` appended.
+        """
+        used: Set[str] = set()
+        for col in self._categorical_cols:
+            for key in _RESERVED:
+                if key in self._category_mappings[col]:
+                    used.add(f"{col}_{_RESERVED_SUFFIX[key]}".lower())
+
+        layout: Dict[str, List[Tuple[str, int]]] = {}
         for col in self._categorical_cols:
             mapping = self._category_mappings[col]
-            indexed_col = f"__{col}_indexed"
-
-            has_other = "__OTHER__" in mapping
-            other_idx = mapping.get("__OTHER__", -1)
-
-            map_args = []
-            for cat_str, idx in mapping.items():
-                if cat_str == "__OTHER__":
-                    continue
-                map_args.append(F.lit(cat_str))
-                map_args.append(F.lit(float(idx)))
-
-            if map_args:
-                mapping_col = F.create_map(*map_args)
-                lookup_result = mapping_col[F.col(col).cast("string")]
-            else:
-                lookup_result = F.lit(None).cast("double")
-
-            if has_other:
-                result_df = result_df.withColumn(
-                    indexed_col,
-                    F.when(F.col(col).isNull(), F.lit(None).cast("double")).otherwise(
-                        F.coalesce(lookup_result, F.lit(float(other_idx)))
-                    ),
-                )
-            else:
-                result_df = result_df.withColumn(
-                    indexed_col,
-                    F.when(F.col(col).isNull(), F.lit(None).cast("double")).otherwise(
-                        lookup_result
-                    ),
-                )
-
-        return result_df
+            by_index = {idx: category for category, idx in mapping.items()}
+            columns = []
+            for idx in range(len(mapping)):
+                category = by_index[idx]
+                if category in _RESERVED:
+                    name = f"{col}_{_RESERVED_SUFFIX[category]}"
+                else:
+                    safe_name = category.replace(" ", "_").replace("-", "_")
+                    name = f"{col}_{safe_name}"
+                    if name.lower() in used:
+                        name = unique_column_name(f"{name}_{idx}", used)
+                    used.add(name.lower())
+                columns.append((name, idx))
+            layout[col] = columns
+        return layout
 
     def transform(self, df: DataFrame) -> DataFrame:
         """Transform the DataFrame by encoding categorical columns.
@@ -240,10 +278,11 @@ class Encoder:
             df: PySpark DataFrame to transform.
 
         Returns:
-            DataFrame with encoded categorical columns.
+            DataFrame with encoded categorical columns (see the class docstring for the
+            column order and the unseen / null rules).
             - For 'label' method: Original columns replaced with integer indices.
             - For 'onehot' method: Original columns replaced with binary columns
-              named '{col}_{category}'.
+              named '{col}_{category}', plus '{col}_OTHER' or '{col}_UNKNOWN'.
 
         Raises:
             ModelNotFittedError: If transform is called before fit.
@@ -261,71 +300,29 @@ class Encoder:
 
     def _transform_label(self, df: DataFrame) -> DataFrame:
         """Transform using label encoding."""
-        result_df = self._apply_label_encoding(df)
-
-        for col in self._categorical_cols:
-            indexed_col = f"__{col}_indexed"
-            result_df = result_df.withColumn(col, F.col(indexed_col).cast("int"))
-            result_df = result_df.drop(indexed_col)
-
-        return result_df
+        return df.withColumns({col: self._index_expr(col) for col in self._categorical_cols})
 
     def _transform_onehot(self, df: DataFrame) -> DataFrame:
-        """Transform using one-hot encoding."""
-        result_df = self._apply_label_encoding(df)
-
+        """Transform using one-hot encoding built from the Encoder's own mapping."""
+        taken = list(df.columns)
+        index_cols: Dict[str, str] = {}
         for col in self._categorical_cols:
-            if col not in self._onehot_models:
-                continue
+            name = unique_column_name(f"__{col}_index", taken)
+            taken.append(name)
+            index_cols[col] = name
 
-            result_df = self._onehot_models[col].transform(result_df)
+        result_df = df.withColumns(
+            {index_cols[col]: self._index_expr(col) for col in self._categorical_cols}
+        )
 
-        result_df = self._extract_onehot_columns(result_df)
+        onehot: Dict[str, Column] = {}
+        for col, columns in self._onehot_layout().items():
+            index = column_ref(index_cols[col])
+            for name, idx in columns:
+                onehot[name] = F.coalesce((index == F.lit(idx)).cast("double"), F.lit(0.0))
+        result_df = result_df.withColumns(onehot)
 
-        return result_df
-
-    def _extract_onehot_columns(self, df: DataFrame) -> DataFrame:
-        """Extract one-hot encoded vectors to individual columns using native Spark."""
-        result_df = df
-
-        for col in self._categorical_cols:
-            mapping = self._category_mappings[col]
-            onehot_col = f"__{col}_onehot"
-            indexed_col = f"__{col}_indexed"
-            array_col = f"__{col}_array"
-
-            if not mapping:
-                result_df = result_df.drop(col, indexed_col)
-                continue
-
-            result_df = result_df.withColumn(array_col, vector_to_array(F.col(onehot_col)))
-
-            reverse_mapping = {v: k for k, v in mapping.items()}
-            num_categories = len(mapping)
-            used_col_names: set = set()
-
-            for idx in range(num_categories):
-                category_name = reverse_mapping.get(idx, f"unknown_{idx}")
-
-                if category_name == "__OTHER__":
-                    new_col_name = f"{col}_OTHER"
-                else:
-                    safe_name = str(category_name).replace(" ", "_").replace("-", "_")
-                    new_col_name = f"{col}_{safe_name}"
-
-                    if new_col_name in used_col_names:
-                        new_col_name = f"{new_col_name}_{idx}"
-
-                used_col_names.add(new_col_name)
-
-                result_df = result_df.withColumn(
-                    new_col_name,
-                    F.col(array_col)[idx].cast("double"),
-                )
-
-            result_df = result_df.drop(col, indexed_col, onehot_col, array_col)
-
-        return result_df
+        return result_df.drop(*self._categorical_cols, *index_cols.values())
 
     def fit_transform(
         self,
@@ -343,6 +340,80 @@ class Encoder:
         """
         self.fit(df, categorical_cols)
         return self.transform(df)
+
+    def save(self, path: str) -> None:
+        """Save the fitted encoder as a directory holding ``metadata.json``.
+
+        The file records the constructor arguments, the fitted columns and their
+        category mappings. IO goes through the Hadoop FileSystem layer, so local paths,
+        ``dbfs:/``, ``s3://`` and ``hdfs://`` all work.
+
+        Args:
+            path: The directory path to save the encoder to.
+
+        Raises:
+            ModelNotFittedError: If save is called before fit.
+            ValidationError: If path is empty.
+        """
+        if not self._is_fitted:
+            raise ModelNotFittedError("Encoder has not been fitted. Call fit() before saving.")
+
+        _artifact.write_metadata(
+            path,
+            ARTIFACT_KIND,
+            {
+                "method": self._method,
+                "max_categories": self._max_categories,
+                "handle_rare": self._handle_rare,
+                "categorical_cols": list(self._categorical_cols),
+                "category_mappings": self._category_mappings,
+            },
+        )
+
+    @classmethod
+    def load(cls, path: str) -> "Encoder":
+        """Load an encoder saved by :meth:`save`.
+
+        Args:
+            path: The directory path to load the encoder from.
+
+        Returns:
+            The loaded, fitted Encoder.
+
+        Raises:
+            ValidationError: If the path does not exist, is not an encoder artifact,
+                was written by a newer smallaxe, or its metadata is incomplete.
+        """
+        metadata = read_step_metadata(path, ARTIFACT_KIND)
+        keys = ["method", "max_categories", "handle_rare", "categorical_cols"]
+        require_keys(metadata, keys + ["category_mappings"], ARTIFACT_KIND, path)
+
+        encoder = cls(
+            method=metadata["method"],
+            max_categories=metadata["max_categories"],
+            handle_rare=metadata["handle_rare"],
+        )
+        categorical_cols = list(metadata["categorical_cols"])
+        raw_mappings = metadata["category_mappings"]
+        mappings: Dict[str, Dict[str, int]] = {}
+        try:
+            for col in categorical_cols:
+                mapping = {str(cat): int(idx) for cat, idx in raw_mappings[col].items()}
+                if sorted(mapping.values()) != list(range(len(mapping))) or not any(
+                    key in mapping for key in _RESERVED
+                ):
+                    raise ValueError(f"invalid mapping for column '{col}'")
+                mappings[col] = mapping
+        except (AttributeError, KeyError, TypeError, ValueError) as exc:
+            raise ValidationError(
+                f"Cannot load {ARTIFACT_KIND}: the category mappings at {path!r} are "
+                f"corrupted ({exc})."
+            ) from exc
+
+        encoder._categorical_cols = categorical_cols
+        encoder._category_mappings = mappings
+        encoder._is_fitted = True
+        return encoder
 
     @property
     def method(self) -> str:
@@ -391,6 +462,9 @@ class Encoder:
     @property
     def category_mappings(self) -> Dict[str, Dict[str, int]]:
         """Get the category mappings for each column.
+
+        Each mapping includes the bucket unseen values go to: ``"__OTHER__"`` or
+        ``"__UNKNOWN__"``.
 
         Returns:
             Dictionary mapping column names to their category-to-index mappings.

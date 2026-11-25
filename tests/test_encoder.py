@@ -1,6 +1,9 @@
 """Tests for the Encoder preprocessing component."""
 
+import pickle
+
 import pytest
+from pyspark.sql import functions as F
 
 from smallaxe.exceptions import (
     ColumnNotFoundError,
@@ -205,9 +208,14 @@ class TestOneHotEncoder:
         # Original column "color" should be removed
         assert "color" not in result.columns
 
-        # Should have columns like color_red, color_blue, color_green
+        # color_red, color_blue, color_green, plus the bucket for unseen values
         color_cols = [c for c in result.columns if c.startswith("color_")]
-        assert len(color_cols) == 3  # red, blue, green
+        assert sorted(color_cols) == [
+            "color_UNKNOWN",
+            "color_blue",
+            "color_green",
+            "color_red",
+        ]
 
     def test_onehot_encoder_binary_values(self, df_for_encoding):
         """Test that OneHotEncoder produces binary (0/1) values."""
@@ -247,8 +255,8 @@ class TestOneHotEncoder:
         color_cols = [c for c in result.columns if c.startswith("color_")]
         size_cols = [c for c in result.columns if c.startswith("size_")]
 
-        assert len(color_cols) == 3  # red, blue, green
-        assert len(size_cols) == 3  # small, medium, large
+        assert len(color_cols) == 4  # red, blue, green, UNKNOWN
+        assert len(size_cols) == 4  # small, medium, large, UNKNOWN
 
 
 class TestMaxCategories:
@@ -302,8 +310,9 @@ class TestHandleRare:
 
         category_cols = [c for c in result.columns if c.startswith("category_")]
 
-        # Should have columns for all 4 categories (cat_A, cat_B, cat_C, cat_D)
-        assert len(category_cols) == 4
+        # All 4 categories (cat_A, cat_B, cat_C, cat_D), plus the UNKNOWN bucket
+        assert len(category_cols) == 5
+        assert "category_UNKNOWN" in category_cols
 
     def test_handle_rare_error_raises_on_excess(self, df_with_rare_categories):
         """Test that handle_rare='error' raises when categories exceed max."""
@@ -325,56 +334,190 @@ class TestHandleRare:
 class TestUnseenCategories:
     """Tests for handling unseen categories during transform."""
 
-    def test_unseen_category_with_other(self, spark_session):
-        """Test handling of unseen categories when handle_rare='other'."""
-        # Fit on data with categories A, B, C
-        fit_data = [
-            (1, "A"),
-            (2, "B"),
-            (3, "C"),
-            (4, "A"),
-            (5, "B"),
-        ]
-        df_fit = spark_session.createDataFrame(fit_data, ["id", "category"])
+    # A appears 3 times, B twice, C once.
+    FIT = [(1, "A"), (2, "B"), (3, "C"), (4, "A"), (5, "B"), (6, "A")]
+    # id 2 is unseen, id 3 is null.
+    PROBE = [(1, "A"), (2, "Z"), (3, None), (4, "B"), (5, "C")]
 
-        # Transform data with unseen category D
-        transform_data = [
-            (1, "A"),
-            (2, "D"),  # Unseen category
-        ]
-        df_transform = spark_session.createDataFrame(transform_data, ["id", "category"])
+    # (handle_rare, max_categories, bucket the unseen value lands in)
+    SETTINGS = [
+        ("other", 100, "__UNKNOWN__"),
+        ("other", 2, "__OTHER__"),
+        ("keep", 2, "__UNKNOWN__"),
+        ("error", 5, "__UNKNOWN__"),
+    ]
 
-        encoder = Encoder(method="label", max_categories=2, handle_rare="other")
+    def _fit(self, spark_session, method, handle_rare, max_categories):
+        df_fit = spark_session.createDataFrame(self.FIT, "id int, category string")
+        df_probe = spark_session.createDataFrame(self.PROBE, "id int, category string")
+        encoder = Encoder(method=method, max_categories=max_categories, handle_rare=handle_rare)
         encoder.fit(df_fit, categorical_cols=["category"])
-        result = encoder.transform(df_transform)
+        return encoder, df_probe
 
-        # Row with unseen category should get the OTHER index
-        rows = result.orderBy("id").collect()
-        # The unseen category D should map to OTHER (or None if no OTHER exists)
-        assert (
-            rows[1]["category"] is not None
-            or "__OTHER__" not in encoder.category_mappings["category"]
-        )
+    @pytest.mark.parametrize("handle_rare,max_categories,bucket", SETTINGS)
+    def test_label_unseen_maps_to_bucket_and_null_stays_null(
+        self, spark_session, handle_rare, max_categories, bucket
+    ):
+        encoder, df_probe = self._fit(spark_session, "label", handle_rare, max_categories)
+        mapping = encoder.category_mappings["category"]
+        assert bucket in mapping
+        assert mapping[bucket] == len(mapping) - 1  # the bucket is the last index
 
-    def test_unseen_category_in_onehot(self, spark_session):
-        """Test handling of unseen categories in one-hot encoding."""
-        fit_data = [(i, "cat_A") for i in range(10)] + [(i + 10, "cat_B") for i in range(10)]
-        df_fit = spark_session.createDataFrame(fit_data, ["id", "category"])
+        result = encoder.transform(df_probe)
 
-        transform_data = [
-            (1, "cat_A"),
-            (2, "cat_C"),  # Unseen
-        ]
-        df_transform = spark_session.createDataFrame(transform_data, ["id", "category"])
+        assert result.count() == len(self.PROBE)
+        rows = {row["id"]: row["category"] for row in result.collect()}
+        assert rows[2] == mapping[bucket]  # unseen: never null
+        assert rows[3] is None  # null input stays null
+        assert rows[1] == mapping["A"]
 
-        # With max_categories=1, only cat_A is kept, cat_B goes to OTHER
-        encoder = Encoder(method="onehot", max_categories=1, handle_rare="other")
-        encoder.fit(df_fit, categorical_cols=["category"])
-        result = encoder.transform(df_transform)
+    @pytest.mark.parametrize("handle_rare,max_categories,bucket", SETTINGS)
+    def test_onehot_unseen_sets_bucket_and_null_is_all_zero(
+        self, spark_session, handle_rare, max_categories, bucket
+    ):
+        encoder, df_probe = self._fit(spark_session, "onehot", handle_rare, max_categories)
+        bucket_col = "category_OTHER" if bucket == "__OTHER__" else "category_UNKNOWN"
 
-        # Should have columns and not crash
+        result = encoder.transform(df_probe)
+
+        assert result.count() == len(self.PROBE)
         category_cols = [c for c in result.columns if c.startswith("category_")]
-        assert len(category_cols) > 0
+        assert category_cols[-1] == bucket_col
+        rows = {row["id"]: row for row in result.collect()}
+        unseen = rows[2]
+        assert unseen[bucket_col] == 1.0
+        assert sum(unseen[c] for c in category_cols) == 1.0
+        null_row = rows[3]
+        assert all(null_row[c] == 0.0 for c in category_cols)
+        assert rows[1]["category_A"] == 1.0
+
+    def test_onehot_has_no_unknown_column_when_other_exists(self, spark_session):
+        encoder, df_probe = self._fit(spark_session, "onehot", "other", 1)
+        result = encoder.transform(df_probe)
+
+        assert "category_UNKNOWN" not in result.columns
+        assert "__UNKNOWN__" not in encoder.category_mappings["category"]
+        rows = {row["id"]: row for row in result.collect()}
+        # B and C were grouped into OTHER at fit; Z was never seen. All three land there.
+        for row_id in (2, 4, 5):
+            assert rows[row_id]["category_OTHER"] == 1.0
+            assert rows[row_id]["category_A"] == 0.0
+
+    def test_unseen_in_several_columns(self, spark_session):
+        df_fit = spark_session.createDataFrame(
+            [(1, "a", "x"), (2, "b", "y")], "id int, c1 string, c2 string"
+        )
+        df_probe = spark_session.createDataFrame(
+            [(1, "new", "x"), (2, "b", "new")], "id int, c1 string, c2 string"
+        )
+        encoder = Encoder(method="label").fit(df_fit, categorical_cols=["c1", "c2"])
+        rows = {row["id"]: row for row in encoder.transform(df_probe).collect()}
+
+        unknown_c1 = encoder.category_mappings["c1"]["__UNKNOWN__"]
+        unknown_c2 = encoder.category_mappings["c2"]["__UNKNOWN__"]
+        assert rows[1]["c1"] == unknown_c1
+        assert rows[2]["c2"] == unknown_c2
+        assert rows[2]["c1"] == encoder.category_mappings["c1"]["b"]
+
+    def test_reserved_value_in_data_raises_at_fit(self, spark_session):
+        df = spark_session.createDataFrame([(1, "__UNKNOWN__"), (2, "a")], "id int, c string")
+        with pytest.raises(ValidationError, match="reserves"):
+            Encoder().fit(df, categorical_cols=["c"])
+
+
+class TestNonStringCategories:
+    """Category keys come from Spark's cast to string, so every type matches itself."""
+
+    @pytest.fixture
+    def df_typed(self, spark_session):
+        rows = [
+            (1, True, 1.5),
+            (2, False, 2.0),
+            (3, True, 1.5),
+            (4, None, None),
+            (5, True, 2.5e7),  # Spark: "2.5E7"; Python str(): "25000000.0"
+        ]
+        return spark_session.createDataFrame(rows, "id int, flag boolean, score double")
+
+    def test_mapping_keys_are_spark_strings(self, df_typed):
+        encoder = Encoder(method="label").fit(df_typed, categorical_cols=["flag", "score"])
+        mappings = encoder.category_mappings
+
+        assert mappings["flag"] == {"true": 0, "false": 1, "__UNKNOWN__": 2}
+        assert mappings["score"] == {"1.5": 0, "2.0": 1, "2.5E7": 2, "__UNKNOWN__": 3}
+
+    def test_label_matches_every_training_category(self, df_typed):
+        encoder = Encoder(method="label")
+        result = encoder.fit_transform(df_typed, categorical_cols=["flag", "score"])
+        rows = {row["id"]: row for row in result.collect()}
+        mappings = encoder.category_mappings
+
+        assert rows[1]["flag"] == mappings["flag"]["true"]
+        assert rows[2]["flag"] == mappings["flag"]["false"]
+        assert rows[2]["score"] == mappings["score"]["2.0"]
+        assert rows[5]["score"] == mappings["score"]["2.5E7"]
+        assert rows[4]["flag"] is None
+        assert rows[4]["score"] is None
+        for col in ("flag", "score"):
+            unknown = mappings[col]["__UNKNOWN__"]
+            assert all(row[col] != unknown for row in rows.values())
+
+    def test_onehot_matches_every_training_category(self, df_typed):
+        encoder = Encoder(method="onehot")
+        result = encoder.fit_transform(df_typed, categorical_cols=["flag", "score"])
+
+        assert "flag_true" in result.columns
+        assert "flag_false" in result.columns
+        assert "score_1.5" in result.columns
+        totals = result.agg(
+            F.sum("flag_UNKNOWN").alias("flag_unknown"),
+            F.sum("score_UNKNOWN").alias("score_unknown"),
+        ).first()
+        assert totals["flag_unknown"] == 0.0
+        assert totals["score_unknown"] == 0.0
+        rows = {row["id"]: row for row in result.collect()}
+        assert rows[1]["flag_true"] == 1.0
+        assert rows[2]["flag_false"] == 1.0
+        assert rows[5]["score_2.5E7"] == 1.0
+
+    def test_integer_categories(self, spark_session):
+        df = spark_session.createDataFrame([(1, 10), (2, 20), (3, 10)], "id int, code int")
+        encoder = Encoder(method="label")
+        result = encoder.fit_transform(df, categorical_cols=["code"])
+
+        assert encoder.category_mappings["code"] == {"10": 0, "20": 1, "__UNKNOWN__": 2}
+        assert [row["code"] for row in result.orderBy("id").collect()] == [0, 1, 0]
+
+
+class TestDeterministicOrder:
+    """Ties are broken by the category string, so partitioning does not matter."""
+
+    ROWS = [(i, cat) for i, cat in enumerate(["d", "b", "c", "a", "b", "d", "a", "c", "e"])]
+
+    def test_ties_are_ordered_by_category(self, spark_session):
+        df = spark_session.createDataFrame(self.ROWS, "id int, c string")
+        mapping = Encoder(method="label").fit(df, categorical_cols=["c"]).category_mappings["c"]
+
+        # a, b, c, d appear twice each; e once.
+        assert mapping == {"a": 0, "b": 1, "c": 2, "d": 3, "e": 4, "__UNKNOWN__": 5}
+
+    @pytest.mark.parametrize("partitions", [1, 3, 7])
+    def test_same_mapping_under_repartitioning(self, spark_session, partitions):
+        df = spark_session.createDataFrame(self.ROWS, "id int, c string")
+        reference = Encoder().fit(df, categorical_cols=["c"]).category_mappings
+
+        shuffled = spark_session.createDataFrame(list(reversed(self.ROWS)), "id int, c string")
+        shuffled = shuffled.repartition(partitions)
+        assert Encoder().fit(shuffled, categorical_cols=["c"]).category_mappings == reference
+
+    def test_rare_grouping_is_deterministic(self, spark_session):
+        df = spark_session.createDataFrame(self.ROWS, "id int, c string")
+        mapping = (
+            Encoder(max_categories=2, handle_rare="other")
+            .fit(df.repartition(5), categorical_cols=["c"])
+            .category_mappings["c"]
+        )
+        assert mapping == {"a": 0, "b": 1, "__OTHER__": 2}
 
 
 class TestEncoderErrors:
@@ -474,7 +617,9 @@ class TestEncoderProperties:
 
         mappings = encoder.category_mappings
         assert "color" in mappings
-        assert len(mappings["color"]) == 3  # red, blue, green
+        # red, blue, green, and the reserved last index for unseen values
+        assert len(mappings["color"]) == 4
+        assert mappings["color"]["__UNKNOWN__"] == 3
 
     def test_category_mappings_property_returns_copy(self, df_for_encoding):
         """Test that category_mappings property returns a copy."""
@@ -499,13 +644,13 @@ class TestEncoderEdgeCases:
         encoder = Encoder(method="onehot")
         result = encoder.fit_transform(df, categorical_cols=["category"])
 
-        # Should have one column for the single category
+        # One column for the single category, plus the UNKNOWN bucket
         category_cols = [c for c in result.columns if c.startswith("category_")]
-        assert len(category_cols) == 1
+        assert category_cols == ["category_only_one", "category_UNKNOWN"]
 
-        # All values should be 1.0
-        values = [row[category_cols[0]] for row in result.collect()]
-        assert all(v == 1.0 for v in values)
+        rows = result.collect()
+        assert all(row["category_only_one"] == 1.0 for row in rows)
+        assert all(row["category_UNKNOWN"] == 0.0 for row in rows)
 
     def test_null_values_handling(self, spark_session):
         """Test that null values are handled correctly."""
@@ -527,8 +672,22 @@ class TestEncoderEdgeCases:
         assert rows[0]["category"] is not None
         assert rows[2]["category"] is not None
 
-        # Null values should remain null (or be handled gracefully)
-        # The exact behavior depends on implementation
+        # Null input stays null: missing values are the Imputer's and the model's business
+        assert rows[1]["category"] is None
+        assert rows[3]["category"] is None
+        assert "None" not in encoder.category_mappings["category"]
+
+    def test_null_values_onehot_all_zero(self, spark_session):
+        """A null yields 0.0 in every one-hot column of the feature, UNKNOWN included."""
+        df = spark_session.createDataFrame(
+            [(1, "A"), (2, None), (3, "B")], "id int, category string"
+        )
+        result = Encoder(method="onehot").fit_transform(df, categorical_cols=["category"])
+
+        null_row = result.filter(F.col("id") == 2).first()
+        category_cols = [c for c in result.columns if c.startswith("category_")]
+        assert category_cols == ["category_A", "category_B", "category_UNKNOWN"]
+        assert [null_row[c] for c in category_cols] == [0.0, 0.0, 0.0]
 
     def test_all_null_label_encoding(self, spark_session):
         """Test label encoding when a fitted categorical column has no categories."""
@@ -542,6 +701,11 @@ class TestEncoderEdgeCases:
 
         rows = result.orderBy("id").collect()
         assert [row["category"] for row in rows] == [None, None]
+        assert encoder.category_mappings["category"] == {"__UNKNOWN__": 0}
+
+        # Any non-null value at transform is unseen and maps to UNKNOWN
+        probe = df.sparkSession.createDataFrame([(1, "x")], "id int, category string")
+        assert encoder.transform(probe).first()["category"] == 0
 
     def test_all_null_onehot_encoding(self, spark_session):
         """Test one-hot encoding when a fitted categorical column has no categories."""
@@ -554,7 +718,10 @@ class TestEncoderEdgeCases:
         result = encoder.fit_transform(df, categorical_cols=["category"])
 
         assert "category" not in result.columns
-        assert [col for col in result.columns if col.startswith("category_")] == []
+        assert [col for col in result.columns if col.startswith("category_")] == [
+            "category_UNKNOWN"
+        ]
+        assert [row["category_UNKNOWN"] for row in result.collect()] == [0.0, 0.0]
         assert result.count() == 2
 
     def test_numeric_string_categories(self, spark_session):
@@ -588,9 +755,103 @@ class TestEncoderEdgeCases:
 
         # Should create valid column names
         category_cols = [c for c in result.columns if c.startswith("category_")]
-        assert len(category_cols) == 3
+        # Ties are ordered by the category string: " " < "-" < "_". The second and third
+        # sanitise to a name already used, so they get their index appended.
+        assert category_cols == [
+            "category_hello_world",
+            "category_hello_world_1",
+            "category_hello_world_2",
+            "category_UNKNOWN",
+        ]
 
         # Column names should be sanitized
         for col in category_cols:
-            # Should not contain problematic characters for Spark column names
-            assert " " not in col or "_" in col
+            assert " " not in col and "-" not in col
+
+    def test_category_named_like_a_bucket_keeps_the_bucket_name(self, spark_session):
+        """A real category 'UNKNOWN' does not take over the {col}_UNKNOWN column."""
+        df = spark_session.createDataFrame(
+            [(1, "UNKNOWN"), (2, "UNKNOWN"), (3, "a")], "id int, category string"
+        )
+        encoder = Encoder(method="onehot")
+        result = encoder.fit_transform(df, categorical_cols=["category"])
+
+        category_cols = [c for c in result.columns if c.startswith("category_")]
+        assert category_cols == ["category_UNKNOWN_0", "category_a", "category_UNKNOWN"]
+        rows = {row["id"]: row for row in result.collect()}
+        assert rows[1]["category_UNKNOWN_0"] == 1.0
+        assert rows[1]["category_UNKNOWN"] == 0.0
+
+    def test_categories_differing_only_in_case_get_distinct_columns(self, spark_session):
+        """Spark resolves names case-insensitively, so 'A' and 'a' need distinct names."""
+        df = spark_session.createDataFrame(
+            [(1, "A"), (2, "A"), (3, "a")], "id int, category string"
+        )
+        result = Encoder(method="onehot").fit_transform(df, categorical_cols=["category"])
+
+        category_cols = [c for c in result.columns if c.startswith("category_")]
+        assert category_cols == ["category_A", "category_a_1", "category_UNKNOWN"]
+        rows = {row["id"]: row for row in result.collect()}
+        assert rows[3]["category_a_1"] == 1.0
+        assert rows[3]["category_A"] == 0.0
+
+
+class TestColumnOrder:
+    """The transform's column order is deterministic (see the Encoder docstring)."""
+
+    @pytest.fixture
+    def df_mixed(self, spark_session):
+        return spark_session.createDataFrame(
+            [(1, "red", 1.0, "s"), (2, "blue", 2.0, "m"), (3, "red", 3.0, "s")],
+            "id int, color string, x double, size string",
+        )
+
+    def test_label_keeps_input_order(self, df_mixed):
+        result = Encoder(method="label").fit_transform(df_mixed, categorical_cols=["size", "color"])
+        assert result.columns == ["id", "color", "x", "size"]
+        assert dict(result.dtypes)["color"] == "int"
+
+    def test_onehot_appends_blocks_in_categorical_cols_order(self, df_mixed):
+        result = Encoder(method="onehot").fit_transform(
+            df_mixed, categorical_cols=["size", "color"]
+        )
+        assert result.columns == [
+            "id",
+            "x",
+            "size_s",
+            "size_m",
+            "size_UNKNOWN",
+            "color_red",
+            "color_blue",
+            "color_UNKNOWN",
+        ]
+
+    def test_user_column_named_like_the_working_index_is_untouched(self, spark_session):
+        df = spark_session.createDataFrame(
+            [(1, "a", 7.0), (2, "b", 8.0)], "id int, c string, `__c_index` double"
+        )
+        result = Encoder(method="onehot").fit_transform(df, categorical_cols=["c"])
+
+        assert "__c_index" in result.columns
+        assert [row["__c_index"] for row in result.orderBy("id").collect()] == [7.0, 8.0]
+
+
+class TestEncoderHoldsPlainData:
+    """A fitted Encoder holds no Spark objects, so it pickles."""
+
+    @pytest.mark.parametrize("method", ["onehot", "label"])
+    def test_pickle_round_trip(self, df_for_encoding, method):
+        encoder = Encoder(method=method).fit(df_for_encoding, categorical_cols=["color", "size"])
+
+        restored = pickle.loads(pickle.dumps(encoder))
+
+        assert restored.category_mappings == encoder.category_mappings
+        expected = encoder.transform(df_for_encoding).orderBy("id").collect()
+        assert restored.transform(df_for_encoding).orderBy("id").collect() == expected
+
+    def test_no_spark_model_attributes(self, df_for_encoding):
+        encoder = Encoder().fit(df_for_encoding, categorical_cols=["color"])
+        assert not hasattr(encoder, "_onehot_models")
+        assert not hasattr(encoder, "_indexer_models")
+        for value in vars(encoder).values():
+            assert isinstance(value, (str, int, bool, list, dict))
