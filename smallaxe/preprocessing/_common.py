@@ -8,6 +8,14 @@ from pyspark.sql import functions as F
 from smallaxe import _artifact, _fs
 from smallaxe.exceptions import ValidationError
 
+__all__ = [
+    "column_ref",
+    "unique_column_name",
+    "read_step_metadata",
+    "column_list",
+    "require_keys",
+]
+
 
 def column_ref(name: str) -> Column:
     """Reference column ``name`` literally, even when it contains dots or backticks."""
@@ -37,8 +45,9 @@ def read_step_metadata(path: str, kind: str, legacy_file: Optional[str] = None) 
 
     Raises:
         ValidationError: If the path is missing, holds neither file, is the wrong kind,
-            or was written by a newer smallaxe.
+            or was written by a newer smallaxe, or ``path`` is not a string.
     """
+    _artifact.check_path(path, allow_empty=True)
     if (
         path
         and legacy_file

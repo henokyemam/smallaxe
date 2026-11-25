@@ -13,19 +13,28 @@ from pyspark.sql import DataFrame
 from pyspark.sql import functions as F
 from pyspark.sql.types import NumericType
 
-from smallaxe import _deprecation
 from smallaxe.exceptions import ValidationError
 from smallaxe.metrics._checks import require_numeric, require_rows
 from smallaxe.metrics._checks import validate_columns as _validate_columns
 
-MULTICLASS_AVERAGED_METRICS = {
+__all__ = [
+    "accuracy",
+    "precision",
+    "recall",
+    "f1_score",
+    "multiclass_scores",
+    "auc_roc",
+    "auc_pr",
+    "log_loss",
+]
+
+_MULTICLASS_AVERAGED_METRICS = {
     f"{metric}_{average}"
     for metric in ("precision", "recall", "f1_score")
     for average in ("macro", "weighted")
 }
 
 
-@_deprecation.df_keyword
 def accuracy(
     dataframe: DataFrame, label_col: str = "label", prediction_col: str = "predict_label"
 ) -> float:
@@ -59,7 +68,6 @@ def accuracy(
     return float(correct_count / total_count)
 
 
-@_deprecation.df_keyword
 def precision(
     dataframe: DataFrame,
     label_col: str = "label",
@@ -108,7 +116,6 @@ def precision(
     return float(true_positives / predicted_positives)
 
 
-@_deprecation.df_keyword
 def recall(
     dataframe: DataFrame,
     label_col: str = "label",
@@ -157,7 +164,6 @@ def recall(
     return float(true_positives / actual_positives)
 
 
-@_deprecation.df_keyword
 def f1_score(
     dataframe: DataFrame,
     label_col: str = "label",
@@ -209,7 +215,6 @@ def _averaged_score(
     return _multiclass_scores(dataframe, label_col, prediction_col, metric)[f"{metric}_{average}"]
 
 
-@_deprecation.df_keyword
 def multiclass_scores(
     dataframe: DataFrame, label_col: str = "label", prediction_col: str = "predict_label"
 ) -> Dict[str, float]:
@@ -318,7 +323,6 @@ def _multiclass_scores(
     return scores
 
 
-@_deprecation.df_keyword
 def auc_roc(
     dataframe: DataFrame, label_col: str = "label", probability_col: str = "probability"
 ) -> float:
@@ -351,7 +355,6 @@ def auc_roc(
     return float(evaluator.evaluate(dataframe))
 
 
-@_deprecation.df_keyword
 def auc_pr(
     dataframe: DataFrame, label_col: str = "label", probability_col: str = "probability"
 ) -> float:
@@ -382,8 +385,6 @@ def auc_pr(
     return float(evaluator.evaluate(dataframe))
 
 
-@_deprecation.df_keyword
-@_deprecation.keyword_only("eps")
 def log_loss(
     dataframe: DataFrame,
     label_col: str = "label",
@@ -399,8 +400,8 @@ def log_loss(
         dataframe: PySpark DataFrame containing true labels and probability scores.
         label_col: Name of the column containing true labels (0 or 1). Default is 'label'.
         probability_col: Name of the column containing probability scores. Default is 'probability'.
-        eps: Small value to avoid log(0). Default is 1e-15. Keyword-only; passing it
-            positionally is deprecated (it warns, and is removed in smallaxe 1.0).
+        eps: Small value to avoid log(0); probabilities are clipped to
+            ``[eps, 1 - eps]``. Default is 1e-15. Keyword-only.
 
     Returns:
         Log loss as a float. Lower values indicate better predictions. NaN when no

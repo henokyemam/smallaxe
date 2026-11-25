@@ -5,7 +5,7 @@ from typing import Any, Dict, List, Set, Tuple
 from pyspark.sql import Column, DataFrame
 from pyspark.sql import functions as F
 
-from smallaxe import _artifact, _deprecation
+from smallaxe import _artifact, _checks
 from smallaxe.exceptions import (
     ColumnNotFoundError,
     ModelNotFittedError,
@@ -19,15 +19,17 @@ from smallaxe.preprocessing._common import (
     unique_column_name,
 )
 
+__all__ = ["Encoder"]
+
 _VALID_METHODS = {"onehot", "label"}
 _VALID_HANDLE_RARE = {"other", "keep", "error"}
 
-OTHER = "__OTHER__"
-UNKNOWN = "__UNKNOWN__"
-_RESERVED = (OTHER, UNKNOWN)
-_RESERVED_SUFFIX = {OTHER: "OTHER", UNKNOWN: "UNKNOWN"}
+_OTHER = "__OTHER__"
+_UNKNOWN = "__UNKNOWN__"
+_RESERVED = (_OTHER, _UNKNOWN)
+_RESERVED_SUFFIX = {_OTHER: "OTHER", _UNKNOWN: "UNKNOWN"}
 
-ARTIFACT_KIND = "encoder"
+_ARTIFACT_KIND = "encoder"
 
 
 class Encoder:
@@ -67,7 +69,7 @@ class Encoder:
             Categories beyond this limit are grouped based on handle_rare.
             Default is 100.
         handle_rare: How to handle rare/excess categories. One of:
-            - 'other': Group rare categories into an 'OTHER' category.
+            - 'other': Group rare categories into an '__OTHER__' bucket.
             - 'keep': Keep all categories (ignore max_categories).
             - 'error': Raise error if categories exceed max_categories.
             Default is 'other'.
@@ -110,8 +112,8 @@ class Encoder:
         upgraded = {}
         for col, mapping in mappings.items():
             mapping = dict(mapping)
-            if OTHER not in mapping and UNKNOWN not in mapping:
-                mapping[UNKNOWN] = len(mapping)
+            if _OTHER not in mapping and _UNKNOWN not in mapping:
+                mapping[_UNKNOWN] = len(mapping)
             upgraded[col] = mapping
         state["_category_mappings"] = upgraded
         self.__dict__.update(state)
@@ -201,13 +203,12 @@ class Encoder:
         mapping = {cat: idx for idx, cat in enumerate(kept)}
 
         if len(kept) < num_categories:
-            mapping[OTHER] = len(kept)
-        if OTHER not in mapping:
-            mapping[UNKNOWN] = len(mapping)
+            mapping[_OTHER] = len(kept)
+        if _OTHER not in mapping:
+            mapping[_UNKNOWN] = len(mapping)
 
         return mapping
 
-    @_deprecation.df_keyword
     def fit(
         self,
         dataframe: DataFrame,
@@ -223,11 +224,14 @@ class Encoder:
             self: The fitted Encoder instance.
 
         Raises:
-            ValidationError: If categorical_cols is empty, max_categories is exceeded
-                with handle_rare='error', or a column holds a reserved value
-                ('__OTHER__' or '__UNKNOWN__').
+            ValidationError: If ``dataframe`` is not a DataFrame, categorical_cols is empty
+                or not a list of column names, max_categories is exceeded with
+                handle_rare='error', or a column holds a reserved value ('__OTHER__' or
+                '__UNKNOWN__').
             ColumnNotFoundError: If any specified column is not in the DataFrame.
         """
+        _checks.require_dataframe(dataframe)
+        categorical_cols = _checks.column_names("categorical_cols", categorical_cols) or []
         if not categorical_cols:
             raise ValidationError("categorical_cols cannot be empty for Encoder.")
 
@@ -241,8 +245,8 @@ class Encoder:
 
     @staticmethod
     def _fallback_index(mapping: Dict[str, int]) -> int:
-        """The index an unseen category maps to: OTHER if present, else UNKNOWN."""
-        return mapping[OTHER] if OTHER in mapping else mapping[UNKNOWN]
+        """The index an unseen category maps to: ``__OTHER__`` if present, else ``__UNKNOWN__``."""
+        return mapping[_OTHER] if _OTHER in mapping else mapping[_UNKNOWN]
 
     def _index_expr(self, col: str) -> Column:
         """Integer index of ``col``: null for null, the fallback index for unseen values."""
@@ -268,7 +272,7 @@ class Encoder:
     def _onehot_layout(self) -> Dict[str, List[Tuple[str, int]]]:
         """``(output column name, index)`` per fitted column, each in index order.
 
-        The OTHER / UNKNOWN buckets always get ``{col}_OTHER`` / ``{col}_UNKNOWN``. A
+        The ``__OTHER__`` / ``__UNKNOWN__`` buckets always get ``{col}_OTHER`` / ``{col}_UNKNOWN``. A
         category whose sanitised name is already taken (compared case-insensitively, as
         Spark resolves names) gets ``_{index}`` appended.
         """
@@ -297,7 +301,6 @@ class Encoder:
             layout[col] = columns
         return layout
 
-    @_deprecation.df_keyword
     def transform(self, dataframe: DataFrame) -> DataFrame:
         """Transform the DataFrame by encoding categorical columns.
 
@@ -313,12 +316,14 @@ class Encoder:
 
         Raises:
             ModelNotFittedError: If transform is called before fit.
+            ValidationError: If ``dataframe`` is not a DataFrame.
             ColumnNotFoundError: If any fitted column is not in the DataFrame.
             ValidationError: For 'onehot', if an output column name is already used by a
                 column the Encoder does not encode (it would be overwritten).
         """
         if not self._is_fitted:
             raise ModelNotFittedError("Encoder has not been fitted. Call fit() before transform().")
+        _checks.require_dataframe(dataframe)
 
         self._validate_columns(dataframe, self._categorical_cols)
 
@@ -375,7 +380,6 @@ class Encoder:
 
         return result_df.drop(*index_cols.values())
 
-    @_deprecation.df_keyword
     def fit_transform(
         self,
         dataframe: DataFrame,
@@ -389,6 +393,10 @@ class Encoder:
 
         Returns:
             DataFrame with encoded categorical columns.
+
+        Raises:
+            ValidationError: As :meth:`fit`.
+            ColumnNotFoundError: As :meth:`fit`.
         """
         self.fit(dataframe, categorical_cols)
         return self.transform(dataframe)
@@ -405,14 +413,14 @@ class Encoder:
 
         Raises:
             ModelNotFittedError: If save is called before fit.
-            ValidationError: If path is empty.
+            ValidationError: If path is empty or not a string.
         """
         if not self._is_fitted:
             raise ModelNotFittedError("Encoder has not been fitted. Call fit() before saving.")
 
         _artifact.write_metadata(
             path,
-            ARTIFACT_KIND,
+            _ARTIFACT_KIND,
             {
                 "method": self._method,
                 "max_categories": self._max_categories,
@@ -436,16 +444,16 @@ class Encoder:
             ValidationError: If the path does not exist, is not an encoder artifact,
                 was written by a newer smallaxe, or its metadata is incomplete.
         """
-        metadata = read_step_metadata(path, ARTIFACT_KIND)
+        metadata = read_step_metadata(path, _ARTIFACT_KIND)
         keys = ["method", "max_categories", "handle_rare", "categorical_cols"]
-        require_keys(metadata, keys + ["category_mappings"], ARTIFACT_KIND, path)
+        require_keys(metadata, keys + ["category_mappings"], _ARTIFACT_KIND, path)
 
         encoder = cls(
             method=metadata["method"],
             max_categories=metadata["max_categories"],
             handle_rare=metadata["handle_rare"],
         )
-        categorical_cols = column_list(metadata, "categorical_cols", ARTIFACT_KIND, path)
+        categorical_cols = column_list(metadata, "categorical_cols", _ARTIFACT_KIND, path)
         raw_mappings = metadata["category_mappings"]
         mappings: Dict[str, Dict[str, int]] = {}
         try:
@@ -458,7 +466,7 @@ class Encoder:
                 mappings[col] = mapping
         except (AttributeError, KeyError, TypeError, ValueError) as exc:
             raise ValidationError(
-                f"Cannot load {ARTIFACT_KIND}: the category mappings at {path!r} are "
+                f"Cannot load {_ARTIFACT_KIND}: the category mappings at {path!r} are "
                 f"corrupted ({exc})."
             ) from exc
 
@@ -555,20 +563,3 @@ class Encoder:
             return list(self._categorical_cols)
         layout = self._onehot_layout()
         return [name for col in self._categorical_cols for name, _ in layout[col]]
-
-
-# Deprecated public names, removed in smallaxe 1.0.
-_MOVED = {
-    "VALID_METHODS": (
-        "The methods are listed in the Encoder docstring; an invalid one raises "
-        "ValidationError.",
-        lambda: _VALID_METHODS,
-    ),
-    "VALID_HANDLE_RARE": (
-        "The handle_rare options are listed in the Encoder docstring; an invalid one raises "
-        "ValidationError.",
-        lambda: _VALID_HANDLE_RARE,
-    ),
-}
-__getattr__ = _deprecation.module_getattr(__name__, _MOVED)
-__dir__ = _deprecation.module_dir(globals(), _MOVED)

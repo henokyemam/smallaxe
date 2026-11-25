@@ -1,9 +1,20 @@
-"""Metrics module - regression and classification metrics."""
+"""Metrics: regression and classification scores computed in Spark.
+
+Every function takes a DataFrame first, then the label column and the prediction (or
+probability) column. Each raises ``ColumnNotFoundError`` for a missing column and
+``ValidationError`` for an empty DataFrame, and returns NaN where the metric is
+undefined on the rows given. :data:`TASK_METRICS` lists the scores a model's validation
+produces for each task.
+
+Example:
+    >>> from smallaxe import metrics
+    >>> metrics.rmse(predictions, label_col="price", prediction_col="predict_label")
+"""
 
 from typing import Dict, FrozenSet
 
 from smallaxe.metrics.classification import (
-    MULTICLASS_AVERAGED_METRICS,
+    _MULTICLASS_AVERAGED_METRICS,
     accuracy,
     auc_pr,
     auc_roc,
@@ -28,7 +39,7 @@ TASK_METRICS: Dict[str, FrozenSet[str]] = {
         {"accuracy", "precision", "recall", "f1_score", "auc_roc", "auc_pr", "log_loss"}
     ),
     "multiclass": frozenset({"accuracy", "precision", "recall", "f1_score"})
-    | MULTICLASS_AVERAGED_METRICS,
+    | _MULTICLASS_AVERAGED_METRICS,
 }
 
 __all__ = [

@@ -13,7 +13,7 @@ from pyspark.sql.types import (
     StringType,
 )
 
-from smallaxe import _artifact, _deprecation, _fs
+from smallaxe import _artifact, _checks, _fs
 from smallaxe.exceptions import (
     ColumnNotFoundError,
     ModelNotFittedError,
@@ -21,11 +21,13 @@ from smallaxe.exceptions import (
 )
 from smallaxe.preprocessing._common import column_ref, read_step_metadata, require_keys
 
-VALID_NUMERICAL_STRATEGIES = {"mean", "median", "mode"}
-VALID_CATEGORICAL_STRATEGIES = {"most_frequent"}
+__all__ = ["Imputer"]
 
-ARTIFACT_KIND = "imputer"
-LEGACY_METADATA_FILE = "imputer_metadata.json"
+_VALID_NUMERICAL_STRATEGIES = {"mean", "median", "mode"}
+_VALID_CATEGORICAL_STRATEGIES = {"most_frequent"}
+
+_ARTIFACT_KIND = "imputer"
+_LEGACY_METADATA_FILE = "imputer_metadata.json"
 _PAYLOAD_KEYS = [
     "numerical_strategy",
     "categorical_strategy",
@@ -116,10 +118,10 @@ class Imputer:
         """Validate the imputation strategies."""
         if numerical_strategy is not None:
             if isinstance(numerical_strategy, str):
-                if numerical_strategy not in VALID_NUMERICAL_STRATEGIES:
+                if numerical_strategy not in _VALID_NUMERICAL_STRATEGIES:
                     raise ValidationError(
                         f"Invalid numerical_strategy '{numerical_strategy}'. "
-                        f"Must be one of {sorted(VALID_NUMERICAL_STRATEGIES)} or a numeric value."
+                        f"Must be one of {sorted(_VALID_NUMERICAL_STRATEGIES)} or a numeric value."
                     )
             elif not isinstance(numerical_strategy, (int, float)):
                 raise ValidationError(
@@ -147,7 +149,6 @@ class Imputer:
             if col not in available_columns:
                 raise ColumnNotFoundError(column=col, available_columns=available_columns)
 
-    @_deprecation.df_keyword
     def fit(
         self,
         dataframe: DataFrame,
@@ -165,12 +166,14 @@ class Imputer:
             self: The fitted Imputer instance.
 
         Raises:
-            ValidationError: If no columns are given, a strategy is missing for the
-                columns given, or a categorical fill does not fit its column's type.
+            ValidationError: If ``dataframe`` is not a DataFrame, no columns are given or a
+                column list is not a list of names, a strategy is missing for the columns
+                given, or a categorical fill does not fit its column's type.
             ColumnNotFoundError: If any specified column is not in the DataFrame.
         """
-        numerical_cols = list(numerical_cols or [])
-        categorical_cols = list(categorical_cols or [])
+        _checks.require_dataframe(dataframe)
+        numerical_cols = _checks.column_names("numerical_cols", numerical_cols) or []
+        categorical_cols = _checks.column_names("categorical_cols", categorical_cols) or []
 
         if not numerical_cols and not categorical_cols:
             raise ValidationError(
@@ -311,7 +314,6 @@ class Imputer:
                 "of that type, or cast the column to string before imputing."
             )
 
-    @_deprecation.df_keyword
     def transform(self, dataframe: DataFrame) -> DataFrame:
         """Transform the DataFrame by imputing missing values.
 
@@ -323,10 +325,12 @@ class Imputer:
 
         Raises:
             ModelNotFittedError: If transform is called before fit.
+            ValidationError: If ``dataframe`` is not a DataFrame.
             ColumnNotFoundError: If any fitted column is not in the DataFrame.
         """
         if not self._is_fitted:
             raise ModelNotFittedError("Imputer has not been fitted. Call fit() before transform().")
+        _checks.require_dataframe(dataframe)
 
         # Validate that all fitted columns exist in the transform DataFrame
         all_cols = self._numerical_cols + self._categorical_cols
@@ -356,7 +360,6 @@ class Imputer:
 
         return result_df
 
-    @_deprecation.df_keyword
     def fit_transform(
         self,
         dataframe: DataFrame,
@@ -372,6 +375,10 @@ class Imputer:
 
         Returns:
             DataFrame with missing values imputed.
+
+        Raises:
+            ValidationError: As :meth:`fit`.
+            ColumnNotFoundError: As :meth:`fit`.
         """
         self.fit(dataframe, numerical_cols, categorical_cols)
         return self.transform(dataframe)
@@ -422,14 +429,14 @@ class Imputer:
 
         Raises:
             ModelNotFittedError: If save is called before fit.
-            ValidationError: If path is empty.
+            ValidationError: If path is empty or not a string.
         """
         if not self._is_fitted:
             raise ModelNotFittedError("Imputer has not been fitted. Call fit() before saving.")
 
         _artifact.write_metadata(
             path,
-            ARTIFACT_KIND,
+            _ARTIFACT_KIND,
             {
                 "numerical_strategy": self._numerical_strategy,
                 "categorical_strategy": self._categorical_strategy,
@@ -454,8 +461,8 @@ class Imputer:
             ValidationError: If the path does not exist, is not an imputer artifact, was
                 written by a newer smallaxe, or its metadata is incomplete.
         """
-        metadata = read_step_metadata(path, ARTIFACT_KIND, LEGACY_METADATA_FILE)
-        require_keys(metadata, _PAYLOAD_KEYS, ARTIFACT_KIND, path)
+        metadata = read_step_metadata(path, _ARTIFACT_KIND, _LEGACY_METADATA_FILE)
+        require_keys(metadata, _PAYLOAD_KEYS, _ARTIFACT_KIND, path)
 
         imputer = cls(
             numerical_strategy=metadata["numerical_strategy"],
@@ -472,7 +479,7 @@ class Imputer:
             }
         except (AttributeError, TypeError, ValueError) as exc:
             raise ValidationError(
-                f"Cannot load {ARTIFACT_KIND}: corrupted fill values at {path!r} ({exc})."
+                f"Cannot load {_ARTIFACT_KIND}: corrupted fill values at {path!r} ({exc})."
             ) from exc
         imputer._is_fitted = True
 

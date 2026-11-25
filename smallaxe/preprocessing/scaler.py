@@ -21,7 +21,7 @@ from pyspark.ml.functions import vector_to_array
 from pyspark.sql import DataFrame
 from pyspark.sql.types import BooleanType, NumericType
 
-from smallaxe import _artifact, _deprecation, _fs
+from smallaxe import _artifact, _checks, _fs
 from smallaxe.exceptions import (
     ColumnNotFoundError,
     ModelNotFittedError,
@@ -35,11 +35,13 @@ from smallaxe.preprocessing._common import (
     unique_column_name,
 )
 
+__all__ = ["Scaler"]
+
 _VALID_METHODS = {"standard", "minmax", "maxabs"}
 
-ARTIFACT_KIND = "scaler"
-LEGACY_METADATA_FILE = "scaler_metadata.json"
-SPARK_MODEL_DIR = "spark_model"
+_ARTIFACT_KIND = "scaler"
+_LEGACY_METADATA_FILE = "scaler_metadata.json"
+_SPARK_MODEL_DIR = "spark_model"
 
 _ScalerModel = Union[StandardScalerModel, MinMaxScalerModel, MaxAbsScalerModel]
 _MODEL_CLASSES: Dict[str, Type[_ScalerModel]] = {
@@ -154,7 +156,6 @@ class Scaler:
             handleInvalid="keep",
         ).transform(dataframe)
 
-    @_deprecation.df_keyword
     def fit(
         self,
         dataframe: DataFrame,
@@ -170,9 +171,12 @@ class Scaler:
             self: The fitted Scaler instance.
 
         Raises:
-            ValidationError: If numerical_cols is empty or a column is not numeric.
+            ValidationError: If ``dataframe`` is not a DataFrame, numerical_cols is empty
+                or not a list of column names, or a column is not numeric.
             ColumnNotFoundError: If any specified column is not in the DataFrame.
         """
+        _checks.require_dataframe(dataframe)
+        numerical_cols = _checks.column_names("numerical_cols", numerical_cols) or []
         if not numerical_cols:
             raise ValidationError("numerical_cols cannot be empty for Scaler.")
 
@@ -189,7 +193,6 @@ class Scaler:
 
         return self
 
-    @_deprecation.df_keyword
     def transform(self, dataframe: DataFrame) -> DataFrame:
         """Transform the DataFrame by scaling numerical columns.
 
@@ -201,10 +204,12 @@ class Scaler:
 
         Raises:
             ModelNotFittedError: If transform is called before fit.
+            ValidationError: If ``dataframe`` is not a DataFrame.
             ColumnNotFoundError: If any fitted column is not in the DataFrame.
         """
         if not self._is_fitted:
             raise ModelNotFittedError("Scaler has not been fitted. Call fit() before transform().")
+        _checks.require_dataframe(dataframe)
 
         # Validate that all fitted columns exist
         self._validate_columns(dataframe, self._numerical_cols)
@@ -236,7 +241,6 @@ class Scaler:
             ]
         )
 
-    @_deprecation.df_keyword
     def fit_transform(
         self,
         dataframe: DataFrame,
@@ -250,6 +254,10 @@ class Scaler:
 
         Returns:
             DataFrame with scaled numerical columns.
+
+        Raises:
+            ValidationError: As :meth:`fit`.
+            ColumnNotFoundError: As :meth:`fit`.
         """
         self.fit(dataframe, numerical_cols)
         return self.transform(dataframe)
@@ -290,19 +298,18 @@ class Scaler:
 
         Raises:
             ModelNotFittedError: If save is called before fit.
-            ValidationError: If path is empty.
+            ValidationError: If path is empty or not a string.
         """
         if not self._is_fitted:
             raise ModelNotFittedError("Scaler has not been fitted. Call fit() before saving.")
-        if not path:
-            raise ValidationError("Path cannot be empty.")
+        _artifact.check_path(path)
 
         # The Spark model first: metadata.json is written last, so a directory that has
         # it holds a complete artifact.
-        self._scaler_model.write().overwrite().save(_fs.join(path, SPARK_MODEL_DIR))
+        self._scaler_model.write().overwrite().save(_fs.join(path, _SPARK_MODEL_DIR))
         _artifact.write_metadata(
             path,
-            ARTIFACT_KIND,
+            _ARTIFACT_KIND,
             {"method": self._method, "numerical_cols": list(self._numerical_cols)},
         )
 
@@ -321,36 +328,25 @@ class Scaler:
                 written by a newer smallaxe, or its metadata or Spark model is missing or
                 unreadable.
         """
-        metadata = read_step_metadata(path, ARTIFACT_KIND, LEGACY_METADATA_FILE)
-        require_keys(metadata, ["method", "numerical_cols"], ARTIFACT_KIND, path)
+        metadata = read_step_metadata(path, _ARTIFACT_KIND, _LEGACY_METADATA_FILE)
+        require_keys(metadata, ["method", "numerical_cols"], _ARTIFACT_KIND, path)
 
         scaler = cls(method=metadata["method"])
-        numerical_cols = column_list(metadata, "numerical_cols", ARTIFACT_KIND, path)
-        model_path = _fs.join(path, SPARK_MODEL_DIR)
+        numerical_cols = column_list(metadata, "numerical_cols", _ARTIFACT_KIND, path)
+        model_path = _fs.join(path, _SPARK_MODEL_DIR)
         if not _fs.exists(model_path):
             raise ValidationError(
-                f"Cannot load {ARTIFACT_KIND}: {path!r} has no {SPARK_MODEL_DIR}/ directory."
+                f"Cannot load {_ARTIFACT_KIND}: {path!r} has no {_SPARK_MODEL_DIR}/ directory."
             )
         model_class = _MODEL_CLASSES[scaler._method]
         try:
             scaler._scaler_model = model_class.load(model_path)
         except _fs.jvm_error_types() as exc:
             raise ValidationError(
-                f"Cannot load {ARTIFACT_KIND}: the Spark model at {model_path!r} could not "
+                f"Cannot load {_ARTIFACT_KIND}: the Spark model at {model_path!r} could not "
                 f"be read as a {model_class.__name__} ({_artifact.jvm_error_summary(exc)})."
             ) from exc
         scaler._numerical_cols = numerical_cols
         scaler._is_fitted = True
 
         return scaler
-
-
-# Deprecated public names, removed in smallaxe 1.0.
-_MOVED = {
-    "VALID_METHODS": (
-        "The methods are listed in the Scaler docstring; an invalid one raises " "ValidationError.",
-        lambda: _VALID_METHODS,
-    ),
-}
-__getattr__ = _deprecation.module_getattr(__name__, _MOVED)
-__dir__ = _deprecation.module_dir(globals(), _MOVED)

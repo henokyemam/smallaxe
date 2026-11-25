@@ -17,6 +17,20 @@ from typing import Any, Dict
 from smallaxe import _fs
 from smallaxe.exceptions import ValidationError
 
+__all__ = [
+    "FORMAT_VERSION",
+    "METADATA_FILE",
+    "RESERVED_KEYS",
+    "LEGACY_STEP_FILES",
+    "check_path",
+    "write_metadata",
+    "read_json",
+    "jvm_error_summary",
+    "is_unversioned",
+    "saved_kind",
+    "read_metadata",
+]
+
 FORMAT_VERSION = 1
 METADATA_FILE = "metadata.json"
 RESERVED_KEYS = ("format_version", "kind", "smallaxe_version")
@@ -35,14 +49,33 @@ def _smallaxe_version() -> str:
     return __version__
 
 
+def check_path(path: Any, allow_empty: bool = False) -> None:
+    """Raise ValidationError unless ``path`` is a string (and, by default, not empty).
+
+    Args:
+        path: What the caller passed as an artifact path.
+        allow_empty: Accept ``""`` (the loaders report it as a path that does not exist).
+
+    Raises:
+        ValidationError: If ``path`` is not a string, or is empty and that is not allowed.
+    """
+    if not isinstance(path, str):
+        raise ValidationError(
+            "path must be a string (a local path or a URI such as dbfs:/... or s3://...), "
+            f"got {type(path).__name__}."
+        )
+    if not path and not allow_empty:
+        raise ValidationError("Path cannot be empty.")
+
+
 def write_metadata(path: str, kind: str, payload: Dict[str, Any]) -> None:
     """Write ``<path>/metadata.json`` with the header keys and ``payload``.
 
     Raises:
-        ValidationError: If ``path`` is empty or ``payload`` uses a reserved key.
+        ValidationError: If ``path`` is empty or not a string, or ``payload`` uses a
+            reserved key.
     """
-    if not path:
-        raise ValidationError("Path cannot be empty.")
+    check_path(path)
     clashes = [key for key in RESERVED_KEYS if key in payload]
     if clashes:
         raise ValidationError(f"Artifact payload may not use the reserved keys {clashes}.")
@@ -110,6 +143,7 @@ def saved_kind(path: str) -> str:
         ValidationError: If the path does not exist, holds no smallaxe artifact, or its
             ``metadata.json`` cannot be read or names no kind.
     """
+    check_path(path, allow_empty=True)
     if not path or not _fs.exists(path):
         raise ValidationError(f"Cannot load artifact: path {path!r} does not exist.{_PATH_HINT}")
     metadata_path = _fs.join(path, METADATA_FILE)
@@ -152,6 +186,7 @@ def read_metadata(path: str, kind: str, allow_unversioned: bool = False) -> Dict
             cannot be read or is not a JSON object, ``kind`` differs, or ``format_version``
             is missing or newer than :data:`FORMAT_VERSION`.
     """
+    check_path(path, allow_empty=True)
     if not path or not _fs.exists(path):
         raise ValidationError(f"Cannot load {kind}: path {path!r} does not exist.{_PATH_HINT}")
     metadata_path = _fs.join(path, METADATA_FILE)

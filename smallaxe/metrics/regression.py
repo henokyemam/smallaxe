@@ -11,9 +11,10 @@ from pyspark.ml.evaluation import RegressionEvaluator
 from pyspark.sql import DataFrame
 from pyspark.sql import functions as F
 
-from smallaxe import _deprecation
 from smallaxe.metrics._checks import require_numeric, require_rows
 from smallaxe.metrics._checks import validate_columns as _validate_columns
+
+__all__ = ["mse", "rmse", "mae", "r2", "mape"]
 
 
 def _evaluate(
@@ -28,7 +29,6 @@ def _evaluate(
     return float(evaluator.evaluate(dataframe))
 
 
-@_deprecation.df_keyword
 def mse(
     dataframe: DataFrame, label_col: str = "label", prediction_col: str = "predict_label"
 ) -> float:
@@ -53,7 +53,6 @@ def mse(
     return _evaluate(dataframe, label_col, prediction_col, "mse")
 
 
-@_deprecation.df_keyword
 def rmse(
     dataframe: DataFrame, label_col: str = "label", prediction_col: str = "predict_label"
 ) -> float:
@@ -79,7 +78,6 @@ def rmse(
     return _evaluate(dataframe, label_col, prediction_col, "rmse")
 
 
-@_deprecation.df_keyword
 def mae(
     dataframe: DataFrame, label_col: str = "label", prediction_col: str = "predict_label"
 ) -> float:
@@ -104,7 +102,6 @@ def mae(
     return _evaluate(dataframe, label_col, prediction_col, "mae")
 
 
-@_deprecation.df_keyword
 def r2(
     dataframe: DataFrame, label_col: str = "label", prediction_col: str = "predict_label"
 ) -> float:
@@ -149,7 +146,6 @@ def r2(
     return _evaluate(dataframe, label_col, prediction_col, "r2")
 
 
-@_deprecation.df_keyword
 def mape(
     dataframe: DataFrame, label_col: str = "label", prediction_col: str = "predict_label"
 ) -> float:
