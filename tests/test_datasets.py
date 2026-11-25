@@ -266,13 +266,13 @@ class TestRandomState:
 
     def test_loading_does_not_fix_the_unseeded_split_seed(self, spark_session):
         """The old global reseed made every later unseeded fit draw the same split."""
-        from smallaxe.training.mixins.validation_mixin import resolve_split_seed
+        from smallaxe.training.mixins.validation_mixin import _resolve_split_seed
 
         smallaxe.set_seed(None)
         drawn = set()
         for _ in range(3):
             load_sample_regression(spark_session, n_rows=5, seed=42)
-            drawn.add(resolve_split_seed())
+            drawn.add(_resolve_split_seed())
         assert len(drawn) == 3
 
 

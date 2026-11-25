@@ -25,11 +25,10 @@ from smallaxe.training.mixins import (
     SparkModelMixin,
     ValidationMixin,
 )
-from smallaxe.training.mixins.validation_mixin import resolve_split_seed
+from smallaxe.training.mixins.validation_mixin import _resolve_split_seed
 
 
-@_deprecation.df_keyword
-def infer_feature_cols(
+def _infer_feature_cols(
     dataframe: DataFrame, label_col: str, exclude_cols: List[str]
 ) -> Tuple[List[str], Dict[str, str]]:
     """Numeric and boolean columns as features; everything else is reported.
@@ -51,7 +50,7 @@ def infer_feature_cols(
     return feature_cols, ignored
 
 
-def warn_ignored_cols(
+def _warn_ignored_cols(
     feature_cols: List[str], ignored: Dict[str, str], stacklevel: Optional[int] = None
 ) -> None:
     """One ``UserWarning`` naming the columns feature inference left out.
@@ -73,8 +72,7 @@ def warn_ignored_cols(
     )
 
 
-@_deprecation.df_keyword
-def check_training_data(
+def _check_training_data(
     dataframe: DataFrame,
     label_col: str,
     feature_cols: List[str],
@@ -322,8 +320,8 @@ class BaseModel(
         inferred = feature_cols is None
         ignored: Dict[str, str] = {}
         if feature_cols is None:
-            feature_cols, ignored = infer_feature_cols(dataframe, label_col, self._exclude_cols)
-            warn_ignored_cols(feature_cols, ignored)
+            feature_cols, ignored = _infer_feature_cols(dataframe, label_col, self._exclude_cols)
+            _warn_ignored_cols(feature_cols, ignored)
 
         # Validate columns exist
         self._validate_columns(dataframe, label_col, feature_cols)
@@ -339,7 +337,7 @@ class BaseModel(
 
         # Seeds: the model's seed parameter, then the global seed, then the search's
         # shared split seed, then random.
-        split_seed = resolve_split_seed(self._seed_param(), self._split_seed_fallback)
+        split_seed = _resolve_split_seed(self._seed_param(), self._split_seed_fallback)
 
         # Apply caching
         cached_df, persisted = self._apply_cache_strategy(
@@ -348,7 +346,7 @@ class BaseModel(
 
         try:
             # One pass over the data: row count, missing features, null labels.
-            data_stats = check_training_data(
+            data_stats = _check_training_data(
                 cached_df, label_col, feature_cols, self._accepts_missing()
             )
             data_stats.update(
@@ -456,10 +454,10 @@ class BaseModel(
     ) -> List[str]:
         """Infer feature columns from DataFrame schema.
 
-        Numeric and boolean columns are features. See :func:`infer_feature_cols`
+        Numeric and boolean columns are features. See :func:`_infer_feature_cols`
         for the columns left out.
         """
-        return infer_feature_cols(dataframe, label_col, exclude_cols)[0]
+        return _infer_feature_cols(dataframe, label_col, exclude_cols)[0]
 
     def _validate_columns(
         self,
@@ -887,7 +885,7 @@ class BaseModel(
             dataframe: Training DataFrame.
             label_col: Label column name.
             feature_cols: Feature column names.
-            data_stats: Output of :func:`check_training_data`, so the row count
+            data_stats: Output of :func:`_check_training_data`, so the row count
                 is not computed again.
         """
         # Capture base metadata
@@ -1198,7 +1196,7 @@ class Model(BaseModel):
         params = dict(self.get_params())
         if "seed" in params and params["seed"] is None:
             params["seed"] = smallaxe.get_seed()
-        ctor, setters = _algorithm.estimator_kwargs(
+        ctor, setters = _algorithm._estimator_kwargs(
             algorithm, self._task, params, self._column_names(label_col)
         )
         ctor.update(extra)
@@ -1275,7 +1273,7 @@ class Model(BaseModel):
         dependency = self._algorithm.dependency
         package = {
             "algorithm_package": dependency.package if dependency is not None else None,
-            "algorithm_package_version": _algorithm.package_version(self._algorithm),
+            "algorithm_package_version": _algorithm._package_version(self._algorithm),
         }
         metadata: Dict[str, Any] = {}
         for key, value in self._metadata.items():
@@ -1313,7 +1311,7 @@ class Model(BaseModel):
         smallaxe reads; an artifact without it (smallaxe 0.10 and earlier) is accepted.
         ``algorithm`` names the algorithm; artifacts written by smallaxe 0.8.x record the
         old class name instead, mapped through
-        :data:`~smallaxe.training.algorithm.LEGACY_CLASS_NAMES`. ``task`` is required and
+        :data:`~smallaxe.training.algorithm._LEGACY_CLASS_NAMES`. ``task`` is required and
         every saved parameter must be in the algorithm's table for that task; parameters
         the artifact leaves out take their defaults.
 
@@ -1336,12 +1334,12 @@ class Model(BaseModel):
 
         name = state.get("algorithm")
         if name is None:
-            if saved_class not in _algorithm.LEGACY_CLASS_NAMES:
+            if saved_class not in _algorithm._LEGACY_CLASS_NAMES:
                 raise ValidationError(
                     "Model metadata does not contain 'algorithm'. "
                     "This may be an older model format or corrupted metadata."
                 )
-            name = _algorithm.LEGACY_CLASS_NAMES[saved_class][0]
+            name = _algorithm._LEGACY_CLASS_NAMES[saved_class][0]
         algorithm = _algorithm.get(name)
         task = _saved_task(path, state, algorithm)
         state["params"] = _saved_params(path, state, algorithm, task)
@@ -1350,7 +1348,7 @@ class Model(BaseModel):
             kind, task_type = Classifier, "classification"
         else:
             kind, task_type = Regressor, "regression"
-        saved_name = _algorithm.legacy_class_name(name, task_type)
+        saved_name = _algorithm._legacy_class_name(name, task_type)
         expected_kind = None
         if issubclass(cls, Regressor):
             expected_kind = Regressor
@@ -1484,3 +1482,24 @@ def _warn_deprecated_alias(name: str, factory: str) -> None:
     _deprecation.warn(
         f"{name} is deprecated and will be removed in smallaxe 1.0. Use {factory} instead."
     )
+
+
+# Deprecated public names, removed in smallaxe 1.0. The two that take a DataFrame still
+# accept df= under their old names.
+_FIT_ADVICE = "Use Model.fit(), which {}, instead."
+_MOVED = {
+    "infer_feature_cols": (
+        _FIT_ADVICE.format("infers feature_cols when none are given"),
+        _deprecation.with_df_keyword(_infer_feature_cols),
+    ),
+    "warn_ignored_cols": (
+        _FIT_ADVICE.format("warns about the columns it leaves out"),
+        lambda: _warn_ignored_cols,
+    ),
+    "check_training_data": (
+        _FIT_ADVICE.format("runs this check"),
+        _deprecation.with_df_keyword(_check_training_data),
+    ),
+}
+__getattr__ = _deprecation.module_getattr(__name__, _MOVED)
+__dir__ = _deprecation.module_dir(globals(), _MOVED)

@@ -2,6 +2,7 @@
 
 from typing import Any, List, Optional
 
+from smallaxe import _deprecation
 from smallaxe.training.algorithm import Algorithm, Dependency, Param
 from smallaxe.training.base import Classifier, Regressor, _warn_deprecated_alias
 
@@ -54,11 +55,17 @@ ALGORITHM = Algorithm(
 )
 
 
-def __getattr__(name: str) -> Any:
-    """``XGBOOST_AVAILABLE``, probed on access so importing this module imports no xgboost."""
-    if name == "XGBOOST_AVAILABLE":
-        return ALGORITHM.available()
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+# Deprecated public names, removed in smallaxe 1.0. ``XGBOOST_AVAILABLE`` is probed on every
+# read, so importing this module imports no optional package.
+_MOVED = {
+    "XGBOOST_AVAILABLE": (
+        "Use smallaxe.training.algorithm.get('xgboost').available() or "
+        "regressors.available_models() instead.",
+        lambda: ALGORITHM.available(),
+    ),
+}
+__getattr__ = _deprecation.module_getattr(__name__, _MOVED)
+__dir__ = _deprecation.module_dir(globals(), _MOVED)
 
 
 class XGBoostRegressor(Regressor):

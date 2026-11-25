@@ -391,14 +391,14 @@ class Pipeline:
         With ``feature_cols`` None, a smallaxe model infers its features in its own
         ``fit``; a duck-typed model gets the columns the same inference picks.
         """
-        from smallaxe.training.base import BaseModel, infer_feature_cols, warn_ignored_cols
+        from smallaxe.training.base import BaseModel, _infer_feature_cols, _warn_ignored_cols
 
         if isinstance(model, BaseModel):
             model.fit(dataframe, label_col=label_col, feature_cols=feature_cols)
             return list(model._feature_cols)
         if feature_cols is None:
-            feature_cols, ignored = infer_feature_cols(dataframe, label_col, [])
-            warn_ignored_cols(feature_cols, ignored)
+            feature_cols, ignored = _infer_feature_cols(dataframe, label_col, [])
+            _warn_ignored_cols(feature_cols, ignored)
         model.fit(dataframe, label_col=label_col, feature_cols=feature_cols)
         return list(feature_cols)
 

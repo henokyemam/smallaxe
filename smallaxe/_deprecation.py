@@ -169,7 +169,7 @@ def keyword_only(*names: str) -> Callable[[_Callable], _Callable]:
     return apply
 
 
-# A deprecated module attribute: the replacement to name, and how to get its value.
+# A deprecated module attribute: what to use instead (a sentence), and how to get its value.
 Moved = Tuple[str, Callable[[], Any]]
 
 
@@ -186,12 +186,14 @@ def _called_by_import_machinery() -> bool:
 def module_getattr(module: str, moved: Mapping[str, Moved]) -> Callable[[str], Any]:
     """A PEP 562 ``__getattr__`` serving a module's deprecated names.
 
-    Reading a deprecated name emits one ``DeprecationWarning`` naming its replacement and
-    returns the value its getter gives; any other unknown name raises ``AttributeError``.
+    Reading a deprecated name emits one ``DeprecationWarning`` (``"<module>.<name> is
+    deprecated and will be removed in smallaxe 1.0. <advice>"``) and returns the value
+    its getter gives; any other unknown name raises ``AttributeError``.
 
     Args:
         module: The module's ``__name__``, for messages.
-        moved: Deprecated name -> ``(replacement, getter)``.
+        moved: Deprecated name -> ``(advice, getter)``; the advice is a sentence naming
+            the replacement (``"Use smallaxe.training.Model instead."``).
 
     Returns:
         The function to assign to the module's ``__getattr__``.
@@ -200,12 +202,9 @@ def module_getattr(module: str, moved: Mapping[str, Moved]) -> Callable[[str], A
     def __getattr__(name: str) -> Any:
         if name not in moved:
             raise AttributeError(f"module {module!r} has no attribute {name!r}")
-        replacement, getter = moved[name]
+        advice, getter = moved[name]
         if not _called_by_import_machinery():
-            warn(
-                f"{module}.{name} is deprecated and will be removed in {REMOVED_IN}. "
-                f"Use {replacement} instead."
-            )
+            warn(f"{module}.{name} is deprecated and will be removed in {REMOVED_IN}. {advice}")
         return getter()
 
     return __getattr__

@@ -35,7 +35,7 @@ from smallaxe.preprocessing._common import (
     unique_column_name,
 )
 
-VALID_METHODS = {"standard", "minmax", "maxabs"}
+_VALID_METHODS = {"standard", "minmax", "maxabs"}
 
 ARTIFACT_KIND = "scaler"
 LEGACY_METADATA_FILE = "scaler_metadata.json"
@@ -77,9 +77,9 @@ class Scaler:
 
     def _validate_method(self, method: str) -> None:
         """Validate the scaling method."""
-        if method not in VALID_METHODS:
+        if method not in _VALID_METHODS:
             raise ValidationError(
-                f"Invalid method '{method}'. Must be one of {sorted(VALID_METHODS)}."
+                f"Invalid method '{method}'. Must be one of {sorted(_VALID_METHODS)}."
             )
 
     def _validate_columns(
@@ -129,7 +129,7 @@ class Scaler:
                 outputCol=output_col,
             )
         raise ValidationError(
-            f"Invalid method '{self._method}'. Must be one of {sorted(VALID_METHODS)}."
+            f"Invalid method '{self._method}'. Must be one of {sorted(_VALID_METHODS)}."
         )
 
     @staticmethod
@@ -343,3 +343,14 @@ class Scaler:
         scaler._is_fitted = True
 
         return scaler
+
+
+# Deprecated public names, removed in smallaxe 1.0.
+_MOVED = {
+    "VALID_METHODS": (
+        "The methods are listed in the Scaler docstring; an invalid one raises " "ValidationError.",
+        lambda: _VALID_METHODS,
+    ),
+}
+__getattr__ = _deprecation.module_getattr(__name__, _MOVED)
+__dir__ = _deprecation.module_dir(globals(), _MOVED)

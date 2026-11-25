@@ -188,7 +188,7 @@ def load(path: str) -> Classifier:
     """
     model = Model.load(path)
     if not isinstance(model, Classifier):
-        saved = algorithm.legacy_class_name(model.algorithm.name, model.task_type)
+        saved = algorithm._legacy_class_name(model.algorithm.name, model.task_type)
         raise ValidationError(
             f"Model type '{saved}' is not a supported classifier: {path!r} holds a "
             "regressor. Load it with regressors.load() or smallaxe.load_model()."
@@ -290,7 +290,7 @@ class Classifiers:
             "installed)",
         )
         return [
-            algorithm.legacy_class_name(name, _TASK_TYPE)
+            algorithm._legacy_class_name(name, _TASK_TYPE)
             for name in algorithm.names()
             if algorithm.get(name).available()
         ]
@@ -305,6 +305,6 @@ class Classifiers:
         """
         _warn_static("available_models", "classifiers.available_models()")
         return {
-            name: {"class_name": algorithm.legacy_class_name(name, _TASK_TYPE), **entry}
+            name: {"class_name": algorithm._legacy_class_name(name, _TASK_TYPE), **entry}
             for name, entry in available_models().items()
         }

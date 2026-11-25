@@ -92,7 +92,7 @@ class TestOptimizeDependencyGating:
 
     def test_run_raises_dependency_error_without_hyperopt(self, monkeypatch, regression_df):
         """run() raises DependencyError with an install hint when hyperopt is absent."""
-        monkeypatch.setattr(optimize, "HYPEROPT_AVAILABLE", False)
+        monkeypatch.setattr(optimize, "_HYPEROPT_AVAILABLE", False)
         model = regressors.random_forest(seed=42)
         with pytest.raises(DependencyError, match="hyperopt"):
             optimize.run(
@@ -147,7 +147,7 @@ class TestOptimizeArgumentValidation:
             )
 
     def test_every_metric_belongs_to_a_task(self):
-        assert set().union(*TASK_METRICS.values()) == optimize.VALID_METRICS
+        assert set().union(*TASK_METRICS.values()) == optimize._VALID_METRICS
 
     def test_validation_none_rejected(self, regression_df):
         model = regressors.random_forest(seed=42)

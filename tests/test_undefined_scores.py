@@ -16,7 +16,7 @@ import smallaxe
 from smallaxe.exceptions import ValidationError
 from smallaxe.training import classifiers
 from smallaxe.training.base import Model
-from smallaxe.training.mixins.validation_mixin import split_hash
+from smallaxe.training.mixins.validation_mixin import _split_hash
 
 NAN = float("nan")
 SEED = 11
@@ -37,7 +37,7 @@ def one_class_fold_frame(spark_session):
     folds = {
         row["key"]: row["fold"]
         for row in keys.select(
-            "key", (split_hash(keys, SEED, "key") % N_FOLDS).alias("fold")
+            "key", (_split_hash(keys, SEED, "key") % N_FOLDS).alias("fold")
         ).collect()
     }
     rows = []
@@ -48,7 +48,7 @@ def one_class_fold_frame(spark_session):
     df = spark_session.createDataFrame(rows, ["key", "x", "z", "label"])
 
     by_fold = (
-        df.withColumn("fold", split_hash(df, SEED, "key") % N_FOLDS)
+        df.withColumn("fold", _split_hash(df, SEED, "key") % N_FOLDS)
         .groupBy("fold")
         .agg(F.countDistinct("label").alias("classes"))
         .collect()
@@ -262,7 +262,7 @@ class TestSingleClassTrainingSplit:
             s
             for s in range(500)
             if keys.where(F.col("key") == "pos")
-            .select((split_hash(keys, s, "key") / F.lit(float(2**31))).alias("b"))
+            .select((_split_hash(keys, s, "key") / F.lit(float(2**31))).alias("b"))
             .first()["b"]
             < 0.2
         )

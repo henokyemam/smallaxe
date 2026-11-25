@@ -180,7 +180,7 @@ def load(path: str) -> Regressor:
     """
     model = Model.load(path)
     if not isinstance(model, Regressor):
-        saved = algorithm.legacy_class_name(model.algorithm.name, model.task_type)
+        saved = algorithm._legacy_class_name(model.algorithm.name, model.task_type)
         raise ValidationError(
             f"Model type '{saved}' is not a supported regressor: {path!r} holds a "
             f"{model.task} classifier. Load it with classifiers.load() or "
@@ -282,7 +282,7 @@ class Regressors:
             "regressors.algorithms() (and regressors.available_models() for what is " "installed)",
         )
         return [
-            algorithm.legacy_class_name(name, _TASK_TYPE)
+            algorithm._legacy_class_name(name, _TASK_TYPE)
             for name in algorithm.names()
             if algorithm.get(name).available()
         ]
@@ -297,6 +297,6 @@ class Regressors:
         """
         _warn_static("available_models", "regressors.available_models()")
         return {
-            name: {"class_name": algorithm.legacy_class_name(name, _TASK_TYPE), **entry}
+            name: {"class_name": algorithm._legacy_class_name(name, _TASK_TYPE), **entry}
             for name, entry in available_models().items()
         }

@@ -83,7 +83,7 @@ def install_fake_modules(monkeypatch, record: Algorithm) -> Dict[str, types.Modu
 
 
 def columns_for(task: str) -> Dict[str, str]:
-    """The column-role mapping a Model hands to ``estimator_kwargs`` for ``task``."""
+    """The column-role mapping a Model hands to ``_estimator_kwargs`` for ``task``."""
     columns = {"features": "features", "label": "y", "prediction": "prediction"}
     if task != "simple_regression":
         columns["probability"] = "probability"

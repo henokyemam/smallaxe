@@ -21,8 +21,7 @@ from smallaxe.exceptions import ColumnNotFoundError, ValidationError
 _HASH_RANGE = 2**31
 
 
-@_deprecation.df_keyword
-def hashable_columns(dataframe: DataFrame) -> List[str]:
+def _hashable_columns(dataframe: DataFrame) -> List[str]:
     """Columns of ``dataframe`` that Spark's ``hash`` accepts (no maps or ML vectors)."""
     return [
         field.name
@@ -31,8 +30,7 @@ def hashable_columns(dataframe: DataFrame) -> List[str]:
     ]
 
 
-@_deprecation.df_keyword
-def split_hash(dataframe: DataFrame, seed: int, fold_key: Optional[str] = None) -> Column:
+def _split_hash(dataframe: DataFrame, seed: int, fold_key: Optional[str] = None) -> Column:
     """A non-negative hash of each row's content (or of ``fold_key``) and ``seed``.
 
     Args:
@@ -50,7 +48,7 @@ def split_hash(dataframe: DataFrame, seed: int, fold_key: Optional[str] = None) 
             raise ColumnNotFoundError(column=fold_key, available_columns=list(dataframe.columns))
         columns = [fold_key]
     else:
-        columns = hashable_columns(dataframe)
+        columns = _hashable_columns(dataframe)
         if not columns:
             raise ValidationError(
                 "No column can be hashed to assign folds: every column is a map or an ML "
@@ -59,7 +57,7 @@ def split_hash(dataframe: DataFrame, seed: int, fold_key: Optional[str] = None) 
     return F.hash(*[F.col(c) for c in columns], F.lit(seed)).bitwiseAND(F.lit(_HASH_RANGE - 1))
 
 
-def resolve_split_seed(seed: Optional[int] = None, fallback: Optional[int] = None) -> int:
+def _resolve_split_seed(seed: Optional[int] = None, fallback: Optional[int] = None) -> int:
     """The seed splits use: ``seed``, else the global seed, else ``fallback``, else random.
 
     ``fallback`` lets a caller that fits many models (``optimize.run``) give them all one
@@ -78,7 +76,7 @@ def resolve_split_seed(seed: Optional[int] = None, fallback: Optional[int] = Non
 class ValidationMixin:
     """Mixin providing data splitting and cross-validation functionality.
 
-    Splits and folds are assigned by :func:`split_hash`. Stratification is implicit:
+    Splits and folds are assigned by :func:`_split_hash`. Stratification is implicit:
     a content hash is independent of the label, so every class is split in the same
     proportion in expectation. The ``stratified`` arguments are accepted for API
     compatibility and validated, but select no different rule.
@@ -120,8 +118,8 @@ class ValidationMixin:
         if stratified and not label_col:
             raise ValidationError("label_col must be specified when stratified=True.")
 
-        self._split_seed = resolve_split_seed(seed)
-        bucket = split_hash(dataframe, self._split_seed, fold_key) / F.lit(float(_HASH_RANGE))
+        self._split_seed = _resolve_split_seed(seed)
+        bucket = _split_hash(dataframe, self._split_seed, fold_key) / F.lit(float(_HASH_RANGE))
         is_test = bucket < F.lit(test_size)
         return dataframe.filter(~is_test), dataframe.filter(is_test)
 
@@ -168,8 +166,8 @@ class ValidationMixin:
         if stratified and not label_col:
             raise ValidationError("label_col must be specified when stratified=True.")
 
-        self._split_seed = resolve_split_seed(seed)
-        fold = split_hash(dataframe, self._split_seed, fold_key) % n_folds
+        self._split_seed = _resolve_split_seed(seed)
+        fold = _split_hash(dataframe, self._split_seed, fold_key) % n_folds
 
         for fold_idx in range(n_folds):
             yield dataframe.filter(fold != fold_idx), dataframe.filter(fold == fold_idx)
@@ -192,3 +190,22 @@ class ValidationMixin:
     ) -> Iterator[Tuple[DataFrame, DataFrame]]:
         """Same rule as :meth:`_kfold_split`; kept for compatibility."""
         yield from self._kfold_split(dataframe, n_folds, True, label_col, seed)
+
+
+# Deprecated public names, removed in smallaxe 1.0. The two that take a DataFrame still
+# accept df= under their old names.
+_SPLIT_ADVICE = (
+    "Use fit(validation='train_test' or 'kfold', fold_key=...), which assigns the splits, "
+    "instead."
+)
+_MOVED = {
+    "hashable_columns": (_SPLIT_ADVICE, _deprecation.with_df_keyword(_hashable_columns)),
+    "split_hash": (_SPLIT_ADVICE, _deprecation.with_df_keyword(_split_hash)),
+    "resolve_split_seed": (
+        "Use smallaxe.set_seed() or the model's seed parameter, which decide the split "
+        "seed, instead.",
+        lambda: _resolve_split_seed,
+    ),
+}
+__getattr__ = _deprecation.module_getattr(__name__, _MOVED)
+__dir__ = _deprecation.module_dir(globals(), _MOVED)

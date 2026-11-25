@@ -136,13 +136,13 @@ class TestHeader:
         monkeypatch.setitem(sys.modules, "catboost_spark", module)
         monkeypatch.setattr(importlib.metadata, "version", _no_distribution)
 
-        assert algorithm.package_version(algorithm.get("catboost")) == "1.2.3"
+        assert algorithm._package_version(algorithm.get("catboost")) == "1.2.3"
 
     def test_package_version_imports_nothing(self, monkeypatch):
         monkeypatch.delitem(sys.modules, "catboost_spark", raising=False)
         monkeypatch.setattr(importlib.metadata, "version", _no_distribution)
 
-        assert algorithm.package_version(algorithm.get("catboost")) is None
+        assert algorithm._package_version(algorithm.get("catboost")) is None
         assert "catboost_spark" not in sys.modules
 
 

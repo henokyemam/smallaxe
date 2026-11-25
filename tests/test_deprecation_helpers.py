@@ -125,7 +125,7 @@ class TestModuleGetattr:
         module = types.ModuleType("smallaxe_fake_module")
         module.__path__ = []  # a package, so ``from ... import`` goes through _handle_fromlist
         module.__getattr__ = _deprecation.module_getattr(
-            "smallaxe_fake_module", {"OLD": ("NEW", _deprecation.renamed(42))}
+            "smallaxe_fake_module", {"OLD": ("Use NEW instead.", _deprecation.renamed(42))}
         )
         module.__dir__ = _deprecation.module_dir(vars(module), ["OLD"])
         monkeypatch.setitem(__import__("sys").modules, "smallaxe_fake_module", module)

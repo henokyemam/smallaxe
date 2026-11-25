@@ -12,7 +12,7 @@ from pyspark.sql import functions as F
 from smallaxe.exceptions import ValidationError
 from smallaxe.preprocessing import Imputer
 from smallaxe.training import algorithm, classifiers, regressors
-from smallaxe.training.base import check_training_data
+from smallaxe.training.base import _check_training_data
 
 
 @pytest.fixture
@@ -61,7 +61,7 @@ def test_null_label_is_rejected_for_every_algorithm(spark_session):
 
 
 def test_check_training_data_counts_in_one_pass(frame):
-    stats = check_training_data(frame, "target", ["age", "income"], accepts_missing=True)
+    stats = _check_training_data(frame, "target", ["age", "income"], accepts_missing=True)
     assert stats == {"n_samples": 60, "missing_counts": {"age": 6, "income": 4}}
 
 

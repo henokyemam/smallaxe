@@ -13,6 +13,7 @@ import tempfile
 from contextlib import contextmanager
 from typing import Any, Callable, Dict, Iterator, List, Optional, Tuple
 
+from smallaxe import _deprecation
 from smallaxe.training.algorithm import CLASSIFICATION_TASKS, Algorithm, Dependency, Param
 from smallaxe.training.base import Classifier, Regressor, _warn_deprecated_alias
 
@@ -22,12 +23,12 @@ _INSTALL_HINT = (
 )
 
 
-def catboost_install_hint() -> str:
+def _catboost_install_hint() -> str:
     """Return the install and Spark package hint for CatBoost support."""
     return _INSTALL_HINT
 
 
-def is_catboost_available() -> bool:
+def _is_catboost_available() -> bool:
     """Return whether CatBoost Spark support is currently importable."""
     return ALGORITHM.available()
 
@@ -213,14 +214,25 @@ ALGORITHM = Algorithm(
 )
 
 
-def __getattr__(name: str) -> Any:
-    """``CATBOOST_AVAILABLE``, probed on access so importing this module imports no catboost_spark.
-
-    Re-probed on every access, as :func:`is_catboost_available` is.
-    """
-    if name == "CATBOOST_AVAILABLE":
-        return ALGORITHM.available()
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+# Deprecated public names, removed in smallaxe 1.0. ``CATBOOST_AVAILABLE`` is probed on every
+# read, so importing this module imports no optional package.
+_MOVED = {
+    "CATBOOST_AVAILABLE": (
+        "Use smallaxe.training.algorithm.get('catboost').available() or "
+        "regressors.available_models() instead.",
+        lambda: ALGORITHM.available(),
+    ),
+    "is_catboost_available": (
+        "Use smallaxe.training.algorithm.get('catboost').available() instead.",
+        lambda: _is_catboost_available,
+    ),
+    "catboost_install_hint": (
+        "Use smallaxe.training.algorithm.get('catboost').dependency.install_hint instead.",
+        lambda: _catboost_install_hint,
+    ),
+}
+__getattr__ = _deprecation.module_getattr(__name__, _MOVED)
+__dir__ = _deprecation.module_dir(globals(), _MOVED)
 
 
 class CatBoostRegressor(Regressor):

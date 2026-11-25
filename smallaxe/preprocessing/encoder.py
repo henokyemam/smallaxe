@@ -19,8 +19,8 @@ from smallaxe.preprocessing._common import (
     unique_column_name,
 )
 
-VALID_METHODS = {"onehot", "label"}
-VALID_HANDLE_RARE = {"other", "keep", "error"}
+_VALID_METHODS = {"onehot", "label"}
+_VALID_HANDLE_RARE = {"other", "keep", "error"}
 
 OTHER = "__OTHER__"
 UNKNOWN = "__UNKNOWN__"
@@ -118,17 +118,17 @@ class Encoder:
 
     def _validate_method(self, method: str) -> None:
         """Validate the encoding method."""
-        if method not in VALID_METHODS:
+        if method not in _VALID_METHODS:
             raise ValidationError(
-                f"Invalid method '{method}'. Must be one of {sorted(VALID_METHODS)}."
+                f"Invalid method '{method}'. Must be one of {sorted(_VALID_METHODS)}."
             )
 
     def _validate_handle_rare(self, handle_rare: str) -> None:
         """Validate the handle_rare option."""
-        if handle_rare not in VALID_HANDLE_RARE:
+        if handle_rare not in _VALID_HANDLE_RARE:
             raise ValidationError(
                 f"Invalid handle_rare '{handle_rare}'. Must be one of "
-                f"{sorted(VALID_HANDLE_RARE)}."
+                f"{sorted(_VALID_HANDLE_RARE)}."
             )
 
     def _validate_max_categories(self, max_categories: int) -> None:
@@ -555,3 +555,20 @@ class Encoder:
             return list(self._categorical_cols)
         layout = self._onehot_layout()
         return [name for col in self._categorical_cols for name, _ in layout[col]]
+
+
+# Deprecated public names, removed in smallaxe 1.0.
+_MOVED = {
+    "VALID_METHODS": (
+        "The methods are listed in the Encoder docstring; an invalid one raises "
+        "ValidationError.",
+        lambda: _VALID_METHODS,
+    ),
+    "VALID_HANDLE_RARE": (
+        "The handle_rare options are listed in the Encoder docstring; an invalid one raises "
+        "ValidationError.",
+        lambda: _VALID_HANDLE_RARE,
+    ),
+}
+__getattr__ = _deprecation.module_getattr(__name__, _MOVED)
+__dir__ = _deprecation.module_dir(globals(), _MOVED)

@@ -505,3 +505,200 @@ class TestLogLossEps:
             positional = log_loss(frames["scored"], "label", "probability", 0.3)
         assert positional == log_loss(frames["scored"], "label", "probability", eps=0.3)
         assert positional != log_loss(frames["scored"], "label", "probability")
+
+
+# --- 7. Names that become private in 1.0 ----------------------------------------------
+
+# (module, old public name, its private implementation or None, a fragment of the hint)
+_PRIVATE = [
+    ("smallaxe.training", "BaseModel", None, "smallaxe.training.Model"),
+    ("smallaxe.training", "BaseRegressor", None, "smallaxe.training.Regressor"),
+    ("smallaxe.training", "BaseClassifier", None, "smallaxe.training.Classifier"),
+    ("smallaxe.training.base", "infer_feature_cols", "_infer_feature_cols", "fit()"),
+    ("smallaxe.training.base", "warn_ignored_cols", "_warn_ignored_cols", "fit()"),
+    ("smallaxe.training.base", "check_training_data", "_check_training_data", "fit()"),
+    (
+        "smallaxe.training.mixins.validation_mixin",
+        "hashable_columns",
+        "_hashable_columns",
+        "fold_key",
+    ),
+    ("smallaxe.training.mixins.validation_mixin", "split_hash", "_split_hash", "fold_key"),
+    (
+        "smallaxe.training.mixins.validation_mixin",
+        "resolve_split_seed",
+        "_resolve_split_seed",
+        "set_seed",
+    ),
+    ("smallaxe.training.algorithm", "resolve", "_resolve", "get("),
+    ("smallaxe.training.algorithm", "estimator_kwargs", "_estimator_kwargs", "set_params"),
+    ("smallaxe.training.algorithm", "legacy_class_name", "_legacy_class_name", "get("),
+    ("smallaxe.training.algorithm", "package_version", "_package_version", "metadata"),
+    ("smallaxe.training.algorithm", "COLUMN_ROLES", "_COLUMN_ROLES", "get("),
+    ("smallaxe.training.algorithm", "LEGACY_CLASS_NAMES", "_LEGACY_CLASS_NAMES", "load"),
+    ("smallaxe.search.optimize", "HYPEROPT_INSTALL_HINT", "_HYPEROPT_INSTALL_HINT", "hyperopt"),
+    ("smallaxe.search.optimize", "MAXIMIZE_METRICS", "_MAXIMIZE_METRICS", "TASK_METRICS"),
+    ("smallaxe.search.optimize", "MINIMIZE_METRICS", "_MINIMIZE_METRICS", "TASK_METRICS"),
+    ("smallaxe.search.optimize", "VALID_METRICS", "_VALID_METRICS", "TASK_METRICS"),
+    ("smallaxe.search.optimize", "HYPEROPT_AVAILABLE", "_HYPEROPT_AVAILABLE", "hyperopt"),
+    ("smallaxe.search", "HYPEROPT_AVAILABLE", None, "hyperopt"),
+    ("smallaxe.training.catboost", "is_catboost_available", "_is_catboost_available", "get("),
+    ("smallaxe.training.catboost", "catboost_install_hint", "_catboost_install_hint", "get("),
+    ("smallaxe.training.xgboost", "XGBOOST_AVAILABLE", None, "available_models()"),
+    ("smallaxe.training.lightgbm", "LIGHTGBM_AVAILABLE", None, "available_models()"),
+    ("smallaxe.training.catboost", "CATBOOST_AVAILABLE", None, "available_models()"),
+    ("smallaxe.preprocessing.encoder", "VALID_METHODS", "_VALID_METHODS", "Encoder"),
+    ("smallaxe.preprocessing.encoder", "VALID_HANDLE_RARE", "_VALID_HANDLE_RARE", "Encoder"),
+    ("smallaxe.preprocessing.scaler", "VALID_METHODS", "_VALID_METHODS", "Scaler"),
+]
+
+# The value each old name had in 0.10, by (module, name), where it is not the private one.
+_EXPECTED = {
+    ("smallaxe.training", "BaseModel"): ("smallaxe.training.base", "BaseModel"),
+    ("smallaxe.training", "BaseRegressor"): ("smallaxe.training.base", "BaseRegressor"),
+    ("smallaxe.training", "BaseClassifier"): ("smallaxe.training.base", "BaseClassifier"),
+    ("smallaxe.search", "HYPEROPT_AVAILABLE"): ("smallaxe.search.optimize", "_HYPEROPT_AVAILABLE"),
+}
+
+
+def _expected_value(module_name, name, private):
+    import importlib
+
+    from smallaxe.training import algorithm
+
+    flags = {"XGBOOST_AVAILABLE": "xgboost", "LIGHTGBM_AVAILABLE": "lightgbm"}
+    flags["CATBOOST_AVAILABLE"] = "catboost"
+    if name in flags:
+        return algorithm.get(flags[name]).available()
+    source, attr = _EXPECTED.get((module_name, name), (module_name, private))
+    return getattr(importlib.import_module(source), attr)
+
+
+@pytest.mark.parametrize(
+    "module_name, name, private, hint", _PRIVATE, ids=[f"{m}.{n}" for m, n, _, _ in _PRIVATE]
+)
+def test_private_name_keeps_old_spelling(module_name, name, private, hint):
+    import importlib
+
+    module = importlib.import_module(module_name)
+    if private is not None:
+        with no_deprecation():
+            getattr(module, private)
+    assert name in dir(module)
+    with warns_once(f"{module_name}.{name}", hint):
+        value = getattr(module, name)
+    with warns_once(f"{module_name}.{name}"):
+        namespace = {}
+        code = compile(f"from {module_name} import {name}", __file__, "exec")
+        exec(code, {"__name__": "user_code"}, namespace)
+    assert namespace[name] is value or namespace[name] == value
+    expected = _expected_value(module_name, name, private)
+    if callable(expected) and not isinstance(expected, type):
+        assert value.__wrapped__ is expected if hasattr(value, "__wrapped__") else value is expected
+    else:
+        assert value is expected or value == expected
+
+
+def test_private_helpers_still_accept_df_by_old_name(frames):
+    from smallaxe.training import base
+    from smallaxe.training.mixins import validation_mixin
+
+    dataframe = frames["regression"]
+    expected = base._infer_feature_cols(dataframe, "y", [])
+    with warnings.catch_warnings(record=True) as record:
+        warnings.simplefilter("always")
+        assert base.infer_feature_cols(df=dataframe, label_col="y", exclude_cols=[]) == expected
+        assert validation_mixin.hashable_columns(df=dataframe) == ["x", "z", "c", "y"]
+    assert len([w for w in record if issubclass(w.category, DeprecationWarning)]) == 4
+
+
+def test_deprecated_names_are_not_in_all():
+    import smallaxe.search
+    import smallaxe.training
+
+    assert not {"BaseModel", "BaseRegressor", "BaseClassifier"} & set(smallaxe.training.__all__)
+    assert "HYPEROPT_AVAILABLE" not in smallaxe.search.__all__
+    for name in ("Model", "Regressor", "Classifier", "Regressors", "Classifiers"):
+        assert name in smallaxe.training.__all__
+    assert {"regressors", "classifiers"} <= set(smallaxe.training.__all__)
+
+
+# --- The library never calls its own deprecated spellings -----------------------------
+
+
+def test_smallaxe_does_not_trigger_its_own_deprecations(spark_session, tmp_path):
+    """Import everything, fit, search, run a pipeline and load data with them as errors."""
+    import importlib
+    import pkgutil
+
+    pytest.importorskip("hyperopt")
+
+    with warnings.catch_warnings():
+        warnings.filterwarnings(
+            "error", message=r"(?s).*removed in smallaxe 1\.0", category=DeprecationWarning
+        )
+        import smallaxe
+        from smallaxe import metrics
+        from smallaxe.datasets import load_sample_classification, load_sample_regression
+        from smallaxe.pipeline import Pipeline
+        from smallaxe.preprocessing import Encoder, Imputer, Scaler
+        from smallaxe.search import optimize
+        from smallaxe.training import classifiers, regressors
+
+        for info in pkgutil.walk_packages(smallaxe.__path__, "smallaxe."):
+            importlib.import_module(info.name)
+
+        houses = load_sample_regression(spark_session, n_rows=150)
+        churn = load_sample_classification(spark_session, n_rows=150)
+
+        model = regressors.random_forest(n_estimators=3, seed=1)
+        model.fit(houses, "price", exclude_cols=["location", "condition"], validation="kfold")
+        model.evaluate(houses)
+        model.save(str(tmp_path / "model"))
+        regressors.load(str(tmp_path / "model"))
+        smallaxe.load_model(str(tmp_path / "model"))
+
+        clf = classifiers.random_forest(n_estimators=3, seed=1)
+        clf.fit(churn, "churn", feature_cols=["tenure", "monthly_charges"], validation="train_test")
+        clf.predict_proba(churn)
+        metrics.accuracy(clf.predict(churn), "churn")
+        clf.evaluate(churn)
+        metrics.log_loss(churn.selectExpr("churn", "0.5 AS p"), "churn", "p", eps=1e-6)
+
+        result = optimize.run(
+            regressors.random_forest(n_estimators=3),
+            houses,
+            label_col="price",
+            param_space={"max_depth": [2, 3]},
+            feature_cols=["sqft", "age"],
+            max_evals=2,
+            validation="kfold",
+            n_folds=2,
+            seed=1,
+            verbose=False,
+        )
+        result.best_model.predict(houses)
+
+        pipeline = Pipeline(
+            [
+                (
+                    "imputer",
+                    Imputer(numerical_strategy="mean", categorical_strategy="most_frequent"),
+                ),
+                ("scaler", Scaler()),
+                ("encoder", Encoder()),
+                ("model", classifiers.random_forest(n_estimators=3, seed=1)),
+            ]
+        )
+        pipeline.fit(
+            churn,
+            label_col="churn",
+            numerical_cols=["tenure", "monthly_charges"],
+            categorical_cols=["contract"],
+        )
+        pipeline.save(str(tmp_path / "pipeline"))
+        loaded = smallaxe.load_pipeline(str(tmp_path / "pipeline"))
+        loaded.predict(churn)
+        loaded.predict_proba(churn)
+        loaded.evaluate(churn)
+        smallaxe.load(str(tmp_path / "pipeline"))
