@@ -1024,8 +1024,12 @@ class TestPipelineValidation:
             {"fold_key": "id"},
             {"refit": False},
             {"cache_strategy": "memory"},
+            # Equal to the default but of another type: still an option given.
+            {"refit": 1},
+            {"n_folds": 5.0},
+            {"validation": None},
         ],
-        ids=lambda option: next(iter(option)),
+        ids=lambda option: f"{next(iter(option))}={next(iter(option.values()))!r}",
     )
     def test_options_without_a_model_raise(self, churn, option):
         pipeline = Pipeline([("scaler", Scaler())])
@@ -1033,6 +1037,21 @@ class TestPipelineValidation:
             pipeline.fit(churn, numerical_cols=["age"], **option)
         with pytest.raises(ValidationError, match="need a model step"):
             pipeline.fit_transform(churn, numerical_cols=["age"], **option)
+
+    def test_default_values_passed_explicitly_without_a_model_are_accepted(self, churn):
+        """A default passed explicitly cannot be told from one left out: both are allowed."""
+        pipeline = Pipeline([("scaler", Scaler())])
+        pipeline.fit(
+            churn,
+            numerical_cols=["age"],
+            validation="none",
+            test_size=0.2,
+            n_folds=5,
+            fold_key=None,
+            refit=True,
+            cache_strategy=None,
+        )
+        assert pipeline.validation_scores is None
 
     def test_validation_scores_without_a_model_is_none(self, churn):
         pipeline = Pipeline([("scaler", Scaler())]).fit(churn, numerical_cols=["age"])

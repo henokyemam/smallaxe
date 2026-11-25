@@ -60,6 +60,21 @@ _MODEL_FIT_DEFAULTS: Dict[str, Any] = {
 }
 
 
+def _given_options(options: Dict[str, Any]) -> Dict[str, Any]:
+    """The validation options that differ from ``Model.fit``'s defaults.
+
+    A value differs unless it is the default's type and equal to it, so ``refit=1`` or
+    ``n_folds=5.0`` counts as given. A default passed explicitly cannot be told from one
+    left out, and counts as not given.
+    """
+    given: Dict[str, Any] = {}
+    for key, value in options.items():
+        default = _MODEL_FIT_DEFAULTS[key]
+        if type(value) is not type(default) or value != default:
+            given[key] = value
+    return given
+
+
 def _step_kind(step: Any) -> Optional[str]:
     """The kind of a step: ``"imputer"``, ``"scaler"``, ``"encoder"``, ``"model"`` or None.
 
@@ -409,8 +424,9 @@ class Pipeline:
         Raises:
             ValidationError: If ``label_col`` is missing when the pipeline has a model,
                 or is listed in ``numerical_cols`` / ``categorical_cols``; a column list
-                is not a list of names; or a validation option other than its default is
-                given to a pipeline without a model.
+                is not a list of names; or a validation option is given to a pipeline
+                without a model (a value equal to its default and of the default's type
+                counts as not given).
             PreprocessingError: If ``categorical_cols`` are given and the model needs
                 an Encoder the pipeline does not have.
 
@@ -428,7 +444,7 @@ class Pipeline:
             "refit": refit,
             "cache_strategy": cache_strategy,
         }
-        given = {key: value for key, value in options.items() if value != _MODEL_FIT_DEFAULTS[key]}
+        given = _given_options(options)
         if given and not self._has_model:
             raise ValidationError(
                 f"Validation options {sorted(given)} need a model step, and this pipeline has "
@@ -521,8 +537,9 @@ class Pipeline:
         if feature_cols is None:
             feature_cols, ignored = _infer_feature_cols(dataframe, label_col, [])
             _warn_ignored_cols(feature_cols, ignored)
-        given = {key: value for key, value in options.items() if value != _MODEL_FIT_DEFAULTS[key]}
-        model.fit(dataframe, label_col=label_col, feature_cols=feature_cols, **given)
+        model.fit(
+            dataframe, label_col=label_col, feature_cols=feature_cols, **_given_options(options)
+        )
         return list(feature_cols)
 
     def transform(self, dataframe: DataFrame) -> DataFrame:
