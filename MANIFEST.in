@@ -1,11 +1,12 @@
-# setuptools-scm adds every git-tracked file to the sdist. Keep the library, its tests,
-# the examples and the release documents; leave out CI, agent instructions, planning
-# notes, tooling config and binary test fixtures.
+# setuptools-scm adds every git-tracked file to the sdist. Keep the library, the
+# examples and the release documents; leave out CI, agent instructions, planning
+# notes, tooling config and the tests (they need binary fixtures that do not belong in
+# an sdist; run them from a git checkout).
 
 prune .claude
 prune .github
 prune .import_linter_cache
-prune tests/fixtures
+prune tests
 
 exclude .gitignore
 exclude requirements-dev.txt

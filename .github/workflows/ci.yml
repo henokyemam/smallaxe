@@ -43,7 +43,9 @@ jobs:
 
   # The supported matrix: every (Python, Spark) pair that PySpark itself supports, per
   # the Python classifiers of each PySpark release on PyPI. PySpark 3.3 does not
-  # support Python 3.11; no PySpark 3.x release supports Python 3.12.
+  # support Python 3.11. No PySpark 3.x release declares Python 3.12, but Databricks
+  # Runtime 16.4 LTS (Spark 3.5, Python 3.12, Java 17) is where LightGBM and CatBoost
+  # are validated, so that one combination is tested here as well.
   # Java: Spark 3.3-3.5 run on Java 8, 11 and 17. Java 11 runs everywhere; Java 8 runs
   # with the oldest Spark line and Java 17 with the newest.
   test:
@@ -63,6 +65,9 @@ jobs:
             spark-version: "3.3"
             java-version: "8"
           - python-version: "3.10"
+            spark-version: "3.5"
+            java-version: "17"
+          - python-version: "3.12"
             spark-version: "3.5"
             java-version: "17"
 

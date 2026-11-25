@@ -188,7 +188,7 @@ algorithms are installed in the current environment, with install hints for the 
 
 | Component | Supported |
 |-----------|-----------|
-| Python | 3.8 – 3.11 (which PySpark lines, below) |
+| Python | 3.8 – 3.12 (which PySpark lines, below) |
 | PySpark | 3.3 – 3.5 (Spark < 4.0) |
 | Java | 11; also 8 with PySpark 3.3 and 17 with PySpark 3.5 |
 | OS | Linux |
@@ -197,13 +197,15 @@ algorithms are installed in the current environment, with install hints for the 
 
 CI tests every pair below on Linux with Java 11, plus Java 8 with PySpark 3.3 and
 Java 17 with PySpark 3.5 (both on Python 3.10). The pairs are the ones PySpark itself
-supports, per the Python classifiers of each PySpark release:
+supports, per the Python classifiers of each PySpark release, plus Python 3.12 with
+PySpark 3.5 and Java 17. No PySpark 3.x release declares Python 3.12; that combination
+is tested because Databricks Runtime 16.4 LTS ships it.
 
 | PySpark | Python |
 |---------|--------|
 | 3.3 | 3.8 – 3.10 |
 | 3.4 | 3.8 – 3.11 |
-| 3.5 | 3.8 – 3.11 |
+| 3.5 | 3.8 – 3.12 |
 
 CI also runs the oldest versions smallaxe allows (Python 3.8, PySpark 3.3.0 and the
 lowest allowed version of every other runtime dependency), and XGBoost on PySpark 3.3

@@ -46,6 +46,10 @@ jobs:
         env:
           RELEASE_TAG: ${{ github.event.release.tag_name }}
         run: |
+          case "$RELEASE_TAG" in
+            v*) ;;
+            *) echo "release tag '${RELEASE_TAG}' does not start with 'v'"; exit 1 ;;
+          esac
           expected="${RELEASE_TAG#v}"
           echo "Release tag: ${RELEASE_TAG}; expected version: ${expected}"
           ls dist
