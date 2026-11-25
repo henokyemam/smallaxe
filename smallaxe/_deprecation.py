@@ -163,7 +163,10 @@ def keyword_only(*names: str) -> Callable[[_Callable], _Callable]:
 
         return wrapper
 
-    return lambda func: cast(_Callable, _wrap_descriptor(func, decorate))
+    def apply(func: _Callable) -> _Callable:
+        return cast(_Callable, _wrap_descriptor(func, decorate))
+
+    return apply
 
 
 # A deprecated module attribute: the replacement to name, and how to get its value.
