@@ -216,6 +216,11 @@ deprecated in 0.11"), naming its replacement. In 1.0 a removed name raises
   `pyspark.ml.functions`, which `smallaxe.preprocessing` (the Scaler) and binary
   `Classifier.evaluate` import, imports it. The
   `xgboost` extra also declares `pandas>=1.2`, which `xgboost.spark` imports.
+- **`import smallaxe.search` works in a fresh Python 3.8 or 3.9 environment.** There the
+  newest hyperopt is 0.2.7, which imports `pkg_resources`, and setuptools 82 removed it;
+  smallaxe now requires `setuptools>=56.0.0,<82` on Python 3.8 and 3.9 (pip downgrades
+  a newer setuptools there). On Python 3.10 and later it requires `hyperopt>=0.3.0`,
+  which does not import `pkg_resources`.
 - **The type annotations are checked strictly.** smallaxe ships `py.typed`, and
   `mypy smallaxe` now passes with untyped and partially typed definitions disallowed,
   `check_untyped_defs`, `no_implicit_optional`, `warn_return_any`, `warn_redundant_casts`

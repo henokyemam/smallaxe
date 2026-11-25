@@ -32,6 +32,9 @@
   `# type: ignore` carries an error code and the reason
 - In the test suite a `DeprecationWarning` raised from a smallaxe module is an error:
   smallaxe must not call deprecated APIs
+- Dependencies: every entry in `[project] dependencies` has a `>=` floor (the
+  test-lowest CI job installs each floor, through `.github/scripts/floor_pins.py`);
+  keep `requirements-dev.txt` the same (`tests/test_packaging.py` checks both)
 - Google-style docstrings (Args / Returns / Raises) on every public class, method and function
 - User errors raise smallaxe exceptions (`smallaxe.exceptions`), never a raw `ValueError` / `KeyError` / `TypeError`
 

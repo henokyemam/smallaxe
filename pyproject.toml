@@ -29,8 +29,9 @@ classifiers = [
     "Topic :: Software Development :: Libraries :: Python Modules",
 ]
 
-# Exactly what smallaxe imports at runtime, directly or through the PySpark modules it
-# imports. Each has a ">=" floor: the test-lowest CI job installs every floor exactly.
+# Exactly what smallaxe imports at runtime, directly or through the PySpark and hyperopt
+# modules it imports, on each supported Python. Each has a ">=" floor: the test-lowest
+# CI job installs every floor exactly (.github/scripts/floor_pins.py).
 dependencies = [
     "pyspark>=3.3,<4.0",
     # smallaxe catches py4j's Py4JJavaError; PySpark 3.3.0 pins py4j 0.10.9.5.
@@ -40,7 +41,12 @@ dependencies = [
     "numpy>=1.17.3",
     # pyspark.ml.functions (vector_to_array) imports pandas from PySpark 3.4.
     "pandas>=1.0.0",
-    "hyperopt>=0.2.7",
+    # hyperopt 0.3.0 needs Python 3.10, so 0.2.7 is the newest release before it. 0.2.x
+    # imports pkg_resources, which setuptools 82 removed; 0.3.0 does not.
+    "hyperopt>=0.2.7; python_version < '3.10'",
+    "hyperopt>=0.3.0; python_version >= '3.10'",
+    # pkg_resources for hyperopt 0.2.7. 56.0.0: the setuptools Python 3.8 bundles.
+    "setuptools>=56.0.0,<82; python_version < '3.10'",
     # PySpark 3.x imports distutils, which Python 3.12 removed; setuptools provides it.
     "setuptools>=68; python_version >= '3.12'",
 ]

@@ -125,20 +125,11 @@ jobs:
           java-version: "11"
 
       - name: Pin runtime dependencies to their floors
-        # Turns each "name>=floor" in [project] dependencies into "name==floor", so this
-        # job follows pyproject.toml. A dependency without a ">=" floor fails the job.
+        # Turns each "name>=floor" in [project] dependencies into "name==floor", keeping
+        # its environment marker, so this job follows pyproject.toml. A dependency without
+        # a ">=" floor fails the job (tests/test_packaging.py tests the script).
         run: |
-          python - <<'EOF' > floors.txt
-          import re
-
-          text = open("pyproject.toml").read()
-          block = re.search(r"^dependencies = \[(.*?)^\]", text, re.S | re.M).group(1)
-          for spec in re.findall(r'"([^"]+)"', block):
-              match = re.match(r"([A-Za-z0-9_.-]+)\s*>=\s*([^,;\s]+)", spec)
-              if match is None:
-                  raise SystemExit("no >= floor in dependency: " + spec)
-              print(match.group(1) + "==" + match.group(2))
-          EOF
+          python .github/scripts/floor_pins.py pyproject.toml > floors.txt
           cat floors.txt
 
       - name: Install dependencies

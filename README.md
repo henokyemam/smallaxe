@@ -263,7 +263,10 @@ Java 17 with PySpark 3.5 (both on Python 3.10). The pairs are the ones PySpark i
 supports, per the Python classifiers of each PySpark release, plus Python 3.12 with
 PySpark 3.5 and Java 17. No PySpark 3.x release declares Python 3.12; that combination
 is tested because Databricks Runtime 16.4 LTS ships it. PySpark 3.5 imports
-`distutils`, which Python 3.12 removed, so smallaxe installs `setuptools` there.
+`distutils`, which Python 3.12 removed, so smallaxe installs `setuptools` there. On
+Python 3.8 and 3.9 the newest hyperopt is 0.2.7, which imports `pkg_resources`, so
+smallaxe installs a `setuptools` older than 82 (the release that removed it) there; from
+Python 3.10 it requires hyperopt 0.3.0 or later, which does not need it.
 
 | PySpark | Python |
 |---------|--------|
