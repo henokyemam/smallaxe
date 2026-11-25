@@ -4,12 +4,25 @@ on:
   release:
     types: [published]
 
+permissions:
+  contents: read
+
 jobs:
+  # The full CI workflow, run on the release commit. Nothing is published unless every
+  # CI job passes.
+  ci:
+    uses: ./.github/workflows/ci.yml
+
   build-and-publish:
+    needs: ci
     runs-on: ubuntu-latest
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          # setuptools-scm derives the version from git tags, so it needs the full
+          # history and the tags rather than a shallow clone.
+          fetch-depth: 0
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -26,6 +39,39 @@ jobs:
 
       - name: Check package
         run: twine check dist/*
+
+      - name: Check the built version matches the release tag
+        # The release tag must be the version with a leading "v" (tag v1.2.3 -> 1.2.3).
+        # Both the wheel and the sdist must carry exactly that version.
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: |
+          case "$RELEASE_TAG" in
+            v*) ;;
+            *) echo "release tag '${RELEASE_TAG}' does not start with 'v'"; exit 1 ;;
+          esac
+          expected="${RELEASE_TAG#v}"
+          echo "Release tag: ${RELEASE_TAG}; expected version: ${expected}"
+          ls dist
+          python - "$expected" <<'EOF'
+          import pathlib
+          import sys
+
+          expected = sys.argv[1]
+          files = sorted(pathlib.Path("dist").iterdir())
+          wheels = [f for f in files if f.name.endswith(".whl")]
+          sdists = [f for f in files if f.name.endswith(".tar.gz")]
+          if len(wheels) != 1 or len(sdists) != 1 or len(files) != 2:
+              raise SystemExit("expected one wheel and one sdist in dist/, found: %s" % files)
+          versions = {
+              wheels[0].name: wheels[0].name.split("-")[1],
+              sdists[0].name: sdists[0].name[: -len(".tar.gz")].split("-", 1)[1],
+          }
+          bad = {name: v for name, v in versions.items() if v != expected}
+          if bad:
+              raise SystemExit("built version does not match release tag %s: %s" % (expected, bad))
+          print("version %s matches the release tag" % expected)
+          EOF
 
       - name: Publish to PyPI
         env:
