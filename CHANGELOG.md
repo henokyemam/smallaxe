@@ -87,12 +87,44 @@
   still loads. Unpickling adds the `__UNKNOWN__` entry to every mapping without an
   `__OTHER__` bucket, so seen values and nulls encode as before and unseen values follow
   the new rule above instead of becoming null.
+- **Model artifacts carry the versioned header.** `model.save(path)` writes
+  `metadata.json` with top-level `format_version` (1), `kind` (`"model"`) and
+  `smallaxe_version` next to the keys it wrote before, whose names and meaning are
+  unchanged. Model artifacts saved by 0.8.x, 0.9 and 0.10 have no header and still load.
+- **`metadata.json` is written after the Spark model**, so a directory that has one
+  holds a complete artifact. Saving over an existing artifact first removes its
+  `metadata.json`: a save that fails part way leaves a directory that does not load,
+  instead of the old metadata next to a new or half-written Spark model.
+- The nested `metadata` of a newly fitted model records `algorithm_package` and
+  `algorithm_package_version` (for example `"xgboost"`, `"3.2.0"`; `None` for
+  Random Forest) next to `smallaxe_version` and `spark_version`, for diagnosis. Loading
+  ignores them.
+- **Loading a model validates its metadata instead of guessing.** A missing or unknown
+  `task` raises `ValidationError` (earlier a missing one silently gave a regression
+  model; every smallaxe release has written `task`). A saved parameter that the
+  algorithm's table does not have for that task raises `ValidationError` naming the
+  parameter and the algorithm (the artifact was written by a newer smallaxe or is
+  corrupted); parameters the artifact leaves out take their defaults. An artifact of
+  another kind (for example an `Imputer` directory) or one written by a newer smallaxe
+  raises `ValidationError` with the reason.
+- **`Regressors.load` and `Classifiers.load` raise `ValidationError`, not
+  `FileNotFoundError`, for a missing path or a directory without `metadata.json`**, with
+  the same message as `Model.load` and `smallaxe.load_model`: `Cannot load model: path
+  '...' does not exist.` or `Cannot load model: '...' is not a smallaxe model artifact
+  (expected metadata.json in it).`
+- `PersistenceMixin` no longer has a `load` classmethod; it provides `save` and reads the
+  saved state back, and `Model.load` is the one load rule for models. A class built
+  directly on `BaseModel` / `BaseRegressor` / `BaseClassifier` (not on `Regressor` or
+  `Classifier`) can still `save` but no longer `load`.
 
 ### Added
 
 - The wheel ships `smallaxe/py.typed`, so type checkers read smallaxe's annotations.
 - `Encoder.save(path)` and `Encoder.load(path)`. A fitted Encoder holds only plain data
   (no Spark models), so it also pickles.
+- `smallaxe.load_model(path)` loads any saved model, whatever its algorithm, returning the
+  `Regressor` or `Classifier` it was, for artifacts of this and every earlier release.
+  `import smallaxe` still imports no training code; it is imported on the first call.
 
 
 ### Fixed
@@ -122,9 +154,6 @@
   `synapse.ml.lightgbm` (each skipped if missing), the order the CatBoost compatibility
   shim needs, whichever algorithm comes first.
 - **A broken optional install is reported as such.** When an algorithm's package is
-- `smallaxe.load_model(path)` loads any saved model, whatever its algorithm, returning the
-  `Regressor` or `Classifier` it was, for artifacts of this and every earlier release.
-  `import smallaxe` still imports no training code; it is imported on the first call.
   present but fails to import (for example a missing dependency of its own),
   `DependencyError` now says it could not be imported and includes the original error,
   instead of claiming the package is not installed.

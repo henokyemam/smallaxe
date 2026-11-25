@@ -138,8 +138,12 @@ class TestRegressorsFactory:
             assert predictions.count() == regression_df.count()
 
     def test_load_nonexistent_path_raises_error(self):
-        with pytest.raises(FileNotFoundError):
+        with pytest.raises(ValidationError, match="'/nonexistent/path' does not exist"):
             Regressors.load("/nonexistent/path")
+
+    def test_load_directory_without_metadata_raises_error(self, tmp_path):
+        with pytest.raises(ValidationError, match="expected metadata.json"):
+            Regressors.load(str(tmp_path))
 
     def test_load_classifier_as_regressor_raises_error(self, classification_df):
         model = Classifiers.random_forest()
@@ -237,8 +241,12 @@ class TestClassifiersFactory:
             assert "probability" in proba.columns
 
     def test_load_nonexistent_path_raises_error(self):
-        with pytest.raises(FileNotFoundError):
+        with pytest.raises(ValidationError, match="'/nonexistent/path' does not exist"):
             Classifiers.load("/nonexistent/path")
+
+    def test_load_directory_without_metadata_raises_error(self, tmp_path):
+        with pytest.raises(ValidationError, match="expected metadata.json"):
+            Classifiers.load(str(tmp_path))
 
     def test_load_regressor_as_classifier_raises_error(self, regression_df):
         model = Regressors.random_forest()

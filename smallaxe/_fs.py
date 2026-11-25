@@ -59,6 +59,12 @@ def makedirs(path: str) -> None:
     fs.mkdirs(hpath)
 
 
+def delete(path: str, recursive: bool = False) -> None:
+    """Delete ``path`` (with its Hadoop checksum file) on the resolved filesystem, if present."""
+    _jvm, fs, hpath = _fs_and_path(path)
+    fs.delete(hpath, recursive)
+
+
 def jvm_error_types() -> Tuple[Type[BaseException], ...]:
     """Exception types for a failure raised on the JVM side of a Spark or Hadoop call.
 
