@@ -822,9 +822,14 @@ class BaseModel(
             "f1_score": f1_score(full_df, label_col, self.PREDICTION_COL),
         }
 
-        # Probability-based metrics (only for binary classification). A fitted model
-        # that writes no probability column cannot be scored on them; that is the only
-        # case they are left out, and any other failure propagates.
+        # Probability-based metrics (only for binary classification). Two conditions
+        # are handled here; any other failure propagates:
+        # - a fitted model that writes no probability column cannot be scored on
+        #   them, so they are unavailable (None);
+        # - a model fitted on a training split holding one class (label 0 only) writes
+        #   a 1-element probability vector (Spark's tree models size it by the classes
+        #   seen). It has no positive-class probability, so the metrics are undefined
+        #   (NaN, stored as None) rather than handed a null score the evaluator rejects.
         if self._task == "binary":
             if self.PROBABILITY_COL not in full_df.columns:
                 metrics["auc_roc"] = None
@@ -834,9 +839,17 @@ class BaseModel(
 
             from pyspark.ml.functions import vector_to_array
 
-            proba_df = full_df.withColumn(
-                "prob_positive", vector_to_array(F.col(self.PROBABILITY_COL))[1]
-            )
+            probabilities = vector_to_array(F.col(self.PROBABILITY_COL))
+            width = full_df.select(
+                F.min(F.when(probabilities.isNotNull(), F.size(probabilities)))
+            ).first()[0]
+            if width is not None and width < 2:
+                metrics["auc_roc"] = float("nan")
+                metrics["auc_pr"] = float("nan")
+                metrics["log_loss"] = float("nan")
+                return metrics
+
+            proba_df = full_df.withColumn("prob_positive", probabilities[1])
 
             metrics["auc_roc"] = auc_roc(proba_df, label_col, "prob_positive")
             metrics["auc_pr"] = auc_pr(proba_df, label_col, "prob_positive")

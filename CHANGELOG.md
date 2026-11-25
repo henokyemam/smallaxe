@@ -22,9 +22,12 @@
   undefined; a metric undefined on every fold has `mean_<metric>` of `None`. Earlier
   releases averaged the 0.0 scores in. In `optimize.run`, a trial whose metric is
   undefined fails with an error saying so, instead of competing with a 0.0 score.
-- Binary `auc_roc`, `auc_pr`, and `log_loss` in `validation_scores` are `None` only when
-  the fitted model writes no probability column. Any other error while computing them
-  now propagates; earlier releases replaced every error with `None`.
+- Binary `auc_roc`, `auc_pr`, and `log_loss` in `validation_scores` are `None` in two
+  cases only: the fitted model writes no probability column, or it was fitted on a
+  training split holding a single class (label 0 only), so its probability vectors have
+  no positive-class entry and the metrics are undefined (counted as undefined folds in a
+  k-fold mean). Any other error while computing them now propagates; earlier releases
+  replaced every error with `None`.
 
 ### Fixed
 

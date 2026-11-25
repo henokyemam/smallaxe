@@ -189,6 +189,100 @@ class TestBinaryProbabilityMetrics:
         assert scores["auc_pr"] is None
         assert scores["log_loss"] is None
 
+    def test_one_class_probability_vector_is_undefined(self, spark_session):
+        # A binary model trained on label 0 only writes a 1-element probability vector:
+        # it has no positive-class probability, so the probability metrics are undefined.
+        from pyspark.ml.linalg import Vectors, VectorUDT
+
+        model = Classifiers.random_forest()
+        df = spark_session.createDataFrame([(0.0, 0), (1.0, 1), (2.0, 0)], ["x", "y"])
+
+        class OneClassModel:
+            def transform(self, frame):
+                one = F.udf(lambda _: Vectors.dense([1.0]), VectorUDT())
+                return frame.withColumn(model.PREDICTION_COL, F.lit(0.0)).withColumn(
+                    model.PROBABILITY_COL, one(F.col("x"))
+                )
+
+        model._feature_cols = ["x"]
+        model._spark_model = OneClassModel()
+        scores = model._evaluate(df, "y")
+
+        assert scores["accuracy"] == pytest.approx(2 / 3)
+        assert math.isnan(scores["auc_roc"])
+        assert math.isnan(scores["auc_pr"])
+        assert math.isnan(scores["log_loss"])
+
+
+@pytest.fixture(scope="module")
+def positives_share_one_key(spark_session):
+    """90 binary rows whose 6 positives all share fold_key 'pos'.
+
+    Whichever split holds 'pos' for validation trains on label 0 only.
+    """
+    rows = [
+        ("pos" if i < 6 else f"k{i % 9}", float(i % 7) + (5.0 if i < 6 else 0.0), 1 if i < 6 else 0)
+        for i in range(90)
+    ]
+    return spark_session.createDataFrame(rows, ["key", "x", "label"])
+
+
+class TestSingleClassTrainingSplit:
+    """A training split with one class must not crash fit (Spark RF writes 1-wide vectors)."""
+
+    def test_kfold(self, positives_share_one_key):
+        model = Classifiers.random_forest(n_estimators=3, seed=2)
+        with warnings.catch_warnings(record=True) as record:
+            warnings.simplefilter("always")
+            model.fit(
+                positives_share_one_key,
+                label_col="label",
+                feature_cols=["x"],
+                validation="kfold",
+                n_folds=3,
+                fold_key="key",
+            )
+
+        folds = model.validation_scores["fold_scores"]
+        assert len(folds) == 3
+        # Every fold is undefined: the 'pos' fold trained on one class, the others
+        # validate on one class.
+        for fold in folds:
+            assert fold["auc_roc"] is None
+            assert fold["auc_pr"] is None
+            assert fold["accuracy"] is not None
+        assert model.validation_scores["mean_auc_roc"] is None
+        undefined = _undefined_warnings(record)
+        assert len(undefined) == 1
+        assert "auc_roc in 3 of 3 folds" in str(undefined[0].message)
+
+    def test_train_test(self, positives_share_one_key):
+        keys = positives_share_one_key.select("key").distinct()
+        seed = next(
+            s
+            for s in range(500)
+            if keys.where(F.col("key") == "pos")
+            .select((split_hash(keys, s, "key") / F.lit(float(2**31))).alias("b"))
+            .first()["b"]
+            < 0.2
+        )
+        model = Classifiers.random_forest(n_estimators=3, seed=seed)
+        model.fit(
+            positives_share_one_key,
+            label_col="label",
+            feature_cols=["x"],
+            validation="train_test",
+            test_size=0.2,
+            fold_key="key",
+        )
+
+        scores = model.validation_scores
+        assert scores["auc_roc"] is None
+        assert scores["auc_pr"] is None
+        assert scores["log_loss"] is None
+        assert scores["accuracy"] is not None
+        json.dumps(scores, allow_nan=False)
+
 
 class TestSearch:
     @pytest.fixture(autouse=True)
