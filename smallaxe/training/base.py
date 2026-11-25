@@ -510,7 +510,10 @@ class BaseModel(
 
         if cache_strategy == "none":
             return df, False
-        if df.storageLevel != StorageLevel.NONE:
+        current = df.storageLevel
+        # Compared by field: ``StorageLevel.NONE`` and ``StorageLevel.__eq__`` only exist
+        # from Spark 3.4.
+        if current.useMemory or current.useDisk or current.useOffHeap:
             # The caller cached it; leave it alone.
             return df, False
 

@@ -121,6 +121,16 @@ class TestRefit:
 # --- Item 5: caching ---------------------------------------------------------------
 
 
+def _flags(level):
+    """A StorageLevel as a tuple. ``StorageLevel.__eq__`` and ``.NONE`` need Spark 3.4."""
+    return (level.useDisk, level.useMemory, level.useOffHeap, level.deserialized)
+
+
+def _is_cached(df):
+    level = df.storageLevel
+    return level.useDisk or level.useMemory or level.useOffHeap
+
+
 class TestCaching:
     def test_a_dataframe_the_user_cached_stays_cached(self, frame):
         cached = frame.persist(StorageLevel.MEMORY_AND_DISK)
@@ -139,8 +149,8 @@ class TestCaching:
                 # ``same_data`` is a new plan over the cached one; Spark reports its own
                 # level as NONE, so smallaxe may cache it too, but must leave the
                 # caller's cache in place.
-                assert cached.storageLevel != StorageLevel.NONE
-                assert same_data.storageLevel == StorageLevel.NONE
+                assert _is_cached(cached)
+                assert not _is_cached(same_data)
         finally:
             cached.unpersist()
 
@@ -158,7 +168,7 @@ class TestCaching:
             monkeypatch.setattr(type(frame), "persist", spy)
             model.fit(cached, label_col="target", feature_cols=["age"], validation="kfold")
             assert persisted == []
-            assert cached.storageLevel == StorageLevel.MEMORY_ONLY
+            assert _flags(cached.storageLevel) == _flags(StorageLevel.MEMORY_ONLY)
         finally:
             cached.unpersist()
 
@@ -174,8 +184,8 @@ class TestCaching:
         monkeypatch.setattr(type(model), "_fit_spark_model", spy)
         model.fit(frame, label_col="target", feature_cols=["age"], validation="kfold", n_folds=2)
 
-        assert seen["level"] == StorageLevel.MEMORY_AND_DISK
-        assert frame.storageLevel == StorageLevel.NONE
+        assert _flags(seen["level"]) == _flags(StorageLevel.MEMORY_AND_DISK)
+        assert not _is_cached(frame)
 
     def test_default_does_not_cache_a_single_pass(self, frame, monkeypatch):
         model = Regressors.random_forest(n_estimators=2, seed=1)
@@ -188,7 +198,7 @@ class TestCaching:
 
         monkeypatch.setattr(type(model), "_fit_spark_model", spy)
         model.fit(frame, label_col="target", feature_cols=["age"])
-        assert seen["level"] == StorageLevel.NONE
+        assert not (seen["level"].useMemory or seen["level"].useDisk)
 
     def test_persist_failure_warns_and_continues(self, frame, monkeypatch):
         model = Regressors.random_forest(n_estimators=2, seed=1)

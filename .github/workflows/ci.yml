@@ -7,10 +7,14 @@ on:
     branches: [main]
 
 jobs:
-  # Fast feedback on PRs - single Python/Spark version
+  # Fast feedback on PRs - one Python, the oldest and newest supported Spark
   test-quick:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        spark-version: ["3.3", "3.5"]
 
     steps:
       - uses: actions/checkout@v4
@@ -29,6 +33,7 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
+          pip install pyspark==${{ matrix.spark-version }}.0
           pip install -e ".[dev]"
 
       - name: Run linting
@@ -40,7 +45,7 @@ jobs:
         run: |
           pytest tests/ -v
         env:
-          SPARK_VERSION: "3.5"
+          SPARK_VERSION: ${{ matrix.spark-version }}
 
   # Optional-algorithm job: XGBoost is the one boosted algorithm that runs on a plain
   # Linux runner (LightGBM and CatBoost need JVM packages and are validated on Databricks).

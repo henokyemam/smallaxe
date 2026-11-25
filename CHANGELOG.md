@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.10.1 (unreleased)
+
+### Fixed
+
+- **`fit` and `optimize.run` work on Spark 3.3 again.** 0.10.0 compared the DataFrame's
+  storage level with `StorageLevel.NONE`, which Spark only has from 3.4, so every `fit`
+  on Spark 3.3 raised `AttributeError`. The check now reads the storage level's fields.
+  Pull-request CI now runs on Spark 3.3 as well as 3.5.
+
 ## 0.10.0 (2026-10-31)
 
 A minor release rather than 0.9.1: fold assignment, row handling, the kept model, and the
