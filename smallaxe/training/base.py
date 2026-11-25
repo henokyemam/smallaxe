@@ -387,11 +387,12 @@ class BaseModel(
         return self
 
     def _seed_param(self) -> Optional[int]:
-        """The model's own ``seed`` parameter, if it has one and it is set."""
-        try:
-            return self.get_params().get("seed")
-        except Exception:
-            return None
+        """The model's own ``seed`` parameter, if it has one and it is set.
+
+        A model without a ``seed`` parameter has none. Errors reading the parameters
+        propagate rather than silently unseeding the model.
+        """
+        return self.get_params().get("seed")
 
     def _validate_fit_params(
         self,

@@ -55,6 +55,14 @@
   present but fails to import (for example a missing dependency of its own),
   `DependencyError` now says it could not be imported and includes the original error,
   instead of claiming the package is not installed.
+- **Loading a sample dataset no longer reseeds Python's `random` module.**
+  `load_sample_regression` and `load_sample_classification` called `random.seed(seed)`,
+  which also fixed the random split seed of every later unseeded `fit`. They now use
+  their own `random.Random(seed)`; the rows generated for a given seed are unchanged.
+- An error while reading a model's parameters no longer silently leaves the model
+  unseeded during `fit`; it propagates.
+- The Random Forest `max_depth` description said 0 meant unlimited. In PySpark depth 0
+  is a single leaf node, and the maximum is 30.
 
 ## 0.10.1 (unreleased)
 

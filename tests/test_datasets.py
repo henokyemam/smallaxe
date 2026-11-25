@@ -1,8 +1,12 @@
 """Tests for smallaxe sample datasets."""
 
+import hashlib
+import random
+
 import pytest
 from pyspark.sql.types import DoubleType, IntegerType, StringType
 
+import smallaxe
 from smallaxe.datasets import (
     dataset_info,
     load_sample_classification,
@@ -226,6 +230,49 @@ class TestClassificationDataset:
 
         for r1, r2 in zip(rows1[:10], rows2[:10]):
             assert r1 == r2
+
+
+class TestRandomState:
+    """Generating data uses its own random state, never Python's global one."""
+
+    # sha256 of repr(rows) for n_rows=200, recorded from the 0.10 generators
+    # (which seeded the global ``random`` module) before they moved to a local Random.
+    BASELINE = {
+        ("regression", 42): "db745dec468768f29c5c74058a70f9e86c1d80982e66183850db5919445cb7f9",
+        ("regression", 7): "0a6ca4474e05316b98d2a043e12496e464823bdccedbfb857113e06abe9a6cc5",
+        ("classification", 42): (
+            "4e79577cdf986965062b500b78edd5ad22332b659ba837837ddb4318320f2925"
+        ),
+        ("classification", 7): "477b4c96f3fa9620b3a553ee1a544bed55729566ebb09be4b1ee1a20cfd8beee",
+    }
+
+    @pytest.mark.parametrize("kind, seed", sorted(BASELINE))
+    def test_generated_rows_are_unchanged(self, kind, seed):
+        from smallaxe.datasets import _data
+
+        generate = getattr(_data, f"_generate_{kind}_data")
+        rows = generate(n_rows=200, seed=seed)
+        assert hashlib.sha256(repr(rows).encode()).hexdigest() == self.BASELINE[(kind, seed)]
+
+    @pytest.mark.parametrize("load", [load_sample_regression, load_sample_classification])
+    def test_loading_leaves_the_global_random_state_alone(self, spark_session, load):
+        random.seed(2024)
+        expected = random.Random(2024).random()
+
+        load(spark_session, n_rows=20, seed=1)
+
+        assert random.random() == expected
+
+    def test_loading_does_not_fix_the_unseeded_split_seed(self, spark_session):
+        """The old global reseed made every later unseeded fit draw the same split."""
+        from smallaxe.training.mixins.validation_mixin import resolve_split_seed
+
+        smallaxe.set_seed(None)
+        drawn = set()
+        for _ in range(3):
+            load_sample_regression(spark_session, n_rows=5, seed=42)
+            drawn.add(resolve_split_seed())
+        assert len(drawn) == 3
 
 
 class TestDatasetInfo:
