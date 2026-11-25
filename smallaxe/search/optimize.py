@@ -33,6 +33,7 @@ Example:
     >>> predictions = result.best_model.predict(df)
 """
 
+import math
 from typing import Any, Dict, List, Optional
 
 from pyspark.sql import DataFrame
@@ -200,7 +201,13 @@ def _extract_metric(
     metric: str,
     validation: str,
 ) -> float:
-    """Pull a single scalar metric out of a model's ``validation_scores``."""
+    """Pull a single scalar metric out of a model's ``validation_scores``.
+
+    Raises:
+        ValidationError: If the metric is missing, or present but undefined (None or
+            NaN) on this trial's validation data, so the trial fails rather than
+            scoring.
+    """
     if not validation_scores:
         raise ValidationError(
             "No validation scores were produced. Use validation='train_test' or "
@@ -210,6 +217,13 @@ def _extract_metric(
     # k-fold aggregates each metric under a 'mean_<metric>' key.
     key = f"mean_{metric}" if validation == "kfold" else metric
     value = validation_scores.get(key)
+    if key in validation_scores and (value is None or math.isnan(float(value))):
+        where = "every fold" if validation == "kfold" else "the test split"
+        raise ValidationError(
+            f"Metric '{metric}' is undefined on {where} of this trial (looked up as "
+            f"'{key}'), for example AUC on validation data with a single class. "
+            "The trial is not scored."
+        )
     if value is None:
         available = sorted(k for k, v in validation_scores.items() if isinstance(v, (int, float)))
         raise ValidationError(

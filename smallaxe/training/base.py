@@ -1,5 +1,6 @@
 """Base classes for training models."""
 
+import math
 import os
 import warnings
 from contextlib import nullcontext
@@ -593,7 +594,7 @@ class BaseModel(
         self._fit_spark_model(train_df, label_col, feature_cols)
 
         # Evaluate on test data
-        self._validation_scores = self._evaluate(test_df, label_col)
+        self._validation_scores = _undefined_to_none(self._evaluate(test_df, label_col))
         self._validation_scores["validation_type"] = "train_test"
         self._validation_scores["test_size"] = test_size
 
@@ -675,6 +676,13 @@ class BaseModel(
     ) -> Dict[str, Any]:
         """Aggregate scores across folds.
 
+        A fold value is either a number, NaN (the metric is undefined on that fold,
+        such as AUC-ROC on a fold with one class), or None (the model cannot produce
+        the metric). Means and standard deviations use the numeric folds only. Folds
+        where a metric was undefined are reported in one ``UserWarning``; a metric
+        undefined on every fold gets a ``mean_`` of None. In the stored
+        ``fold_scores`` undefined values are None.
+
         Args:
             fold_scores: List of score dictionaries from each fold.
             n_folds: Number of folds.
@@ -685,24 +693,42 @@ class BaseModel(
         if not fold_scores:
             return {"validation_type": "kfold", "n_folds": n_folds}
 
+        import statistics
+
         # Get metric names (exclude 'fold' key)
         metric_names = [k for k in fold_scores[0].keys() if k != "fold"]
 
         result: Dict[str, Any] = {
             "validation_type": "kfold",
             "n_folds": n_folds,
-            "fold_scores": fold_scores,
+            "fold_scores": [_undefined_to_none(s) for s in fold_scores],
         }
 
-        # Calculate mean and std for each metric
+        undefined_counts: Dict[str, int] = {}
         for metric in metric_names:
-            values = [s[metric] for s in fold_scores if s[metric] is not None]
+            present = [s[metric] for s in fold_scores if s[metric] is not None]
+            values = [v for v in present if not _is_undefined(v)]
+            if len(values) < len(present):
+                undefined_counts[metric] = len(present) - len(values)
             if values:
-                import statistics
-
                 result[f"mean_{metric}"] = statistics.mean(values)
                 if len(values) > 1:
                     result[f"std_{metric}"] = statistics.stdev(values)
+            elif present:
+                result[f"mean_{metric}"] = None
+
+        if undefined_counts:
+            detail = ", ".join(
+                f"{metric} in {count} of {len(fold_scores)} folds"
+                for metric, count in undefined_counts.items()
+            )
+            warnings.warn(
+                f"k-fold validation: a metric was undefined on some folds ({detail}), for "
+                "example AUC on a fold with one class. Their means use the remaining folds; "
+                "a metric undefined on every fold has mean None.",
+                UserWarning,
+                stacklevel=4,
+            )
 
         return result
 
@@ -789,23 +815,25 @@ class BaseModel(
             "f1_score": f1_score(full_df, label_col, self.PREDICTION_COL),
         }
 
-        # Probability-based metrics (only for binary classification)
+        # Probability-based metrics (only for binary classification). A fitted model
+        # that writes no probability column cannot be scored on them; that is the only
+        # case they are left out, and any other failure propagates.
         if self._task == "binary":
-            try:
-                from pyspark.ml.functions import vector_to_array
-                from pyspark.sql import functions as F
-
-                proba_df = full_df.withColumn(
-                    "prob_positive", vector_to_array(F.col(self.PROBABILITY_COL))[1]
-                )
-
-                metrics["auc_roc"] = auc_roc(proba_df, label_col, "prob_positive")
-                metrics["auc_pr"] = auc_pr(proba_df, label_col, "prob_positive")
-                metrics["log_loss"] = log_loss(proba_df, label_col, "prob_positive")
-            except Exception:
+            if self.PROBABILITY_COL not in full_df.columns:
                 metrics["auc_roc"] = None
                 metrics["auc_pr"] = None
                 metrics["log_loss"] = None
+                return metrics
+
+            from pyspark.ml.functions import vector_to_array
+
+            proba_df = full_df.withColumn(
+                "prob_positive", vector_to_array(F.col(self.PROBABILITY_COL))[1]
+            )
+
+            metrics["auc_roc"] = auc_roc(proba_df, label_col, "prob_positive")
+            metrics["auc_pr"] = auc_pr(proba_df, label_col, "prob_positive")
+            metrics["log_loss"] = log_loss(proba_df, label_col, "prob_positive")
 
         return metrics
 
@@ -1247,6 +1275,20 @@ class Classifier(Model, BaseClassifier):
 
     def __init__(self, algorithm: Union[str, Algorithm], task: str = "binary") -> None:
         super().__init__(algorithm, task)
+
+
+def _is_undefined(value: Any) -> bool:
+    """Whether a metric value is NaN, the metrics' marker for "undefined on this data"."""
+    return isinstance(value, float) and math.isnan(value)
+
+
+def _undefined_to_none(scores: Dict[str, Any]) -> Dict[str, Any]:
+    """A copy of ``scores`` with undefined (NaN) values as None.
+
+    Stored scores use None for any value that is not a number: NaN is not valid JSON,
+    and None already marks metrics a model cannot produce.
+    """
+    return {key: None if _is_undefined(value) else value for key, value in scores.items()}
 
 
 def _warn_if_class1_scores(validation_scores: Dict[str, Any]) -> None:

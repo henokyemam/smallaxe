@@ -2,6 +2,30 @@
 
 ## 0.11.0 (unreleased)
 
+### Changed
+
+- **Metrics no longer turn a failure into a score.** Every function in
+  `smallaxe.metrics` raises `ValidationError` naming the metric when the DataFrame has
+  no rows; earlier releases returned 0.0, a perfect `mse` / `rmse` / `mae`. `mse`,
+  `rmse`, `mae`, and `r2` no longer catch every exception and return 0.0: Spark's
+  errors propagate. A metric that is undefined on the rows given is `NaN`, not 0.0:
+  `auc_roc` with one class present, `auc_pr` with no positive labels, `mape` when every
+  label is zero, `log_loss` and `multiclass_scores` when no row is complete, and `r2`
+  when Spark's evaluator yields NaN. `r2` keeps scikit-learn's rule for constant labels
+  (1.0 on exact predictions, else 0.0), and per-class precision, recall, and F1 with a
+  zero denominator are still 0.0. An empty validation split or fold now makes `fit`
+  raise instead of scoring it 0.0.
+- **Undefined validation scores are None, and k-fold means skip them.** In
+  `validation_scores` (and the saved `metadata.json`) an undefined metric is stored as
+  `None`. A k-fold `mean_` / `std_` uses only the folds where the metric was defined and
+  `fit` emits one `UserWarning` naming each such metric and how many folds were
+  undefined; a metric undefined on every fold has `mean_<metric>` of `None`. Earlier
+  releases averaged the 0.0 scores in. In `optimize.run`, a trial whose metric is
+  undefined fails with an error saying so, instead of competing with a 0.0 score.
+- Binary `auc_roc`, `auc_pr`, and `log_loss` in `validation_scores` are `None` only when
+  the fitted model writes no probability column. Any other error while computing them
+  now propagates; earlier releases replaced every error with `None`.
+
 ### Fixed
 
 - **XGBoost trains the number of rounds `n_estimators` asks for.** Every earlier release

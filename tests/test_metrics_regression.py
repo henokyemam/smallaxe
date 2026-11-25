@@ -4,7 +4,7 @@ import math
 
 import pytest
 
-from smallaxe.exceptions import ColumnNotFoundError
+from smallaxe.exceptions import ColumnNotFoundError, ValidationError
 from smallaxe.metrics.regression import mae, mape, mse, r2, rmse
 
 
@@ -288,10 +288,10 @@ class TestMAPE:
         expected = 100 * (0 + 0.1 + 0.1) / 3
         assert math.isclose(result, expected, rel_tol=1e-4)
 
-    def test_mape_all_zeros_returns_zero(self, all_zeros_df):
-        """Test that MAPE returns 0 when all true values are zero."""
+    def test_mape_all_zeros_is_undefined(self, all_zeros_df):
+        """MAPE divides by the label, so it is undefined (NaN) when every label is zero."""
         result = mape(all_zeros_df)
-        assert result == 0.0
+        assert math.isnan(result)
 
     def test_mape_missing_column_raises_error(self, regression_df):
         """Test that missing column raises ColumnNotFoundError."""
@@ -339,6 +339,38 @@ class TestColumnValidation:
         except ColumnNotFoundError as e:
             assert "id" in str(e) or e.available_columns is not None
             assert e.column == "missing"
+
+
+ALL_METRICS = [mse, rmse, mae, r2, mape]
+
+
+class TestFailureIsNeverAScore:
+    """Empty input and internal errors raise; undefined values are NaN, never 0.0."""
+
+    @pytest.mark.parametrize("metric_fn", ALL_METRICS, ids=lambda fn: fn.__name__)
+    def test_empty_frame_raises_naming_the_metric(self, spark_session, metric_fn):
+        df = spark_session.createDataFrame([], "label double, predict_label double")
+        with pytest.raises(ValidationError, match=f"{metric_fn.__name__}.*no rows"):
+            metric_fn(df)
+
+    @pytest.mark.parametrize("metric_fn", [mse, rmse, mae, r2], ids=lambda fn: fn.__name__)
+    def test_evaluator_errors_propagate(self, spark_session, metric_fn):
+        """A label Spark's evaluator cannot read is an error, not a perfect 0.0."""
+        df = spark_session.createDataFrame([("a", 1.0), ("b", 2.0)], ["label", "predict_label"])
+        with pytest.raises(Exception) as info:
+            metric_fn(df)
+        assert not isinstance(info.value, ValidationError)
+
+    def test_r2_is_nan_when_the_evaluator_yields_nan(self, spark_session):
+        df = spark_session.createDataFrame(
+            [(1.0, 1.0), (float("nan"), 2.0), (3.0, 3.0)], ["label", "predict_label"]
+        )
+        assert math.isnan(r2(df))
+
+    def test_r2_constant_labels_with_wrong_predictions_is_zero(self, spark_session):
+        """scikit-learn's rule: constant labels score 1.0 if matched exactly, else 0.0."""
+        df = spark_session.createDataFrame([(5.0, 5.0), (5.0, 6.0)], ["label", "predict_label"])
+        assert r2(df) == 0.0
 
 
 class TestEdgeCases:
