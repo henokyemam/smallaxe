@@ -2,10 +2,14 @@
 
 The public API is every name in the ``__all__`` of a public module (one whose dotted
 path has no segment starting with ``_``), the public methods and attributes of every
-public class, and their parameters. The snapshots below record it. A failing test here
-means the API changed. If that was deliberate, update the snapshot in the same change
-and add a CHANGELOG.md entry; under semantic versioning a removal or an incompatible
-change needs a new major version, an addition a new minor version.
+public class, and their parameters. A function or class defined in a private module and
+exported by a public one (``smallaxe.datasets.load_sample_regression``) is pinned under
+the public module. The snapshots below record it; they also pin the implementation
+classes (``BaseModel``, the mixins), which the README leaves out of the public API but
+whose members ``Model`` exposes. A failing test here means the API changed. If that was
+deliberate, update the snapshot in the same change and add a CHANGELOG.md entry; under
+semantic versioning a removal or an incompatible change needs a new major version, an
+addition a new minor version.
 
 Signatures are recorded without annotations (parameter names, kinds and defaults):
 annotation reprs differ across the supported Pythons (3.8 spells ``Optional[X]`` as
@@ -98,6 +102,25 @@ def _class_members(cls: type) -> Dict[str, str]:
     return dict(sorted(members.items()))
 
 
+def _pinned_here(obj: Any, module_name: str) -> bool:
+    """Whether ``obj``, exported by ``module_name``, is pinned under that module.
+
+    An object is pinned where it is defined when that module is public and exports it,
+    and otherwise under every public module that exports it: a function defined in a
+    private module (``smallaxe.datasets._data``) and re-exported by a public one
+    (``smallaxe.datasets``) is public API all the same.
+    """
+    if not (inspect.isfunction(obj) or inspect.isclass(obj)):
+        return False  # a submodule or a constant: pinned by __all__ alone
+    home = obj.__module__
+    if not home.startswith("smallaxe"):
+        return False
+    if home == module_name:
+        return True
+    pinned_at_home = _is_public(home) and obj.__name__ in importlib.import_module(home).__all__
+    return not pinned_at_home
+
+
 def public_api() -> Tuple[Dict[str, List[str]], Dict[str, str], Dict[str, Dict[str, str]]]:
     """``(__all__ per module, function signatures, class members)`` of public smallaxe."""
     exported: Dict[str, List[str]] = {}
@@ -108,7 +131,7 @@ def public_api() -> Tuple[Dict[str, List[str]], Dict[str, str], Dict[str, Dict[s
         exported[module_name] = sorted(module.__all__)
         for name in module.__all__:
             obj = getattr(module, name)
-            if getattr(obj, "__module__", None) != module_name:
+            if not _pinned_here(obj, module_name):
                 continue  # pinned where it is defined
             if inspect.isclass(obj):
                 classes[f"{module_name}.{name}"] = _class_members(obj)
@@ -124,7 +147,7 @@ def public_callables() -> List[Tuple[str, Callable[..., Any]]]:
         module = importlib.import_module(module_name)
         for name in module.__all__:
             obj = getattr(module, name)
-            if getattr(obj, "__module__", None) != module_name:
+            if not _pinned_here(obj, module_name):
                 continue
             if inspect.isfunction(obj):
                 found.append((f"{module_name}.{name}", obj))
@@ -207,6 +230,76 @@ def test_function_signature_snapshot():
 def test_class_member_snapshot():
     _, _, classes = public_api()
     assert classes == EXPECTED_CLASSES, CHANGE_HINT
+
+
+def test_every_exported_function_and_class_is_pinned():
+    """Each function or class a public module exports has a snapshot entry somewhere.
+
+    Pinned under its defining module when that module is public and exports it, else
+    under the exporting module, so a public name implemented in a private module
+    (``smallaxe.datasets._data``) cannot escape the tripwire.
+    """
+    _, functions, classes = public_api()
+    unpinned = []
+    for module_name in public_modules():
+        module = importlib.import_module(module_name)
+        for name in module.__all__:
+            obj = getattr(module, name)
+            if not (inspect.isfunction(obj) or inspect.isclass(obj)):
+                continue
+            keys = {f"{module_name}.{name}", f"{obj.__module__}.{obj.__name__}"}
+            if not keys & (set(functions) | set(classes)):
+                unpinned.append(f"{module_name}.{name}")
+    assert unpinned == []
+    assert "smallaxe.datasets.load_sample_regression" in functions
+
+
+def _documented_args(docstring: str) -> List[str]:
+    """The parameter names listed in the ``Args:`` section of a Google-style docstring."""
+    names: List[str] = []
+    in_args = False
+    indent = None
+    for line in inspect.cleandoc(docstring).splitlines():
+        stripped = line.strip()
+        if stripped == "Args:":
+            in_args, indent = True, None
+            continue
+        if not in_args or not stripped:
+            continue
+        current = len(line) - len(line.lstrip())
+        if current == 0:
+            in_args = False  # the next section
+            continue
+        if indent is None:
+            indent = current
+        if current == indent and ":" in stripped:
+            names.append(stripped.split(":", 1)[0].split(" ", 1)[0].lstrip("*"))
+    return names
+
+
+def test_every_public_callable_documents_its_arguments():
+    """Each parameter of a public function or method is listed under ``Args:``.
+
+    A class may document its constructor's arguments in the class docstring instead.
+    """
+    problems = []
+    for name, func in public_callables():
+        params = [
+            p.name
+            for p in inspect.signature(func).parameters.values()
+            if p.name not in ("self", "cls")
+        ]
+        if not params:
+            continue
+        documented = _documented_args(func.__doc__ or "")
+        if func.__name__ == "__init__":
+            owner = importlib.import_module(func.__module__)
+            cls = getattr(owner, func.__qualname__.split(".")[0])
+            documented += _documented_args(cls.__doc__ or "")
+        missing = [param for param in params if param not in documented]
+        if missing:
+            problems.append(f"{name}: {missing} not under Args:")
+    assert problems == []
 
 
 def test_training_exports_the_supported_names_only():
@@ -410,6 +503,9 @@ EXPECTED_ALL: Dict[str, List[str]] = {
 }
 
 EXPECTED_FUNCTIONS: Dict[str, str] = {
+    "smallaxe.datasets.dataset_info": "(dataset_name, *, verbose=False)",
+    "smallaxe.datasets.load_sample_classification": "(spark=None, n_rows=10000, seed=42)",
+    "smallaxe.datasets.load_sample_regression": "(spark=None, n_rows=10000, seed=42)",
     "smallaxe.get_seed": "()",
     "smallaxe.get_verbosity": "()",
     "smallaxe.load": "(path)",

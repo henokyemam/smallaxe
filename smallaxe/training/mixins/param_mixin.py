@@ -52,7 +52,9 @@ class ParamMixin(ABC):
         Each value is checked against the parameter's default: it must have the same
         type (an int is accepted for a float parameter; a bool only for a bool one), and
         ``seed`` must be an int or None. None resets a parameter to "let the estimator
-        decide". Nothing is set if any value is rejected.
+        decide". Nothing is set if any value is rejected. Ranges are the estimator's
+        to check, when ``fit`` runs: ``max_depth=-3`` is accepted here and rejected by
+        ``fit``.
 
         Args:
             **params: Parameter names and the values to set.

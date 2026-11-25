@@ -499,6 +499,17 @@ class TestMetadataMixin:
 class TestSparkModelMixin:
     """Tests for SparkModelMixin."""
 
+    def test_declares_the_state_its_methods_read(self):
+        """The fitted model and feature columns are declared on the mixin for type checkers.
+
+        A subclass's fit sets them; they are declared without a class value, so the
+        ``hasattr`` checks for an unfitted model stay meaningful.
+        """
+        hints = SparkModelMixin.__annotations__
+        assert {"_spark_model", "_feature_cols"} <= set(hints)
+        assert "_feature_cols" not in vars(SparkModelMixin)
+        assert "_spark_model" not in vars(SparkModelMixin)
+
     def test_assemble_features(self, regression_df):
         """Test _assemble_features creates features column."""
         mixin = ConcreteSparkModelMixin()

@@ -251,7 +251,8 @@ class Algorithm:
         return self._resolve(self._path(self.models, task))
 
     def _path(self, paths: Mapping[str, str], task: str) -> str:
-        if task not in paths:
+        """``paths[task]``, or ValidationError for a task this algorithm does not have."""
+        if not isinstance(task, str) or task not in paths:
             raise ValidationError(
                 f"Algorithm '{self.name}' has no task {task!r}; its tasks are {sorted(paths)}."
             )

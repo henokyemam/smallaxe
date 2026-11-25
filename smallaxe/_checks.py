@@ -1,10 +1,17 @@
-"""Argument checks shared by the public entry points: a DataFrame, a list of column names."""
+"""Argument checks shared by the public entry points.
 
-from typing import Any, List, Optional, Sequence
+A DataFrame, a list of column names, a new column's name, and Spark's own argument
+errors turned into ``ValidationError``.
+"""
+
+from contextlib import contextmanager
+from typing import Any, Iterator, List, Optional, Sequence
+
+from pyspark.sql.utils import IllegalArgumentException
 
 from smallaxe.exceptions import ValidationError
 
-__all__ = ["require_dataframe", "column_names"]
+__all__ = ["require_dataframe", "column_names", "output_column", "spark_argument_errors"]
 
 
 def require_dataframe(dataframe: Any, name: str = "dataframe") -> None:
@@ -45,3 +52,42 @@ def column_names(name: str, value: Optional[Sequence[Any]]) -> Optional[List[str
     if not isinstance(value, (list, tuple)) or not all(isinstance(col, str) for col in value):
         raise ValidationError(f"{name} must be a list of column names, got {value!r}.")
     return list(value)
+
+
+def output_column(name: str, value: Any) -> str:
+    """``value`` if it is a usable name for a new column.
+
+    Args:
+        name: The argument's name, for the message.
+        value: The proposed column name.
+
+    Returns:
+        ``value``, unchanged.
+
+    Raises:
+        ValidationError: If ``value`` is not a non-empty string.
+    """
+    if not isinstance(value, str) or not value:
+        raise ValidationError(f"{name} must be a non-empty column name, got {value!r}.")
+    return value
+
+
+@contextmanager
+def spark_argument_errors(context: str) -> Iterator[None]:
+    """Turn Spark's ``IllegalArgumentException`` inside the block into ``ValidationError``.
+
+    Spark checks some arguments only when a job starts: an estimator parameter out of its
+    range (``maxDepth=-3``), an evaluator column of the wrong type. Those are user errors,
+    so they surface as ``ValidationError`` with Spark's message, chained to the original.
+
+    Args:
+        context: What was being done, for the message (``"Cannot fit 'random_forest'"``).
+
+    Raises:
+        ValidationError: If the block raises Spark's ``IllegalArgumentException``.
+    """
+    try:
+        yield
+    except IllegalArgumentException as exc:
+        detail = str(exc).splitlines()[0] if str(exc) else type(exc).__name__
+        raise ValidationError(f"{context}: {detail}") from exc

@@ -13,7 +13,6 @@ import warnings
 from contextlib import nullcontext
 from typing import Any, Dict, List, Literal, Mapping, Optional, Tuple, Type, TypeVar, Union, cast
 
-from pyspark.ml.linalg import VectorUDT
 from pyspark.sql import DataFrame
 from pyspark.sql import functions as F
 from pyspark.sql.types import BooleanType, DoubleType, FloatType, NumericType
@@ -34,6 +33,7 @@ from smallaxe.training.mixins import (
     SparkModelMixin,
     ValidationMixin,
 )
+from smallaxe.training.mixins.spark_model_mixin import _check_feature_types
 from smallaxe.training.mixins.validation_mixin import _resolve_split_seed
 
 __all__ = ["BaseModel", "BaseRegressor", "BaseClassifier", "Model", "Regressor", "Classifier"]
@@ -67,6 +67,21 @@ def _infer_feature_cols(
         else:
             ignored[field.name] = field.dataType.simpleString()
     return feature_cols, ignored
+
+
+def _require_numeric_label(dataframe: DataFrame, label_col: str) -> None:
+    """Reject a label column that is not numeric: every estimator and metric needs one.
+
+    Raises:
+        ValidationError: If the label column's type is not numeric (a string or boolean).
+    """
+    data_type = dataframe.schema[label_col].dataType
+    if not isinstance(data_type, NumericType):
+        raise ValidationError(
+            f"Label column '{label_col}' has type {data_type.simpleString()}; the label "
+            "must be numeric. Encode class labels as 0, 1, ... first, for example with "
+            "pyspark.ml.feature.StringIndexer or a cast."
+        )
 
 
 def _warn_ignored_cols(
@@ -194,7 +209,7 @@ class BaseModel(
         Raises:
             ValidationError: If task is not a valid task type.
         """
-        if task not in ALL_TASKS:
+        if not isinstance(task, str) or task not in ALL_TASKS:
             raise ValidationError(f"Invalid task {task!r}. Valid tasks are: {sorted(ALL_TASKS)}")
         self._task = task
         self._params: Dict[str, Any] = {}
@@ -297,8 +312,12 @@ class BaseModel(
         Raises:
             ValidationError: If ``label_col`` is empty, ``validation``, ``cache_strategy``,
                 ``test_size`` or ``n_folds`` is invalid, no feature column is given or
-                inferred, a feature has missing values the algorithm cannot accept, the
-                label has nulls, or a validation split or fold is empty.
+                inferred, the label is not numeric or has nulls, a feature is not
+                numeric, boolean or an ML vector or has missing values the algorithm
+                cannot accept, a validation split or fold is empty, or Spark's estimator
+                rejects a parameter value (``max_depth=-3`` for Random Forest; XGBoost
+                checks its parameters inside the training job instead, and its error
+                propagates unchanged).
             ColumnNotFoundError: If ``label_col``, a feature column or ``fold_key`` is not
                 in ``dataframe``.
         """
@@ -503,17 +522,8 @@ class BaseModel(
                     column=col,
                     available_columns=list(available),
                 )
-        types = {field.name: field.dataType for field in dataframe.schema.fields}
-        for col in feature_cols:
-            data_type = types.get(col)
-            if data_type is not None and not isinstance(
-                data_type, (NumericType, BooleanType, VectorUDT)
-            ):
-                raise ValidationError(
-                    f"Feature column '{col}' has type {data_type.simpleString()}; features "
-                    "must be numeric, boolean or ML vectors. Encode it first, for example "
-                    "with smallaxe.preprocessing.Encoder."
-                )
+        _require_numeric_label(dataframe, label_col)
+        _check_feature_types(dataframe, feature_cols)
 
     def _accepts_missing(self) -> bool:
         """Whether the estimator treats NaN features as missing values."""
@@ -932,11 +942,14 @@ class BaseModel(
         Raises:
             ModelNotFittedError: If the model has not been fitted.
             ColumnNotFoundError: If a feature column is not in ``dataframe``.
-            ValidationError: If ``output_col`` is already a column of ``dataframe``.
+            ValidationError: If ``dataframe`` is not a DataFrame, ``output_col`` is not a
+                non-empty string or is already a column of ``dataframe``, or a feature
+                column is not numeric, boolean or an ML vector.
         """
         if not self._is_fitted:
             raise ModelNotFittedError("Model has not been fitted. Call fit() before predict().")
         _checks.require_dataframe(dataframe)
+        _checks.output_column("output_col", output_col)
 
         return self._predict_spark_model(dataframe, output_col=output_col)
 
@@ -961,15 +974,21 @@ class BaseModel(
         Raises:
             ModelNotFittedError: If the model has not been fitted.
             ColumnNotFoundError: If the label or a feature column is not in ``dataframe``.
+            ValidationError: If ``dataframe`` is not a DataFrame, ``label_col`` is not a
+                string, the label is not numeric, or a feature column is not numeric,
+                boolean or an ML vector.
         """
         if not self._is_fitted:
             raise ModelNotFittedError("Model has not been fitted. Call fit() before evaluate().")
         _checks.require_dataframe(dataframe)
+        if label_col is not None and not isinstance(label_col, str):
+            raise ValidationError(f"label_col must be a column name or None, got {label_col!r}.")
         label = label_col or self._label_col or ""
         available = list(dataframe.columns)
         for col in [label] + list(self._feature_cols):
             if col not in available:
                 raise ColumnNotFoundError(column=col, available_columns=available)
+        _require_numeric_label(dataframe, label)
         # Score only the columns the model needs, so a column of dataframe that shares a name
         # with one the model writes (``prediction``, ``probability``) cannot collide.
         needed = [label] + [col for col in self._feature_cols if col != label]
@@ -1044,7 +1063,7 @@ class BaseRegressor(BaseModel):
         Raises:
             ValidationError: If task is not a valid regression task.
         """
-        if task not in REGRESSION_TASKS:
+        if not isinstance(task, str) or task not in REGRESSION_TASKS:
             raise ValidationError(
                 f"Invalid regression task {task!r}. Valid tasks are: {sorted(REGRESSION_TASKS)}"
             )
@@ -1070,7 +1089,7 @@ class BaseClassifier(BaseModel):
         Raises:
             ValidationError: If task is not a valid classification task.
         """
-        if task not in CLASSIFICATION_TASKS:
+        if not isinstance(task, str) or task not in CLASSIFICATION_TASKS:
             raise ValidationError(
                 f"Invalid classification task {task!r}. "
                 f"Valid tasks are: {sorted(CLASSIFICATION_TASKS)}"
@@ -1095,13 +1114,16 @@ class BaseClassifier(BaseModel):
         Raises:
             ModelNotFittedError: If the model has not been fitted.
             ColumnNotFoundError: If a feature column is not in ``dataframe``.
-            ValidationError: If ``output_col`` is already a column of ``dataframe``.
+            ValidationError: If ``dataframe`` is not a DataFrame, ``output_col`` is not a
+                non-empty string or is already a column of ``dataframe``, or a feature
+                column is not numeric, boolean or an ML vector.
         """
         if not self._is_fitted:
             raise ModelNotFittedError(
                 "Model has not been fitted. Call fit() before predict_proba()."
             )
         _checks.require_dataframe(dataframe)
+        _checks.output_column("output_col", output_col)
 
         return self._predict_proba_spark_model(dataframe, output_col=output_col)
 
@@ -1231,7 +1253,9 @@ class Model(BaseModel):
             if algorithm.fit_context is not None
             else nullcontext({})
         )
-        with context as extra:
+        with context as extra, _checks.spark_argument_errors(
+            f"Cannot fit {algorithm.name!r} with parameters {self.get_params()}"
+        ):
             estimator = self._build_estimator(label_col, extra)
             self._feature_cols = feature_cols
             self._label_col = label_col

@@ -4,11 +4,34 @@ from abc import ABC, abstractmethod
 from typing import Any, Dict, List, Optional, Tuple
 
 from pyspark.ml.feature import VectorAssembler
+from pyspark.ml.linalg import VectorUDT
 from pyspark.sql import DataFrame
+from pyspark.sql.types import BooleanType, NumericType
 
 from smallaxe.exceptions import ColumnNotFoundError, ModelNotFittedError, ValidationError
 
 __all__ = ["SparkModelMixin"]
+
+
+def _check_feature_types(dataframe: DataFrame, feature_cols: List[str]) -> None:
+    """Reject a feature column that is not numeric, boolean or an ML vector.
+
+    Columns missing from ``dataframe`` are left to the caller's ColumnNotFoundError.
+
+    Raises:
+        ValidationError: Naming the first feature column of another type.
+    """
+    types = {field.name: field.dataType for field in dataframe.schema.fields}
+    for col in feature_cols:
+        data_type = types.get(col)
+        if data_type is not None and not isinstance(
+            data_type, (NumericType, BooleanType, VectorUDT)
+        ):
+            raise ValidationError(
+                f"Feature column '{col}' has type {data_type.simpleString()}; features "
+                "must be numeric, boolean or ML vectors. Encode it first, for example "
+                "with smallaxe.preprocessing.Encoder."
+            )
 
 
 class SparkModelMixin(ABC):
@@ -32,6 +55,10 @@ class SparkModelMixin(ABC):
     PREDICTION_COL = "prediction"
     PROBABILITY_COL = "probability"
     RAW_PREDICTION_COL = "rawPrediction"
+
+    # Set by fit (or load): the fitted Spark model and the columns it was fitted on.
+    _spark_model: Any
+    _feature_cols: List[str]
 
     def _handle_invalid(self) -> str:
         """``VectorAssembler``'s policy for null and NaN features.
@@ -129,6 +156,7 @@ class SparkModelMixin(ABC):
         missing = [col for col in feature_cols if col not in dataframe.columns]
         if missing:
             raise ColumnNotFoundError(column=missing[0], available_columns=list(dataframe.columns))
+        _check_feature_types(dataframe, feature_cols)
         dataframe, shielded = self._shield_user_columns(dataframe)
         df_with_features = self._assemble_features(dataframe, feature_cols)
         return self._spark_model.transform(df_with_features), shielded

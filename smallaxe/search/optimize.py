@@ -30,11 +30,13 @@ Example:
 """
 
 import math
+import numbers
 from typing import Any, Dict, List, Optional
 
 from hyperopt import STATUS_FAIL, STATUS_OK, Trials, fmin, hp, space_eval, tpe
 from hyperopt.early_stop import no_progress_loss
 from hyperopt.exceptions import AllTrialsFailed
+from hyperopt.pyll import Apply
 from pyspark.sql import DataFrame
 
 import smallaxe
@@ -75,6 +77,17 @@ _VALID_METRICS = _MAXIMIZE_METRICS | _MINIMIZE_METRICS
 
 class SearchResult:
     """Container for the outcome of a hyperparameter search.
+
+    :func:`run` builds it; each argument is kept as the attribute of the same name.
+
+    Args:
+        best_params: The best hyperparameters found.
+        best_score: The validation score of ``best_params``.
+        best_model: The model refitted with ``best_params``, or None.
+        trials_history: One dict per evaluation.
+        metric: The optimized metric name.
+        validation: The validation strategy used during the search.
+        max_evals: The number of evaluations requested.
 
     Attributes:
         best_params: The best hyperparameters found, cast to the model's
@@ -145,12 +158,17 @@ def _default_metric(model: Any) -> str:
     return "accuracy"
 
 
-def _normalize_space(param_space: Dict[str, Any]) -> Dict[str, Any]:
-    """Convert convenience shorthands into hyperopt expressions.
+def _normalize_space(param_space: Dict[str, Any], type_reference: Dict[str, Any]) -> Dict[str, Any]:
+    """Convert convenience shorthands into hyperopt expressions, checking fixed values.
 
     A list/tuple value is treated as a discrete set of choices and converted to
-    ``hp.choice``. Any other value is assumed to already be a hyperopt
-    expression and is passed through unchanged.
+    ``hp.choice``. A hyperopt expression (``hp.quniform(...)``) is passed through
+    unchanged. Any other value is a constant: hyperopt hands it to every trial as is.
+    Each choice and constant must cast to the parameter's type (see :func:`_cast_params`).
+
+    Raises:
+        ValidationError: If ``param_space`` is not a non-empty dict with string keys, a
+            choice list is empty, or a choice or constant does not fit its parameter.
     """
     if not isinstance(param_space, dict) or not param_space:
         raise ValidationError(
@@ -160,11 +178,17 @@ def _normalize_space(param_space: Dict[str, Any]) -> Dict[str, Any]:
 
     normalized: Dict[str, Any] = {}
     for name, spec in param_space.items():
+        if not isinstance(name, str):
+            raise ValidationError(f"param_space keys must be parameter names, got {name!r}.")
         if isinstance(spec, (list, tuple)):
             if len(spec) == 0:
                 raise ValidationError(f"Choice list for parameter '{name}' is empty.")
+            for choice in spec:
+                _cast_params({name: choice}, type_reference)
             normalized[name] = hp.choice(name, list(spec))
         else:
+            if not isinstance(spec, Apply):
+                _cast_params({name: spec}, type_reference)
             normalized[name] = spec
     return normalized
 
@@ -175,6 +199,9 @@ def _cast_params(sampled: Dict[str, Any], type_reference: Dict[str, Any]) -> Dic
     hyperopt's quantized distributions (``hp.quniform``) yield floats even for
     integer-valued parameters, so cast each sampled value to match the type of
     the model's default for that parameter.
+
+    Raises:
+        ValidationError: If a value for an int or float parameter is not a number.
     """
     cast: Dict[str, Any] = {}
     for name, value in sampled.items():
@@ -184,10 +211,13 @@ def _cast_params(sampled: Dict[str, Any], type_reference: Dict[str, Any]) -> Dic
         elif isinstance(default, bool):
             # bool is a subclass of int; handle before int to avoid misfire.
             cast[name] = bool(value)
-        elif isinstance(default, int):
-            cast[name] = int(round(value))
-        elif isinstance(default, float):
-            cast[name] = float(value)
+        elif isinstance(default, (int, float)):
+            if isinstance(value, bool) or not isinstance(value, numbers.Real):
+                raise ValidationError(
+                    f"param_space value {value!r} for '{name}' must be a number, like the "
+                    f"parameter's default {default!r}."
+                )
+            cast[name] = int(round(value)) if isinstance(default, int) else float(value)
         else:
             cast[name] = value
     return cast
@@ -304,8 +334,12 @@ def run(
     Raises:
         ValidationError: If arguments are invalid: ``model`` is not a smallaxe model,
             ``dataframe`` is not a DataFrame, a bad metric or one the model's task does
-            not produce, an empty or malformed space, validation='none', ``max_evals``
-            below 1, or every trial failed.
+            not produce, an empty or malformed space (a key that is not a parameter
+            name, a choice or constant that is not a number for a numeric parameter),
+            validation='none', a ``test_size``, ``n_folds`` or ``fold_key`` that ``fit``
+            would reject, a ``max_evals`` or ``early_stopping_rounds`` below 1, a ``seed``
+            that is not an int, a ``refit``, ``verbose`` or ``early_stopping`` that is not
+            a bool, a label that is not numeric, or every trial failed.
         ColumnNotFoundError: If ``label_col`` or a feature column is missing.
     """
     # --- Validate arguments up front for clear, early failures. ---
@@ -320,11 +354,27 @@ def run(
     if not label_col or not isinstance(label_col, str):
         raise ValidationError(f"label_col must be a non-empty column name, got {label_col!r}.")
 
-    if validation not in {"train_test", "kfold"}:
+    if validation not in ("train_test", "kfold"):
         raise ValidationError(
             f"validation must be 'train_test' or 'kfold' for optimization, got "
-            f"'{validation}'. 'none' produces no score to optimize."
+            f"{validation!r}. 'none' produces no score to optimize."
         )
+    # test_size, n_folds, fold_key and refit are checked as fit checks them, once.
+    model._validate_fit_params(
+        dataframe=dataframe,
+        label_col=label_col,
+        feature_cols=feature_cols,
+        exclude_cols=exclude_cols,
+        validation=validation,
+        cache_strategy=None,
+        test_size=test_size,
+        n_folds=n_folds,
+        fold_key=fold_key,
+        refit=refit,
+    )
+    for name, flag in (("verbose", verbose), ("early_stopping", early_stopping)):
+        if flag is not None and not isinstance(flag, bool):
+            raise ValidationError(f"{name} must be True or False, got {flag!r}.")
 
     if isinstance(max_evals, bool) or not isinstance(max_evals, int) or max_evals < 1:
         raise ValidationError(f"max_evals must be an integer of at least 1, got {max_evals!r}.")
@@ -340,7 +390,7 @@ def run(
         raise ValidationError(f"seed must be an integer or None, got {type(seed).__name__}.")
 
     metric = metric or _default_metric(model)
-    if metric not in _VALID_METRICS:
+    if not isinstance(metric, str) or metric not in _VALID_METRICS:
         raise ValidationError(
             f"Invalid metric '{metric}'. Supported metrics are: {sorted(_VALID_METRICS)}."
         )
@@ -352,14 +402,14 @@ def run(
             f"Supported metrics for this task are: {sorted(task_metrics)}."
         )
 
-    space = _normalize_space(param_space)
+    type_reference = model.default_params
+    space = _normalize_space(param_space, type_reference)
     unknown = sorted(set(param_space) - set(model.params))
     if unknown:
         raise ValidationError(
             f"param_space names {unknown}, which {model.algorithm.name!r} does not have for "
             f"task {model.task!r}. Its parameters are: {sorted(model.params)}."
         )
-    type_reference = model.default_params
     maximize = metric in _MAXIMIZE_METRICS
 
     # Infer features once and check the data once, so bad data fails here rather

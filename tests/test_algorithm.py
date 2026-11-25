@@ -120,6 +120,14 @@ class TestAlgorithmRecord:
         install_fake_modules(monkeypatch, record)
         assert record.estimator_class("binary") is FakeEstimator
 
+    @pytest.mark.parametrize("task", ["ranking", ["binary"], None])
+    def test_classes_for_an_unknown_task_raise_validation_error(self, task):
+        record = _record()
+        with pytest.raises(ValidationError, match="has no task"):
+            record.estimator_class(task)
+        with pytest.raises(ValidationError, match="has no task"):
+            record.model_class(task)
+
 
 class TestRegistry:
     def test_names_in_factory_order(self):
@@ -128,6 +136,11 @@ class TestRegistry:
     def test_get_unknown_raises(self):
         with pytest.raises(ValidationError, match="Unknown algorithm 'nope'"):
             algorithm.get("nope")
+
+    @pytest.mark.parametrize("name", [3, None, ["xgboost"]])
+    def test_get_non_string_raises(self, name):
+        with pytest.raises(ValidationError, match="Algorithm name must be a string"):
+            algorithm.get(name)
 
     @pytest.mark.parametrize("name", algorithm.names())
     def test_every_record_covers_every_task(self, name):

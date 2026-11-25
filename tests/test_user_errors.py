@@ -9,6 +9,7 @@ design, raised before smallaxe runs.)
 from pathlib import Path
 
 import pytest
+from pyspark.sql import functions as F
 
 import smallaxe
 from smallaxe import metrics
@@ -37,9 +38,19 @@ def fitted(frame):
     return regressors.random_forest(n_estimators=2, seed=1).fit(frame, "y", feature_cols=["x"])
 
 
-def _cases(frame, fitted, tmp_path):
+@pytest.fixture(scope="module")
+def fitted_classifier(frame):
+    binary = frame.withColumn("b", (F.col("id") % 2).cast("double"))
+    return classifiers.random_forest(n_estimators=2, seed=1).fit(binary, "b", feature_cols=["x"])
+
+
+def _cases(frame, fitted, fitted_classifier, tmp_path):
     """name -> (zero-argument call, expected exception)."""
     scaler = Scaler().fit(frame, numerical_cols=["x"])
+    binary = frame.withColumn("b", (F.col("id") % 2).cast("double"))
+    scored = binary.withColumn("p", F.col("x") / 7.0)
+    string_x = frame.withColumn("x", F.lit("a"))
+    rf = regressors.random_forest
     return {
         # Global settings
         "set_seed(bool)": (lambda: smallaxe.set_seed(True), ConfigurationError),
@@ -299,6 +310,122 @@ def _cases(frame, fitted, tmp_path):
             lambda: optimize.run(regressors.random_forest(), frame, "nope", {"max_depth": [2]}),
             ColumnNotFoundError,
         ),
+        # Task names that are not strings
+        "Classifier(task=['binary'])": (
+            lambda: Classifier("random_forest", task=["binary"]),
+            ValidationError,
+        ),
+        "Regressor(task=['simple_regression'])": (
+            lambda: Regressor("random_forest", task=["simple_regression"]),
+            ValidationError,
+        ),
+        "Model(task={})": (lambda: Model("random_forest", task={}), ValidationError),
+        "classifiers.random_forest(task=['binary'])": (
+            lambda: classifiers.random_forest(task=["binary"]),
+            ValidationError,
+        ),
+        # Labels and features of the wrong type
+        "fit(string label)": (lambda: rf().fit(frame, "c", feature_cols=["x"]), ValidationError),
+        "fit(boolean label)": (
+            lambda: rf().fit(frame.withColumn("t", F.col("x") > 3), "t", feature_cols=["x"]),
+            ValidationError,
+        ),
+        "classifier fit(string label)": (
+            lambda: classifiers.random_forest().fit(frame, "c", feature_cols=["x"]),
+            ValidationError,
+        ),
+        "evaluate(string label)": (lambda: fitted.evaluate(frame, "c"), ValidationError),
+        "predict(string feature)": (lambda: fitted.predict(string_x), ValidationError),
+        "predict_proba(string feature)": (
+            lambda: fitted_classifier.predict_proba(string_x),
+            ValidationError,
+        ),
+        # Prediction column names
+        "predict(output_col=None)": (
+            lambda: fitted.predict(frame, output_col=None),
+            ValidationError,
+        ),
+        "predict(output_col=1)": (lambda: fitted.predict(frame, output_col=1), ValidationError),
+        "predict(output_col='')": (lambda: fitted.predict(frame, output_col=""), ValidationError),
+        "predict_proba(output_col=1)": (
+            lambda: fitted_classifier.predict_proba(frame, output_col=1),
+            ValidationError,
+        ),
+        # Parameter values the estimator rejects
+        "set_params(max_depth=-3).fit": (
+            lambda: rf().set_params(max_depth=-3).fit(frame, "y", feature_cols=["x"]),
+            ValidationError,
+        ),
+        "set_params(subsampling_rate=5.0).fit": (
+            lambda: rf().set_params(subsampling_rate=5.0).fit(frame, "y", feature_cols=["x"]),
+            ValidationError,
+        ),
+        "set_params(feature_subset_strategy='bogus').fit": (
+            lambda: rf()
+            .set_params(feature_subset_strategy="bogus")
+            .fit(frame, "y", feature_cols=["x"]),
+            ValidationError,
+        ),
+        # Metrics on string columns
+        "mse string label": (lambda: metrics.mse(frame, "c", "x"), ValidationError),
+        "rmse string prediction": (lambda: metrics.rmse(frame, "y", "c"), ValidationError),
+        "r2 string label": (lambda: metrics.r2(frame, "c", "x"), ValidationError),
+        "mae string label": (lambda: metrics.mae(frame, "c", "x"), ValidationError),
+        "auc_roc string label": (lambda: metrics.auc_roc(scored, "c", "p"), ValidationError),
+        "auc_pr string probability": (lambda: metrics.auc_pr(scored, "b", "c"), ValidationError),
+        "auc_roc string probability": (lambda: metrics.auc_roc(scored, "b", "c"), ValidationError),
+        # Search arguments
+        "optimize.run(space={'max_depth': 'ab'})": (
+            lambda: optimize.run(rf(), frame, "y", {"max_depth": "ab"}, feature_cols=["x"]),
+            ValidationError,
+        ),
+        "optimize.run(space={'max_depth': ['a', 'b']})": (
+            lambda: optimize.run(rf(), frame, "y", {"max_depth": ["a", "b"]}, feature_cols=["x"]),
+            ValidationError,
+        ),
+        "optimize.run(space={1: [2, 3]})": (
+            lambda: optimize.run(rf(), frame, "y", {1: [2, 3]}, feature_cols=["x"]),
+            ValidationError,
+        ),
+        "optimize.run(validation=[])": (
+            lambda: optimize.run(rf(), frame, "y", {"max_depth": [2]}, validation=[]),
+            ValidationError,
+        ),
+        "optimize.run(verbose='y')": (
+            lambda: optimize.run(rf(), frame, "y", {"max_depth": [2]}, verbose="y"),
+            ValidationError,
+        ),
+        "optimize.run(refit='y')": (
+            lambda: optimize.run(rf(), frame, "y", {"max_depth": [2]}, refit="y"),
+            ValidationError,
+        ),
+        "optimize.run(early_stopping='y')": (
+            lambda: optimize.run(rf(), frame, "y", {"max_depth": [2]}, early_stopping="y"),
+            ValidationError,
+        ),
+        "optimize.run(test_size=2)": (
+            lambda: optimize.run(rf(), frame, "y", {"max_depth": [2]}, test_size=2),
+            ValidationError,
+        ),
+        "optimize.run(n_folds=1)": (
+            lambda: optimize.run(
+                rf(), frame, "y", {"max_depth": [2]}, validation="kfold", n_folds=1
+            ),
+            ValidationError,
+        ),
+        "optimize.run(string label)": (
+            lambda: optimize.run(rf(), frame, "c", {"max_depth": [2]}, feature_cols=["x"]),
+            ValidationError,
+        ),
+        # Pipeline validation options of the wrong type on a pipeline without a model
+        "pipeline refit=1 without model": (
+            lambda: Pipeline([("s", Scaler())]).fit(frame, numerical_cols=["x"], refit=1),
+            ValidationError,
+        ),
+        "pipeline n_folds=5.0 without model": (
+            lambda: Pipeline([("s", Scaler())]).fit(frame, numerical_cols=["x"], n_folds=5.0),
+            ValidationError,
+        ),
         # Datasets
         "dataset_info('nope')": (lambda: dataset_info("nope"), ValidationError),
         "load_sample_regression(n_rows=0)": (
@@ -312,9 +439,9 @@ def _cases(frame, fitted, tmp_path):
     }
 
 
-def test_user_errors_raise_smallaxe_exceptions(frame, fitted, tmp_path):
+def test_user_errors_raise_smallaxe_exceptions(frame, fitted, fitted_classifier, tmp_path):
     failures = []
-    for name, (call, expected) in _cases(frame, fitted, tmp_path).items():
+    for name, (call, expected) in _cases(frame, fitted, fitted_classifier, tmp_path).items():
         try:
             call()
         except expected:
