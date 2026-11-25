@@ -424,8 +424,7 @@ class Imputer:
             }
         except (AttributeError, TypeError, ValueError) as exc:
             raise ValidationError(
-                f"Cannot load {ARTIFACT_KIND}: the fill values at {path!r} are corrupted "
-                f"({exc})."
+                f"Cannot load {ARTIFACT_KIND}: corrupted fill values at {path!r} ({exc})."
             ) from exc
         imputer._is_fitted = True
 
