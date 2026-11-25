@@ -15,7 +15,9 @@ def _importances(model: Any, n_features: int) -> Optional[List[float]]:
 ALGORITHM = Algorithm(
     name="xgboost",
     params=(
-        Param("n_estimators", "Number of boosting rounds", 100, spark="num_round"),
+        # xgboost.spark reads the round count from ``n_estimators``. smallaxe <= 0.10 sent
+        # ``num_round``, which xgboost.spark files under ``arbitrary_params_dict`` and ignores.
+        Param("n_estimators", "Number of boosting rounds", 100),
         Param("max_depth", "Maximum depth of each tree", 6),
         Param("learning_rate", "Step size shrinkage used in update to prevent overfitting", 0.3),
         Param("subsample", "Fraction of samples used for training each tree", 1.0),
@@ -24,6 +26,8 @@ ALGORITHM = Algorithm(
         Param("reg_alpha", "L1 regularization term on weights", 0.0),
         Param("reg_lambda", "L2 regularization term on weights", 1.0),
         Param("gamma", "Minimum loss reduction required to make a further partition", 0.0),
+        # Not a declared xgboost.spark param: it reaches the booster through
+        # ``arbitrary_params_dict`` as XGBoost's native ``seed``, which takes effect.
         Param("seed", "Random seed for reproducibility", None),
     ),
     estimators={

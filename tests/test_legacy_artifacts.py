@@ -66,6 +66,15 @@ def test_resaved_legacy_artifact_uses_the_new_format(frame, name, tmp_path):
     assert reloaded.predict(frame).count() == frame.count()
 
 
+@pytest.mark.parametrize("name", ["xgboost_regressor", "xgboost_classifier"])
+def test_legacy_xgboost_artifact_keeps_its_one_hundred_rounds(name):
+    """0.8.x sent n_estimators as num_round, which xgboost.spark ignored."""
+    model, _ = _load(name)
+
+    assert model.get_param("n_estimators") == 5
+    assert model._spark_model.get_booster().num_boosted_rounds() == 100
+
+
 def _multiclass_artifact_with_scores(tmp_path, validation_scores):
     path = tmp_path / "random_forest_classifier"
     shutil.copytree(FIXTURES / "random_forest_classifier", path)

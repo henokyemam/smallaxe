@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.11.0 (unreleased)
+
+### Fixed
+
+- **XGBoost trains the number of rounds `n_estimators` asks for.** Every earlier release
+  sent it to `xgboost.spark` as `num_round`, which that package does not know: it filed
+  the value under `arbitrary_params_dict` and trained its default 100 rounds whatever
+  `n_estimators` said. `n_estimators` is now forwarded under its own name, so models
+  with a non-default `n_estimators` train a different number of trees and give
+  different predictions and validation scores than before. XGBoost models saved by
+  earlier releases keep their 100 trees when loaded; refit them to get the requested
+  number. XGBoost's `seed` was not affected: it reaches the booster and controls
+  training.
+
 ## 0.10.1 (unreleased)
 
 ### Fixed
