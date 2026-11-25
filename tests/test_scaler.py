@@ -1,6 +1,7 @@
 """Tests for the Scaler preprocessing component."""
 
 import math
+from decimal import Decimal
 
 import pytest
 from pyspark.sql import functions as F
@@ -257,6 +258,99 @@ class TestScalerErrors:
         scaler = Scaler()
         with pytest.raises(ModelNotFittedError):
             _ = scaler.numerical_cols
+
+    @pytest.mark.parametrize(
+        "ddl,type_name",
+        [
+            ("id int, value double, name string", "string"),
+            ("id int, value double, name date", "date"),
+        ],
+    )
+    def test_non_numeric_column_raises_error(self, spark_session, ddl, type_name):
+        """A non-numeric input column is rejected at fit, naming the column and type."""
+        df = spark_session.createDataFrame([], ddl)
+        scaler = Scaler()
+        with pytest.raises(ValidationError, match=f"'name' has type {type_name}"):
+            scaler.fit(df, numerical_cols=["value", "name"])
+        assert not scaler._is_fitted
+
+    def test_boolean_column_is_scaled_as_zero_one(self, spark_session):
+        """Booleans are features everywhere else in smallaxe, so the Scaler takes them."""
+        df = spark_session.createDataFrame(
+            [(1, True), (2, False), (3, True)], "id int, flag boolean"
+        )
+        result = Scaler(method="minmax").fit_transform(df, numerical_cols=["flag"])
+        assert [row["flag"] for row in result.orderBy("id").collect()] == [1.0, 0.0, 1.0]
+
+    def test_numeric_types_are_accepted(self, spark_session):
+        df = spark_session.createDataFrame(
+            [(1, 2, 3.0, Decimal("4.00")), (2, 4, 5.0, Decimal("8.00"))],
+            "a int, b long, c float, d decimal(10,2)",
+        )
+        result = Scaler(method="minmax").fit_transform(df, numerical_cols=["a", "b", "c", "d"])
+        assert [row["a"] for row in result.orderBy("b").collect()] == [0.0, 1.0]
+
+    def test_create_scaler_cannot_return_none(self):
+        scaler = Scaler()
+        scaler._method = "bogus"
+        with pytest.raises(ValidationError, match="Invalid method"):
+            scaler._create_scaler("in", "out")
+
+
+class TestScalerWorkingColumns:
+    """The Scaler's working columns never collide with user columns."""
+
+    WORKING = ["_assembled_features", "_scaled_features", "_scaled_array"]
+
+    @pytest.fixture
+    def df_with_working_names(self, spark_session):
+        rows = [(1, 0.0, "a", 10, 1.5), (2, 5.0, "b", 20, 2.5), (3, 10.0, "c", 30, 3.5)]
+        return spark_session.createDataFrame(
+            rows,
+            "id int, value double, _assembled_features string, "
+            "_scaled_features int, _scaled_array double",
+        )
+
+    @pytest.mark.parametrize("method", ["standard", "minmax", "maxabs"])
+    def test_user_columns_with_working_names_are_untouched(self, df_with_working_names, method):
+        scaler = Scaler(method=method)
+        result = scaler.fit_transform(df_with_working_names, numerical_cols=["value"])
+
+        assert result.columns == df_with_working_names.columns
+        assert result.dtypes == [
+            ("id", "int"),
+            ("value", "double"),
+            ("_assembled_features", "string"),
+            ("_scaled_features", "int"),
+            ("_scaled_array", "double"),
+        ]
+        before = df_with_working_names.orderBy("id").collect()
+        after = result.orderBy("id").collect()
+        for name in self.WORKING:
+            assert [row[name] for row in after] == [row[name] for row in before]
+        if method == "minmax":
+            assert [row["value"] for row in after] == pytest.approx([0.0, 0.5, 1.0])
+
+    def test_case_variant_working_name_is_untouched(self, spark_session):
+        df = spark_session.createDataFrame(
+            [(1, 1.0, "x"), (2, 3.0, "y")], "id int, value double, _Scaled_Features string"
+        )
+        result = Scaler(method="minmax").fit_transform(df, numerical_cols=["value"])
+
+        assert result.columns == ["id", "value", "_Scaled_Features"]
+        assert [row["_Scaled_Features"] for row in result.orderBy("id").collect()] == ["x", "y"]
+
+    def test_fit_on_plain_frame_then_transform_frame_with_working_names(
+        self, df_for_scaling, df_with_working_names
+    ):
+        """The fitted model's working names are re-pointed per transform call."""
+        df_fit = df_for_scaling.withColumnRenamed("value1", "value")
+        scaler = Scaler(method="maxabs").fit(df_fit, numerical_cols=["value"])
+        result = scaler.transform(df_with_working_names)
+
+        assert result.columns == df_with_working_names.columns
+        values = [row["value"] for row in result.orderBy("id").collect()]
+        assert values == pytest.approx([0.0, 0.1, 0.2])  # max abs at fit was 50
 
 
 class TestScalerFitTransform:

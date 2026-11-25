@@ -1,6 +1,9 @@
 """Tests for the Imputer preprocessing component."""
 
+from decimal import Decimal
+
 import pytest
+from pyspark.sql import DataFrame
 from pyspark.sql import functions as F
 
 from smallaxe.exceptions import (
@@ -273,13 +276,16 @@ class TestImputerErrors:
 class TestImputerEdgeCases:
     """Tests for Imputer edge cases."""
 
-    def test_empty_column_lists(self, df_with_nulls):
-        """Test that empty column lists work without error."""
-        imputer = Imputer()
-        result = imputer.fit_transform(df_with_nulls)
-
-        # Should return unchanged DataFrame
-        assert result.count() == df_with_nulls.count()
+    @pytest.mark.parametrize(
+        "kwargs",
+        [{}, {"numerical_cols": [], "categorical_cols": []}, {"numerical_cols": None}],
+    )
+    def test_empty_column_lists_raise(self, df_with_nulls, kwargs):
+        """fit with nothing to impute raises, like Scaler and Encoder do."""
+        imputer = Imputer(numerical_strategy="mean", categorical_strategy="most_frequent")
+        with pytest.raises(ValidationError, match="cannot both be empty"):
+            imputer.fit(df_with_nulls, **kwargs)
+        assert not imputer._is_fitted
 
     def test_all_nulls_in_column(self, spark_session):
         """Test handling of column with all null values."""
@@ -326,3 +332,126 @@ class TestImputerEdgeCases:
             F.col("age").isNull() | F.col("income").isNull() | F.col("category").isNull()
         ).count()
         assert null_count == 0
+
+
+class TestImputerNonStringCategorical:
+    """Every declared categorical column is really imputed, in its own type, or fit raises.
+
+    0.10 filled with ``DataFrame.fillna(dict)``, which casts the fill to the column's type.
+    A fill that does not cast (``'UNKNOWN'`` on an integer column, ``'-1'`` on a boolean)
+    left the nulls in place without a message, and a lossy one (``'1.5'`` on an integer
+    column) filled a value other than the configured one. The type-compatible cases below
+    worked in 0.10 too; they pin the contract. The rejection cases are the regressions.
+    """
+
+    @pytest.fixture
+    def df_int_category(self, spark_session):
+        rows = [(1, 3), (2, 3), (3, 5), (4, None), (5, 5), (6, 3)]
+        return spark_session.createDataFrame(rows, "id int, code int")
+
+    def test_most_frequent_fills_integer_column(self, df_int_category):
+        imputer = Imputer(categorical_strategy="most_frequent")
+        result = imputer.fit_transform(df_int_category, categorical_cols=["code"])
+
+        assert imputer.categorical_fill_values == {"code": "3"}
+        assert dict(result.dtypes)["code"] == "int"
+        assert result.filter(F.col("code").isNull()).count() == 0
+        assert result.filter(F.col("id") == 4).first()["code"] == 3
+
+    def test_custom_value_of_the_column_type_fills_integer_column(self, df_int_category):
+        imputer = Imputer(categorical_strategy="-1")
+        result = imputer.fit_transform(df_int_category, categorical_cols=["code"])
+
+        assert dict(result.dtypes)["code"] == "int"
+        assert result.filter(F.col("id") == 4).first()["code"] == -1
+        assert result.filter(F.col("code").isNull()).count() == 0
+
+    def test_custom_value_of_another_type_is_rejected_at_fit(self, df_int_category):
+        imputer = Imputer(categorical_strategy="UNKNOWN")
+        with pytest.raises(ValidationError, match="'code' of type int") as info:
+            imputer.fit(df_int_category, categorical_cols=["code"])
+        assert "'UNKNOWN'" in str(info.value)
+
+    @pytest.mark.parametrize("fill", ["1.5", "3.000001", "99999999999"])
+    def test_lossy_custom_value_is_rejected_at_fit(self, df_int_category, fill):
+        imputer = Imputer(categorical_strategy=fill)
+        with pytest.raises(ValidationError, match="'code' of type int") as info:
+            imputer.fit(df_int_category, categorical_cols=["code"])
+        assert repr(fill) in str(info.value)
+
+    def test_exact_custom_value_in_another_spelling_is_accepted(self, df_int_category):
+        result = Imputer(categorical_strategy="7.0").fit_transform(
+            df_int_category, categorical_cols=["code"]
+        )
+        assert result.filter(F.col("id") == 4).first()["code"] == 7
+
+    def test_lossy_custom_value_on_decimal_column_is_rejected(self, spark_session):
+        df = spark_session.createDataFrame(
+            [(1, Decimal("1.25")), (2, None)], "id int, price decimal(5,2)"
+        )
+        with pytest.raises(ValidationError, match="'price' of type decimal"):
+            Imputer(categorical_strategy="1.255").fit(df, categorical_cols=["price"])
+        result = Imputer(categorical_strategy="1.5").fit_transform(df, categorical_cols=["price"])
+        assert result.filter(F.col("id") == 2).first()["price"] == Decimal("1.50")
+
+    def test_most_frequent_on_double_column_ignores_nan(self, spark_session):
+        nan = float("nan")
+        df = spark_session.createDataFrame(
+            [(1, nan), (2, nan), (3, 1.0), (4, None)], "id int, d double"
+        )
+        imputer = Imputer(categorical_strategy="most_frequent")
+        result = imputer.fit_transform(df, categorical_cols=["d"])
+
+        assert imputer.categorical_fill_values == {"d": "1.0"}
+        assert [row["d"] for row in result.orderBy("id").collect()] == [1.0, 1.0, 1.0, 1.0]
+
+    def test_nan_in_double_column_is_filled_like_null(self, spark_session):
+        """As 0.10's fillna did, and as the numerical path does."""
+        df = spark_session.createDataFrame(
+            [(1, float("nan")), (2, None), (3, 1.0)], "id int, d double"
+        )
+        result = Imputer(categorical_strategy="2.5").fit_transform(df, categorical_cols=["d"])
+        assert [row["d"] for row in result.orderBy("id").collect()] == [2.5, 2.5, 1.0]
+
+    def test_unexpected_spark_failure_is_not_reported_as_a_bad_value(
+        self, df_int_category, monkeypatch
+    ):
+        """Only a failed cast means the value does not fit; other errors propagate."""
+
+        def broken_first(self):
+            raise RuntimeError("gateway down")
+
+        monkeypatch.setattr(DataFrame, "first", broken_first)
+        with pytest.raises(RuntimeError, match="gateway down"):
+            Imputer(categorical_strategy="3").fit(df_int_category, categorical_cols=["code"])
+
+    def test_most_frequent_on_all_null_integer_column_is_rejected(self, spark_session):
+        df = spark_session.createDataFrame([(1, None), (2, None)], "id int, code int")
+        with pytest.raises(ValidationError, match="'code' of type int"):
+            Imputer(categorical_strategy="most_frequent").fit(df, categorical_cols=["code"])
+
+    def test_most_frequent_fills_boolean_column(self, spark_session):
+        df = spark_session.createDataFrame(
+            [(1, True), (2, None), (3, True), (4, False)], "id int, flag boolean"
+        )
+        imputer = Imputer(categorical_strategy="most_frequent")
+        result = imputer.fit_transform(df, categorical_cols=["flag"])
+
+        assert imputer.categorical_fill_values == {"flag": "true"}
+        assert result.filter(F.col("id") == 2).first()["flag"] is True
+
+    def test_string_column_is_unchanged(self, df_with_nulls):
+        imputer = Imputer(categorical_strategy="most_frequent")
+        result = imputer.fit_transform(df_with_nulls, categorical_cols=["category"])
+
+        assert dict(result.dtypes)["category"] == "string"
+        assert result.columns == df_with_nulls.columns
+
+    def test_most_frequent_ties_go_to_the_smallest_value(self, spark_session):
+        df = spark_session.createDataFrame(
+            [(1, "b"), (2, "a"), (3, "b"), (4, "a"), (5, None)], "id int, c string"
+        )
+        for partitions in (1, 3):
+            imputer = Imputer(categorical_strategy="most_frequent")
+            imputer.fit(df.repartition(partitions), categorical_cols=["c"])
+            assert imputer.categorical_fill_values == {"c": "a"}

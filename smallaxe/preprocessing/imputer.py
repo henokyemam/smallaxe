@@ -1,20 +1,39 @@
 """Imputer for handling missing values in PySpark DataFrames."""
 
-import json
-import os
 from typing import Dict, List, Optional, Union
 
 from pyspark.sql import Column, DataFrame
 from pyspark.sql import functions as F
+from pyspark.sql.types import (
+    DataType,
+    DecimalType,
+    DoubleType,
+    FloatType,
+    IntegralType,
+    StringType,
+)
 
+from smallaxe import _artifact, _fs
 from smallaxe.exceptions import (
     ColumnNotFoundError,
     ModelNotFittedError,
     ValidationError,
 )
+from smallaxe.preprocessing._common import column_ref, read_step_metadata, require_keys
 
 VALID_NUMERICAL_STRATEGIES = {"mean", "median", "mode"}
 VALID_CATEGORICAL_STRATEGIES = {"most_frequent"}
+
+ARTIFACT_KIND = "imputer"
+LEGACY_METADATA_FILE = "imputer_metadata.json"
+_PAYLOAD_KEYS = [
+    "numerical_strategy",
+    "categorical_strategy",
+    "numerical_cols",
+    "categorical_cols",
+    "numerical_fill_values",
+    "categorical_fill_values",
+]
 
 
 def _present(col: str) -> Column:
@@ -22,11 +41,38 @@ def _present(col: str) -> Column:
     return F.when(F.isnan(F.col(col)), None).otherwise(F.col(col))
 
 
+def _fill_literal(fill: str, data_type: DataType) -> Column:
+    """The categorical fill value as a literal of the column's own type."""
+    if isinstance(data_type, StringType):
+        return F.lit(fill)
+    return F.lit(fill).cast(data_type)
+
+
+def _categorical_value(col: str, data_type: DataType) -> Column:
+    """``col``, with NaN made null for a floating column (NaN counts as missing)."""
+    if isinstance(data_type, (FloatType, DoubleType)):
+        return F.when(F.isnan(column_ref(col)), None).otherwise(column_ref(col))
+    return column_ref(col)
+
+
+# A fill for an exact numeric column must keep its value when cast to the column's type;
+# comparing both as this decimal catches truncation ("1.5" -> 1) and rounding.
+_EXACT = DecimalType(38, 18)
+
+
 class Imputer:
     """Impute missing values in numerical and categorical columns.
 
     Supports different strategies for numerical columns (mean, median, mode)
     and categorical columns (most_frequent). Custom values can also be specified.
+
+    Categorical columns are filled in their own type: the most frequent value (or the
+    custom ``categorical_strategy``) is kept as Spark's string form of the value and cast
+    back to the column's type, so an integer or boolean categorical column is imputed
+    too. ``fit`` raises ``ValidationError`` when the fill cannot be represented exactly in
+    the column's type (for example ``categorical_strategy='UNKNOWN'`` or ``'1.5'`` on an
+    integer column). In a float or double column NaN counts as missing, both for
+    ``most_frequent`` and at transform.
 
     Args:
         numerical_strategy: Strategy for imputing numerical columns.
@@ -118,11 +164,17 @@ class Imputer:
             self: The fitted Imputer instance.
 
         Raises:
+            ValidationError: If no columns are given, a strategy is missing for the
+                columns given, or a categorical fill does not fit its column's type.
             ColumnNotFoundError: If any specified column is not in the DataFrame.
         """
-        numerical_cols = numerical_cols or []
-        categorical_cols = categorical_cols or []
+        numerical_cols = list(numerical_cols or [])
+        categorical_cols = list(categorical_cols or [])
 
+        if not numerical_cols and not categorical_cols:
+            raise ValidationError(
+                "numerical_cols and categorical_cols cannot both be empty for Imputer."
+            )
         if numerical_cols and self._numerical_strategy is None:
             raise ValidationError(
                 "numerical_cols provided but numerical_strategy is None. "
@@ -140,6 +192,7 @@ class Imputer:
         self._categorical_cols = categorical_cols
         self._numerical_fill_values = {}
         self._categorical_fill_values = {}
+        self._is_fitted = False
 
         # Compute fill values for numerical columns
         if numerical_cols:
@@ -189,25 +242,65 @@ class Imputer:
                     self._numerical_fill_values[col] = 0.0
 
     def _compute_categorical_fill_values(self, df: DataFrame, categorical_cols: List[str]) -> None:
-        """Compute fill values for categorical columns based on strategy."""
-        if self._categorical_strategy == "most_frequent":
-            # Compute most frequent value for each column
-            for col in categorical_cols:
+        """Compute fill values for categorical columns based on strategy.
+
+        A fill value is kept as Spark's string form of the value (``cast("string")``), so
+        it round-trips through JSON and casts back to the column's type at transform.
+        """
+        types = {field.name: field.dataType for field in df.schema.fields}
+        for col in categorical_cols:
+            if self._categorical_strategy == "most_frequent":
+                # Most frequent value; ties go to the smallest value, so the result does
+                # not depend on partitioning.
                 mode_row = (
-                    df.filter(F.col(col).isNotNull())
-                    .groupBy(col)
+                    df.select(_categorical_value(col, types[col]).cast("string").alias("value"))
+                    .filter(F.col("value").isNotNull())
+                    .groupBy("value")
                     .count()
-                    .orderBy(F.col("count").desc())
+                    .orderBy(F.col("count").desc(), F.col("value").asc())
                     .first()
                 )
-                if mode_row:
-                    self._categorical_fill_values[col] = str(mode_row[col])
-                else:
-                    self._categorical_fill_values[col] = "UNKNOWN"
-        else:
-            # Custom value - use it for all columns
-            for col in categorical_cols:
-                self._categorical_fill_values[col] = str(self._categorical_strategy)
+                fill = mode_row["value"] if mode_row else "UNKNOWN"
+            else:
+                # Custom value - use it for all columns
+                fill = str(self._categorical_strategy)
+            self._check_categorical_fill(df, col, types[col], fill)
+            self._categorical_fill_values[col] = fill
+
+    @staticmethod
+    def _check_categorical_fill(df: DataFrame, col: str, data_type: DataType, fill: str) -> None:
+        """Raise ValidationError if ``fill`` cannot be stored exactly in a ``data_type`` column.
+
+        The cast must succeed (not null) and, for an integer or decimal column, keep the
+        value: ``"1.5"`` on an integer column would silently fill 1.
+        """
+        if isinstance(data_type, StringType):
+            return
+        typed = _fill_literal(fill, data_type)
+        exact = isinstance(data_type, (IntegralType, DecimalType))
+        try:
+            row = (
+                df.sparkSession.range(1)
+                .select(
+                    typed.isNotNull().alias("cast_ok"),
+                    (
+                        (typed.cast(_EXACT) == F.lit(fill).cast(_EXACT)).alias("exact")
+                        if exact
+                        else F.lit(True).alias("exact")
+                    ),
+                )
+                .first()
+            )
+            valid = bool(row["cast_ok"]) and bool(row["exact"])
+        except _fs.jvm_error_types():  # an invalid cast fails under ANSI mode, or for
+            valid = False  # complex types at analysis
+        if not valid:
+            raise ValidationError(
+                f"Cannot impute categorical column '{col}' of type "
+                f"{data_type.simpleString()} with {fill!r}: the value is not exactly "
+                f"representable as {data_type.simpleString()}. Use a categorical_strategy "
+                "of that type, or cast the column to string before imputing."
+            )
 
     def transform(self, df: DataFrame) -> DataFrame:
         """Transform the DataFrame by imputing missing values.
@@ -238,9 +331,18 @@ class Imputer:
         if self._numerical_fill_values:
             result_df = result_df.fillna(self._numerical_fill_values)
 
-        # Fill categorical columns
+        # Fill categorical columns in their own type (fit checked the fill fits it). For a
+        # floating column NaN counts as missing, as DataFrame.fillna treats it.
         if self._categorical_fill_values:
-            result_df = result_df.fillna(self._categorical_fill_values)
+            types = {field.name: field.dataType for field in result_df.schema.fields}
+            result_df = result_df.withColumns(
+                {
+                    col: F.coalesce(
+                        _categorical_value(col, types[col]), _fill_literal(fill, types[col])
+                    )
+                    for col, fill in self._categorical_fill_values.items()
+                }
+            )
 
         return result_df
 
@@ -283,6 +385,9 @@ class Imputer:
     def categorical_fill_values(self) -> Dict[str, str]:
         """Get the computed fill values for categorical columns.
 
+        Values are Spark's string form of the fill (``"3"`` for an integer column); they
+        are cast to the column's type at transform.
+
         Returns:
             Dictionary mapping column names to their fill values.
 
@@ -296,53 +401,68 @@ class Imputer:
         return self._categorical_fill_values.copy()
 
     def save(self, path: str) -> None:
-        """Save the imputer to disk.
+        """Save the imputer as a directory holding ``metadata.json``.
+
+        IO goes through the Hadoop FileSystem layer, so local paths, ``dbfs:/``,
+        ``s3://`` and ``hdfs://`` all work.
 
         Args:
             path: The directory path to save the imputer to.
 
         Raises:
             ModelNotFittedError: If save is called before fit.
+            ValidationError: If path is empty.
         """
         if not self._is_fitted:
             raise ModelNotFittedError("Imputer has not been fitted. Call fit() before saving.")
 
-        os.makedirs(path, exist_ok=True)
-
-        metadata = {
-            "numerical_strategy": self._numerical_strategy,
-            "categorical_strategy": self._categorical_strategy,
-            "numerical_cols": self._numerical_cols,
-            "categorical_cols": self._categorical_cols,
-            "numerical_fill_values": self._numerical_fill_values,
-            "categorical_fill_values": self._categorical_fill_values,
-            "is_fitted": self._is_fitted,
-        }
-
-        with open(os.path.join(path, "imputer_metadata.json"), "w") as f:
-            json.dump(metadata, f, indent=2)
+        _artifact.write_metadata(
+            path,
+            ARTIFACT_KIND,
+            {
+                "numerical_strategy": self._numerical_strategy,
+                "categorical_strategy": self._categorical_strategy,
+                "numerical_cols": list(self._numerical_cols),
+                "categorical_cols": list(self._categorical_cols),
+                "numerical_fill_values": dict(self._numerical_fill_values),
+                "categorical_fill_values": dict(self._categorical_fill_values),
+            },
+        )
 
     @classmethod
     def load(cls, path: str) -> "Imputer":
-        """Load an imputer from disk.
+        """Load an imputer saved by :meth:`save`, or by smallaxe 0.10 and earlier.
 
         Args:
             path: The directory path to load the imputer from.
 
         Returns:
-            The loaded Imputer instance.
+            The loaded, fitted Imputer instance.
+
+        Raises:
+            ValidationError: If the path does not exist, is not an imputer artifact, was
+                written by a newer smallaxe, or its metadata is incomplete.
         """
-        with open(os.path.join(path, "imputer_metadata.json")) as f:
-            metadata = json.load(f)
+        metadata = read_step_metadata(path, ARTIFACT_KIND, LEGACY_METADATA_FILE)
+        require_keys(metadata, _PAYLOAD_KEYS, ARTIFACT_KIND, path)
 
         imputer = cls(
             numerical_strategy=metadata["numerical_strategy"],
             categorical_strategy=metadata["categorical_strategy"],
         )
-        imputer._numerical_cols = metadata["numerical_cols"]
-        imputer._categorical_cols = metadata["categorical_cols"]
-        imputer._numerical_fill_values = metadata["numerical_fill_values"]
-        imputer._categorical_fill_values = metadata["categorical_fill_values"]
-        imputer._is_fitted = metadata["is_fitted"]
+        try:
+            imputer._numerical_cols = [str(col) for col in metadata["numerical_cols"]]
+            imputer._categorical_cols = [str(col) for col in metadata["categorical_cols"]]
+            imputer._numerical_fill_values = {
+                str(col): float(value) for col, value in metadata["numerical_fill_values"].items()
+            }
+            imputer._categorical_fill_values = {
+                str(col): str(value) for col, value in metadata["categorical_fill_values"].items()
+            }
+        except (AttributeError, TypeError, ValueError) as exc:
+            raise ValidationError(
+                f"Cannot load {ARTIFACT_KIND}: corrupted fill values at {path!r} ({exc})."
+            ) from exc
+        imputer._is_fitted = True
 
         return imputer
