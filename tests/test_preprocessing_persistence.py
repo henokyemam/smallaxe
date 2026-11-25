@@ -353,14 +353,19 @@ class TestLegacyArtifacts:
         assert (tmp_path / "resaved" / "metadata.json").exists()
         _assert_same_output(resaved.transform(probe), legacy.transform(probe))
 
-    def test_committed_scaler_fixture_loads_and_transforms_identically(self, spark_session):
+    def test_scaler_fixture_is_in_the_old_layout(self):
         directory = FIXTURES / "scaler"
-        if not directory.exists():
-            pytest.skip(
-                "no committed 0.10 Scaler fixture: run make_fixtures.py against smallaxe 0.10"
-            )
-        assert (directory / "scaler_metadata.json").exists()
-        assert not (directory / "metadata.json").exists()
+        assert sorted(p.name for p in directory.iterdir()) == [
+            "scaler_metadata.json",
+            "spark_model",
+        ]
+        metadata = json.loads((directory / "scaler_metadata.json").read_text())
+        assert metadata == {"method": "standard", "numerical_cols": ["x", "y"], "is_fitted": True}
+        assert (directory / "spark_model" / "metadata").is_dir()
+        assert list((directory / "spark_model" / "data").glob("*.parquet"))
+
+    def test_scaler_fixture_loads_and_transforms_identically(self, spark_session):
+        directory = FIXTURES / "scaler"
         spec = EXPECTED["scaler"]
         probe = spark_session.createDataFrame(
             [tuple(r) for r in spec["probe"]], "id int, x double, y double, note string"

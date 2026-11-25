@@ -1,0 +1,8 @@
+{
+  "method": "standard",
+  "numerical_cols": [
+    "x",
+    "y"
+  ],
+  "is_fitted": true
+}
