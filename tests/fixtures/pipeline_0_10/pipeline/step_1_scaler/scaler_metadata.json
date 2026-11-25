@@ -1,0 +1,8 @@
+{
+  "method": "standard",
+  "numerical_cols": [
+    "age",
+    "income"
+  ],
+  "is_fitted": true
+}
