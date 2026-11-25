@@ -13,7 +13,7 @@ optional dependencies.
 """
 
 import json
-from typing import Any, Dict
+from typing import Any, Dict, Tuple, Type
 
 
 def _spark() -> Any:
@@ -57,6 +57,20 @@ def makedirs(path: str) -> None:
     """Create ``path`` (and parents) on the resolved filesystem."""
     _jvm, fs, hpath = _fs_and_path(path)
     fs.mkdirs(hpath)
+
+
+def jvm_error_types() -> Tuple[Type[BaseException], ...]:
+    """Exception types for a failure raised on the JVM side of a Spark or Hadoop call.
+
+    ``Py4JJavaError`` is what a raw Hadoop ``FileSystem`` call raises (for example a
+    ``ChecksumException`` when a file was edited after Hadoop wrote its ``.crc``);
+    ``CapturedException`` is what PySpark raises when it converts a JVM error (for example
+    from ``MLReader.load``). Py4J connection errors are deliberately not included.
+    """
+    from py4j.protocol import Py4JJavaError
+    from pyspark.sql.utils import CapturedException
+
+    return (Py4JJavaError, CapturedException)
 
 
 def write_json(path: str, obj: Dict[str, Any]) -> None:

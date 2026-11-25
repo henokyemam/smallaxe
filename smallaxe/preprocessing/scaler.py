@@ -28,6 +28,7 @@ from smallaxe.exceptions import (
     ValidationError,
 )
 from smallaxe.preprocessing._common import (
+    column_list,
     column_ref,
     read_step_metadata,
     require_keys,
@@ -223,9 +224,11 @@ class Scaler:
         array = column_ref(names["array"])
         return scaled_df.select(
             *[
-                array[positions[col]].cast("double").alias(col)
-                if col in positions
-                else column_ref(col)
+                (
+                    array[positions[col]].cast("double").alias(col)
+                    if col in positions
+                    else column_ref(col)
+                )
                 for col in df.columns
             ]
         )
@@ -318,19 +321,21 @@ class Scaler:
         require_keys(metadata, ["method", "numerical_cols"], ARTIFACT_KIND, path)
 
         scaler = cls(method=metadata["method"])
+        numerical_cols = column_list(metadata, "numerical_cols", ARTIFACT_KIND, path)
         model_path = _fs.join(path, SPARK_MODEL_DIR)
         if not _fs.exists(model_path):
             raise ValidationError(
                 f"Cannot load {ARTIFACT_KIND}: {path!r} has no {SPARK_MODEL_DIR}/ directory."
             )
+        model_class = _MODEL_CLASSES[scaler._method]
         try:
-            scaler._scaler_model = _MODEL_CLASSES[scaler._method].load(model_path)
-        except Exception as exc:  # Py4J / Spark errors carry no common smallaxe type
+            scaler._scaler_model = model_class.load(model_path)
+        except _fs.jvm_error_types() as exc:
             raise ValidationError(
                 f"Cannot load {ARTIFACT_KIND}: the Spark model at {model_path!r} could not "
-                f"be read as a {_MODEL_CLASSES[scaler._method].__name__} ({exc})."
+                f"be read as a {model_class.__name__} ({_artifact.jvm_error_summary(exc)})."
             ) from exc
-        scaler._numerical_cols = list(metadata["numerical_cols"])
+        scaler._numerical_cols = numerical_cols
         scaler._is_fitted = True
 
         return scaler

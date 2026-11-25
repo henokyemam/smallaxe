@@ -46,16 +46,29 @@ def read_step_metadata(path: str, kind: str, legacy_file: Optional[str] = None) 
         and _fs.exists(_fs.join(path, legacy_file))
     ):
         legacy_path = _fs.join(path, legacy_file)
-        try:
-            metadata = _fs.read_json(legacy_path)
-        except ValueError as exc:
-            raise ValidationError(
-                f"Cannot load {kind}: {legacy_path!r} is not valid JSON ({exc})."
-            ) from exc
+        metadata = _artifact.read_json(legacy_path, kind)
         if not isinstance(metadata, dict):
             raise ValidationError(f"Cannot load {kind}: {legacy_path!r} is not a JSON object.")
         return metadata
     return _artifact.read_metadata(path, kind)
+
+
+def column_list(
+    metadata: Dict[str, Any], key: str, kind: str, path: str, allow_empty: bool = False
+) -> List[str]:
+    """``metadata[key]`` as a list of column names, or ValidationError if it is not one."""
+    value = metadata[key]
+    if (
+        not isinstance(value, list)
+        or not all(isinstance(col, str) for col in value)
+        or (not value and not allow_empty)
+    ):
+        expected = "a list of column names" if allow_empty else "a non-empty list of column names"
+        raise ValidationError(
+            f"Cannot load {kind}: {key!r} at {path!r} must be {expected}, got {value!r}; "
+            "the artifact is corrupted."
+        )
+    return list(value)
 
 
 def require_keys(metadata: Dict[str, Any], keys: List[str], kind: str, path: str) -> None:

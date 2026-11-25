@@ -48,6 +48,33 @@ def write_metadata(path: str, kind: str, payload: Dict[str, Any]) -> None:
     _fs.write_json(_fs.join(path, METADATA_FILE), document)
 
 
+def read_json(path: str, kind: str) -> Any:
+    """Parse the JSON file at ``path``, raising ValidationError when it cannot be read.
+
+    ``kind`` names what was being loaded, for the message.
+
+    Raises:
+        ValidationError: If the file is not valid JSON, or the filesystem refuses to read
+            it (for example a Hadoop checksum mismatch after the file was edited by hand).
+    """
+    try:
+        return _fs.read_json(path)
+    except ValueError as exc:
+        raise ValidationError(f"Cannot load {kind}: {path!r} is not valid JSON ({exc}).") from exc
+    except _fs.jvm_error_types() as exc:
+        raise ValidationError(
+            f"Cannot load {kind}: {path!r} could not be read ({jvm_error_summary(exc)}). If it was "
+            "edited after saving, delete the '.crc' file next to it or save the artifact again."
+        ) from exc
+
+
+def jvm_error_summary(exc: BaseException) -> str:
+    """A one-line description of a JVM-side error (the Java exception, when Py4J has it)."""
+    java_exception = getattr(exc, "java_exception", None)
+    text = str(java_exception.toString() if java_exception is not None else exc).strip()
+    return text.splitlines()[0] if text else type(exc).__name__
+
+
 def read_metadata(path: str, kind: str) -> Dict[str, Any]:
     """Read ``<path>/metadata.json`` and check it holds a readable ``kind`` artifact.
 
@@ -55,8 +82,8 @@ def read_metadata(path: str, kind: str) -> Dict[str, Any]:
         The whole metadata dict, header keys included.
 
     Raises:
-        ValidationError: If the path or its ``metadata.json`` does not exist, the file is
-            not a JSON object, ``kind`` differs, or ``format_version`` is missing or newer
+        ValidationError: If the path or its ``metadata.json`` does not exist, the file
+            cannot be read or is not a JSON object, ``kind`` differs, or ``format_version`` is missing or newer
             than :data:`FORMAT_VERSION`.
     """
     if not path or not _fs.exists(path):
@@ -67,12 +94,7 @@ def read_metadata(path: str, kind: str) -> Dict[str, Any]:
             f"Cannot load {kind}: {path!r} is not a smallaxe {kind} artifact "
             f"(expected {METADATA_FILE} in it)."
         )
-    try:
-        metadata = _fs.read_json(metadata_path)
-    except ValueError as exc:
-        raise ValidationError(
-            f"Cannot load {kind}: {metadata_path!r} is not valid JSON ({exc})."
-        ) from exc
+    metadata = read_json(metadata_path, kind)
     if not isinstance(metadata, dict):
         raise ValidationError(f"Cannot load {kind}: {metadata_path!r} is not a JSON object.")
 
