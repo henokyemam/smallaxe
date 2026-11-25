@@ -293,8 +293,10 @@ def test_every_public_callable_documents_its_arguments():
             continue
         documented = _documented_args(func.__doc__ or "")
         if func.__name__ == "__init__":
-            owner = importlib.import_module(func.__module__)
-            cls = getattr(owner, func.__qualname__.split(".")[0])
+            # ``name`` is "<module>.<Class>.__init__". A dataclass's generated __init__ has
+            # no usable __qualname__ on Python 3.8, so the class is resolved from the name.
+            module_name, class_name, _ = name.rsplit(".", 2)
+            cls = getattr(importlib.import_module(module_name), class_name)
             documented += _documented_args(cls.__doc__ or "")
         missing = [param for param in params if param not in documented]
         if missing:
