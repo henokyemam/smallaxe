@@ -525,3 +525,28 @@ class Encoder:
             )
 
         return {col: mapping.copy() for col, mapping in self._category_mappings.items()}
+
+    @property
+    def output_cols(self) -> List[str]:
+        """The columns ``transform`` writes for the encoded features, in order.
+
+        For ``'label'`` these are the encoded input columns (replaced in place), in
+        ``categorical_cols`` order. For ``'onehot'`` they are the generated columns: for
+        each column in ``categorical_cols`` order, one column per index in index order,
+        the ``{col}_OTHER`` / ``{col}_UNKNOWN`` bucket last (see the class docstring for
+        the names). A ``Pipeline`` hands exactly these columns to its model.
+
+        Returns:
+            List of output column names.
+
+        Raises:
+            ModelNotFittedError: If accessed before fit.
+        """
+        if not self._is_fitted:
+            raise ModelNotFittedError(
+                "Encoder has not been fitted. Call fit() to access output_cols."
+            )
+        if self._method == "label":
+            return list(self._categorical_cols)
+        layout = self._onehot_layout()
+        return [name for col in self._categorical_cols for name, _ in layout[col]]

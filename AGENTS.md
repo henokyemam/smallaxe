@@ -85,7 +85,7 @@ Artifacts they saved load through `LEGACY_CLASS_NAMES`; new artifacts record `al
 
 ### Pipeline
 
-The `Pipeline` class chains preprocessing steps and a model into a single `fit()`/`predict()` flow, accepting `numerical_cols` and `categorical_cols` parameters.
+The `Pipeline` class chains preprocessing steps and a model into a single `fit()`/`predict()` flow, accepting `numerical_cols` and `categorical_cols` parameters. The model is fitted on exactly `numerical_cols` plus the Encoder's `output_cols` (the Pipeline owns its feature columns); whether a model needs an Encoder comes from its algorithm record's `accepts_raw_categoricals`. `Pipeline.save` writes each step's own artifact under `steps/` and a versioned `metadata.json` (kind `pipeline`) through `smallaxe._fs`; no pickle. `smallaxe.load(path)` loads any artifact by its kind.
 
 ## Development
 

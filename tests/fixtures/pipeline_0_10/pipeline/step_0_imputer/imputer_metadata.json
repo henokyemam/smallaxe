@@ -1,0 +1,19 @@
+{
+  "numerical_strategy": "median",
+  "categorical_strategy": "most_frequent",
+  "numerical_cols": [
+    "age",
+    "income"
+  ],
+  "categorical_cols": [
+    "city"
+  ],
+  "numerical_fill_values": {
+    "age": 31.0,
+    "income": 61000.0
+  },
+  "categorical_fill_values": {
+    "city": "paris"
+  },
+  "is_fitted": true
+}

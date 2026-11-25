@@ -74,7 +74,7 @@
   `ValidationError` with the reason.
 - `Imputer.fit` raises `ValidationError` when given neither `numerical_cols` nor
   `categorical_cols`, as `Scaler` and `Encoder` already did for empty input. A `Pipeline`
-  fitted with no columns leaves its `Imputer` unfitted and passes the data through.
+  fitted with no columns skips its `Imputer` (see the pipeline entries below).
 - `Imputer` `most_frequent` ties go to the smallest value (by its string form), so the
   fill value no longer depends on partitioning. Categorical fill values are stored as
   Spark's string form of the value (`"3"`, `"true"`).
@@ -116,6 +116,61 @@
   saved state back, and `Model.load` is the one load rule for models. A class built
   directly on `BaseModel` / `BaseRegressor` / `BaseClassifier` (not on `Regressor` or
   `Classifier`) can still `save` but no longer `load`.
+- **A `Pipeline` fits its model on the columns it is given, and nothing else.** The
+  model's features are exactly `numerical_cols` plus the Encoder's output columns for
+  `categorical_cols` (`Encoder.output_cols`); every other column of the frame passes
+  through the preprocessing steps untouched and never reaches the model. Earlier
+  releases handed the model every non-label column, so an unlisted string ID column made
+  `fit` fail and an unlisted numeric column silently became a feature. With neither
+  list, the model infers its features as `model.fit` does without `feature_cols`
+  (numeric and boolean columns, one `UserWarning` naming the others). The chosen columns
+  are `pipeline.feature_cols`, and predict uses the model's fitted feature columns, so
+  extra columns at predict time are harmless. `categorical_cols` given to a duck-typed
+  model with no Encoder are handed to it raw, as before. `fit` raises `ValidationError`
+  when `label_col` is also listed in `numerical_cols` or `categorical_cols`.
+- **Pipeline steps are dispatched on what they are, not on their class name.** An
+  `Imputer`, `Scaler`, `Encoder` or smallaxe model (`Regressor` / `Classifier`) is
+  recognised with `isinstance`, so subclasses work; a class that merely shares a name
+  with one (`class RandomForestRegressor: ...`) is a duck-typed step. Whether a model
+  needs an Encoder comes from its algorithm record (`accepts_raw_categoricals`);
+  `Pipeline.MODEL_TYPES_REQUIRING_ENCODER` is removed. `PreprocessingError.algorithm`
+  is the algorithm name (`"random_forest"`), not the class name.
+- **A CatBoost pipeline with `categorical_cols` needs an Encoder**, like every other
+  algorithm, and `fit` raises `PreprocessingError` without one. It used to be exempt but
+  then failed inside Spark, because features are assembled with `VectorAssembler`, which
+  rejects string columns. The CatBoost algorithm record's `accepts_raw_categoricals` is
+  now `False`.
+- **A pipeline step that receives no columns is skipped explicitly**: an `Imputer` with
+  neither list, a `Scaler` without `numerical_cols`, an `Encoder` without
+  `categorical_cols`. It stays unfitted, `transform` passes the data through it, and
+  `pipeline.skipped_steps` names it; it is saved and loaded as skipped. The `Scaler` and
+  `Encoder` are fitted on the lists as given: a listed column that is missing raises
+  `ColumnNotFoundError` instead of being dropped from the list without a message.
+- **A duck-typed preprocessing step is fitted as `fit(df, numerical_cols=...,
+  categorical_cols=...)` and nothing else.** Errors from its `fit` propagate; 0.10 caught
+  `TypeError`, retried `fit(df)`, and on a second `TypeError` left the step unfitted
+  without a message.
+- `Pipeline(steps)` raises `ValidationError` for a step that is neither a preprocessing
+  step (`fit` and `transform`) nor a model (`fit` and `predict`), and for more than one
+  model step.
+- **Pipeline artifacts are versioned and written through the Hadoop FileSystem, with no
+  pickle.** `Pipeline.save(path)` saves each fitted step with its own `save` into
+  `<path>/steps/<index>_<name>/` and then writes `<path>/metadata.json` (kind
+  `"pipeline"`: the ordered steps with name, kind, directory and skipped flag,
+  `numerical_cols`, `categorical_cols`, `label_col`, `feature_cols`, `has_model`), so
+  pipelines save and load on `dbfs:/`, `s3://` and `file:` URIs as well as local paths.
+  Saving over an existing pipeline removes its old metadata and step directories (in
+  either layout) first. A step that is not an Imputer, Scaler, Encoder or smallaxe model
+  cannot be saved: `save` raises `ValidationError` naming it before writing anything,
+  where 0.10 pickled it. `Pipeline.load` loads each step by kind and raises
+  `ValidationError` for a missing path, another kind of artifact, a newer
+  `format_version`, a missing step directory, or corrupted metadata.
+- **Pipelines saved by 0.10 still load** when their steps are an Imputer, a Scaler and an
+  Encoder (the only pipelines 0.10 could load). The Encoder 0.10 pickled is the one pickle
+  read, through an unpickler that resolves nothing but the `Encoder` class. Any other
+  `.pkl` in a 0.10 pipeline (a pickled duck-typed step, or a stray file) raises
+  `ValidationError` explaining that pickled steps are no longer loaded, as does a 0.10
+  pipeline with a model step (0.10 could not load those either).
 
 ### Added
 
@@ -125,10 +180,34 @@
 - `smallaxe.load_model(path)` loads any saved model, whatever its algorithm, returning the
   `Regressor` or `Classifier` it was, for artifacts of this and every earlier release.
   `import smallaxe` still imports no training code; it is imported on the first call.
+- `model.evaluate(df, label_col=None)` scores a fitted model on any DataFrame with the
+  metrics its validation computes for its task (the same keys as `validation_scores`,
+  without `validation_type` / `test_size` / fold bookkeeping), undefined metrics as
+  `None`. `label_col` defaults to the label the model was fitted with. It raises
+  `ModelNotFittedError` before `fit` and `ColumnNotFoundError` when the label or a
+  feature column is missing.
+- `Encoder.output_cols`: the columns `transform` writes for the encoded features, in
+  order (the encoded columns themselves for `'label'`, the generated columns for
+  `'onehot'`).
+- `Pipeline.predict_proba(df, output_col="probability")` and
+  `Pipeline.evaluate(df, label_col=None)` apply the preprocessing steps and delegate to
+  the model; `Pipeline.predict` gains `output_col` (default `"predict_label"`, as
+  `model.predict`). They raise `ValidationError` on a pipeline without a model, and
+  `predict_proba` does on a regressor. `pipeline.feature_cols` and
+  `pipeline.skipped_steps` report what `fit` decided.
+- `smallaxe.load_pipeline(path)` loads a saved pipeline, and `smallaxe.load(path)` loads
+  any smallaxe artifact (model, pipeline, Imputer, Scaler, Encoder, including the
+  unversioned model, pipeline, Imputer and Scaler layouts of 0.10 and earlier), choosing
+  by the kind the artifact records. `load_model` and `load_pipeline` reject other kinds.
+  `import smallaxe` still imports neither.
 
 
 ### Fixed
 
+- **A pipeline with a model step can be saved and loaded.** 0.10's `Pipeline.load` had no
+  way to load a model step, so such a pipeline could be saved but never loaded.
+- `Pipeline.save` and `Pipeline.load` wrote and read with local `open()` / `os`, so a
+  pipeline saved to `dbfs:/` or `s3://` was split between filesystems or failed.
 - **XGBoost trains the number of rounds `n_estimators` asks for.** Every earlier release
   sent it to `xgboost.spark` as `num_round`, which that package does not know: it filed
   the value under `arbitrary_params_dict` and trained its default 100 rounds whatever

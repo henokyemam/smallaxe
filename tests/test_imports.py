@@ -43,11 +43,12 @@ def test_importing_smallaxe_imports_no_optional_package():
 
 
 def test_importing_smallaxe_alone_stays_light():
-    """``smallaxe.load_model`` imports the training package when called, not at import."""
+    """``load_model`` / ``load_pipeline`` / ``load`` import what they need when called."""
     code = (
         "import json, sys\n"
         "import smallaxe\n"
-        "assert 'load_model' in smallaxe.__all__ and callable(smallaxe.load_model)\n"
+        "for name in ('load_model', 'load_pipeline', 'load'):\n"
+        "    assert name in smallaxe.__all__ and callable(getattr(smallaxe, name))\n"
         "print(json.dumps(sorted(m for m in sys.modules if m.split('.')[0] in "
         "('smallaxe', 'pyspark', 'py4j'))))\n"
     )

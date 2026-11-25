@@ -1,0 +1,47 @@
+{
+  "format_version": 1,
+  "kind": "pipeline",
+  "smallaxe_version": "0.10.1.dev0",
+  "steps": [
+    {
+      "name": "imputer",
+      "kind": "imputer",
+      "path": "steps/0_imputer",
+      "skipped": false
+    },
+    {
+      "name": "scaler",
+      "kind": "scaler",
+      "path": "steps/1_scaler",
+      "skipped": false
+    },
+    {
+      "name": "encoder",
+      "kind": "encoder",
+      "path": "steps/2_encoder",
+      "skipped": true,
+      "params": {
+        "method": "onehot",
+        "max_categories": 100,
+        "handle_rare": "other"
+      }
+    },
+    {
+      "name": "model",
+      "kind": "model",
+      "path": "steps/3_model",
+      "skipped": false
+    }
+  ],
+  "numerical_cols": [
+    "age",
+    "income"
+  ],
+  "categorical_cols": null,
+  "label_col": "target",
+  "feature_cols": [
+    "age",
+    "income"
+  ],
+  "has_model": true
+}

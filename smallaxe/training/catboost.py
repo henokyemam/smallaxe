@@ -203,7 +203,9 @@ ALGORITHM = Algorithm(
     },
     importances=_importances,
     dependency=Dependency("catboost_spark", _INSTALL_HINT),
-    accepts_raw_categoricals=True,
+    # Features are assembled with VectorAssembler, which rejects string columns, so a
+    # Pipeline with categorical_cols needs an Encoder for CatBoost as for the others.
+    accepts_raw_categoricals=False,
     # catboost-spark treats NaN as missing (``nan_mode=Min``).
     accepts_missing=True,
     prepare=_ensure_synapseml_compat,

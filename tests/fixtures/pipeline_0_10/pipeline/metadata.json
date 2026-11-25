@@ -1,0 +1,21 @@
+{
+  "numerical_cols": [
+    "age",
+    "income"
+  ],
+  "categorical_cols": [
+    "city"
+  ],
+  "label_col": null,
+  "has_model": false,
+  "step_names": [
+    "imputer",
+    "scaler",
+    "encoder"
+  ],
+  "step_types": [
+    "Imputer",
+    "Scaler",
+    "Encoder"
+  ]
+}

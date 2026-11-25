@@ -354,19 +354,17 @@ class TestPersistence:
 
 
 class TestPipelineEncoderRequirement:
-    def test_algorithm_record_decides_whether_an_encoder_is_required(self, monkeypatch):
+    def test_algorithm_record_decides_whether_an_encoder_is_required(self):
         from smallaxe.exceptions import PreprocessingError
         from smallaxe.pipeline import Pipeline
 
-        install_fake_modules(monkeypatch, algorithm.get("catboost"))
+        raw = dataclasses.replace(algorithm.get("random_forest"), accepts_raw_categoricals=True)
 
-        # CatBoost accepts raw categoricals, so a model-only pipeline is valid.
-        steps = [("model", Regressors.catboost())]
-        Pipeline(steps)._validate_preprocessing_requirements(steps, categorical_cols=["city"])
+        # A record that accepts raw categoricals needs no Encoder.
+        Pipeline([("model", Regressor(raw))])._check_encoder_requirement(["city"])
 
-        steps = [("model", Regressors.random_forest())]
         with pytest.raises(PreprocessingError):
-            Pipeline(steps)._validate_preprocessing_requirements(steps, categorical_cols=["city"])
+            Pipeline([("model", Regressors.random_forest())])._check_encoder_requirement(["city"])
 
 
 class TestOptimizeUsesClone:
