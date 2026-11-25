@@ -25,7 +25,7 @@ from pyspark.sql import functions as F  # noqa: E402
 
 import smallaxe  # noqa: E402
 from smallaxe.search import optimize  # noqa: E402
-from smallaxe.training import Classifiers  # noqa: E402
+from smallaxe.training import classifiers  # noqa: E402
 
 TITANIC_URL = "https://raw.githubusercontent.com/datasciencedojo/datasets/master/titanic.csv"
 
@@ -83,7 +83,7 @@ def main() -> None:
     feature_cols = ["Pclass", "sex_code", "Age", "SibSp", "Parch", "Fare", "embarked_code"]
 
     # --- Train + evaluate a Random Forest classifier (train/test split). ---
-    model = Classifiers.random_forest(task="binary", n_estimators=100, max_depth=5, seed=42)
+    model = classifiers.random_forest(task="binary", n_estimators=100, max_depth=5, seed=42)
     model.fit(
         df,
         label_col="Survived",
@@ -100,7 +100,7 @@ def main() -> None:
     # --- Save and reload; confirm identical predictions. ---
     model_dir = os.path.join(tempfile.mkdtemp(), "titanic_rf")
     model.save(model_dir)
-    loaded = Classifiers.load(model_dir)
+    loaded = classifiers.load(model_dir)
     before = model.predict(df).select("PassengerId", "predict_label")
     after = loaded.predict(df).select("PassengerId", "predict_label")
     mismatches = (
@@ -114,7 +114,7 @@ def main() -> None:
     from hyperopt import hp
 
     result = optimize.run(
-        Classifiers.random_forest(task="binary", seed=42),
+        classifiers.random_forest(task="binary", seed=42),
         df,
         label_col="Survived",
         feature_cols=feature_cols,

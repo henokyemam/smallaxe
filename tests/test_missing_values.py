@@ -11,7 +11,7 @@ from pyspark.sql import functions as F
 
 from smallaxe.exceptions import ValidationError
 from smallaxe.preprocessing import Imputer
-from smallaxe.training import Classifiers, Regressors, algorithm
+from smallaxe.training import algorithm, classifiers, regressors
 from smallaxe.training.base import check_training_data
 
 
@@ -32,7 +32,7 @@ def _skip_unless(name):
 
 class TestRandomForestRejectsMissing:
     def test_fit_names_the_columns_with_missing_values(self, frame):
-        model = Regressors.random_forest(n_estimators=2, seed=1)
+        model = regressors.random_forest(n_estimators=2, seed=1)
         with pytest.raises(ValidationError, match="age \\(6\\).*income \\(4\\)") as exc:
             model.fit(frame, label_col="target", feature_cols=["age", "income"])
         assert "Imputer" in str(exc.value)
@@ -41,13 +41,13 @@ class TestRandomForestRejectsMissing:
         df = spark_session.createDataFrame(
             [(1.0, 1.0), (float("inf"), 2.0), (3.0, 3.0)] * 5, ["x", "y"]
         )
-        model = Regressors.random_forest(n_estimators=2, seed=1)
+        model = regressors.random_forest(n_estimators=2, seed=1)
         with pytest.raises(ValidationError, match="infinite values: x \\(5\\)"):
             model.fit(df, label_col="y", feature_cols=["x"])
 
     def test_clean_data_records_zero_missing(self, frame):
         clean = frame.filter(F.col("age").isNotNull() & ~F.isnan("income"))
-        model = Regressors.random_forest(n_estimators=2, seed=1)
+        model = regressors.random_forest(n_estimators=2, seed=1)
         model.fit(clean, label_col="target", feature_cols=["age", "income"])
         assert model.metadata["missing_counts"] == {"age": 0, "income": 0}
         assert model.metadata["n_samples"] == clean.count()
@@ -55,7 +55,7 @@ class TestRandomForestRejectsMissing:
 
 def test_null_label_is_rejected_for_every_algorithm(spark_session):
     df = spark_session.createDataFrame([(1.0, 1.0), (2.0, None), (3.0, 3.0)] * 5, ["x", "y"])
-    model = Regressors.random_forest(n_estimators=2, seed=1)
+    model = regressors.random_forest(n_estimators=2, seed=1)
     with pytest.raises(ValidationError, match="Label column 'y' has 5 null values"):
         model.fit(df, label_col="y", feature_cols=["x"])
 
@@ -68,7 +68,7 @@ def test_check_training_data_counts_in_one_pass(frame):
 class TestBoostingKeepsMissingRows:
     def test_xgboost_predicts_every_row(self, frame):
         _skip_unless("xgboost")
-        model = Regressors.xgboost(n_estimators=3, seed=1)
+        model = regressors.xgboost(n_estimators=3, seed=1)
         model.fit(frame, label_col="target", feature_cols=["age", "income"])
 
         out = model.predict(frame)
@@ -79,7 +79,7 @@ class TestBoostingKeepsMissingRows:
 
     def test_xgboost_validation_scores_use_every_row(self, frame):
         _skip_unless("xgboost")
-        model = Classifiers.xgboost(n_estimators=3, seed=1)
+        model = classifiers.xgboost(n_estimators=3, seed=1)
         model.fit(frame, label_col="label", feature_cols=["age", "income"], validation="train_test")
         assert 0 <= model.validation_scores["accuracy"] <= 1
 
@@ -88,7 +88,7 @@ def test_search_rejects_bad_data_before_any_trial(frame):
     pytest.importorskip("hyperopt")
     from smallaxe.search import optimize
 
-    model = Regressors.random_forest(n_estimators=2, seed=1)
+    model = regressors.random_forest(n_estimators=2, seed=1)
     with pytest.raises(ValidationError, match="null or NaN"):
         optimize.run(
             model,

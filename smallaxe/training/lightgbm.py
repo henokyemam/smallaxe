@@ -92,20 +92,20 @@ def __getattr__(name: str) -> Any:
 
 
 class LightGBMRegressor(Regressor):
-    """Deprecated alias; use ``Regressors.lightgbm()``."""
+    """Deprecated alias; use ``regressors.lightgbm()``."""
 
     _alias_algorithm = "lightgbm"
 
     def __init__(self, task: str = "simple_regression") -> None:
-        _warn_deprecated_alias("LightGBMRegressor", "Regressors.lightgbm()")
+        _warn_deprecated_alias("LightGBMRegressor", "regressors.lightgbm()")
         super().__init__(ALGORITHM, task)
 
 
 class LightGBMClassifier(Classifier):
-    """Deprecated alias; use ``Classifiers.lightgbm()``."""
+    """Deprecated alias; use ``classifiers.lightgbm()``."""
 
     _alias_algorithm = "lightgbm"
 
     def __init__(self, task: str = "binary") -> None:
-        _warn_deprecated_alias("LightGBMClassifier", "Classifiers.lightgbm()")
+        _warn_deprecated_alias("LightGBMClassifier", "classifiers.lightgbm()")
         super().__init__(ALGORITHM, task)

@@ -22,7 +22,7 @@ from pyspark.sql import SparkSession  # noqa: E402
 
 import smallaxe  # noqa: E402
 from smallaxe.search import optimize  # noqa: E402
-from smallaxe.training import Regressors  # noqa: E402
+from smallaxe.training import regressors  # noqa: E402
 from smallaxe.training.xgboost import XGBOOST_AVAILABLE  # noqa: E402
 
 HOUSE_URL = (
@@ -84,7 +84,7 @@ def main() -> None:
     print(f"Loaded King County house sales: {n} rows, {len(FEATURE_COLS)} features")
 
     # --- Train + evaluate a Random Forest regressor. ---
-    rf = Regressors.random_forest(n_estimators=100, max_depth=10, seed=42)
+    rf = regressors.random_forest(n_estimators=100, max_depth=10, seed=42)
     rf.fit(df, label_col="price", feature_cols=FEATURE_COLS, validation="train_test", test_size=0.2)
     report(rf.validation_scores, "Random Forest")
 
@@ -93,7 +93,7 @@ def main() -> None:
 
     model_dir = os.path.join(tempfile.mkdtemp(), "house_rf")
     rf.save(model_dir)
-    loaded = Regressors.load(model_dir)
+    loaded = regressors.load(model_dir)
     diff = (
         rf.predict(df)
         .select("price", F.col("predict_label").alias("p1"))
@@ -113,7 +113,7 @@ def main() -> None:
     from hyperopt import hp
 
     result = optimize.run(
-        Regressors.random_forest(seed=42),
+        regressors.random_forest(seed=42),
         df,
         label_col="price",
         feature_cols=FEATURE_COLS,
@@ -135,7 +135,7 @@ def main() -> None:
 
     # --- Compare against XGBoost when available. ---
     if XGBOOST_AVAILABLE:
-        xgb = Regressors.xgboost(n_estimators=150, max_depth=6, learning_rate=0.1, seed=42)
+        xgb = regressors.xgboost(n_estimators=150, max_depth=6, learning_rate=0.1, seed=42)
         xgb.fit(
             df, label_col="price", feature_cols=FEATURE_COLS, validation="train_test", test_size=0.2
         )

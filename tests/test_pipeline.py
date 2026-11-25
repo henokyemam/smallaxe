@@ -13,7 +13,7 @@ from pyspark.sql import functions as F
 from smallaxe.exceptions import ModelNotFittedError, PreprocessingError, ValidationError
 from smallaxe.pipeline import Pipeline
 from smallaxe.preprocessing import Encoder, Imputer, Scaler
-from smallaxe.training import Classifiers, Regressors, algorithm
+from smallaxe.training import algorithm, classifiers, regressors
 from tests.fakes import install_fake_modules
 
 
@@ -592,7 +592,7 @@ class TestEncoderRequirement:
     """Whether a model needs an Encoder comes from its Algorithm record."""
 
     @pytest.mark.parametrize(
-        "make", [Regressors.random_forest, Classifiers.random_forest], ids=["reg", "clf"]
+        "make", [regressors.random_forest, classifiers.random_forest], ids=["reg", "clf"]
     )
     def test_random_forest_with_categorical_cols_and_no_encoder_raises(self, df_clean, make):
         pipeline = Pipeline([("imputer", Imputer()), ("model", make())])
@@ -610,7 +610,7 @@ class TestEncoderRequirement:
 
     def test_xgboost_with_categorical_cols_and_no_encoder_raises(self, df_clean):
         _require("xgboost")
-        pipeline = Pipeline([("scaler", Scaler()), ("model", Regressors.xgboost())])
+        pipeline = Pipeline([("scaler", Scaler()), ("model", regressors.xgboost())])
 
         with pytest.raises(PreprocessingError, match="xgboost requires Encoder"):
             pipeline.fit(
@@ -627,7 +627,7 @@ class TestEncoderRequirement:
         record = algorithm.get(name)
         install_fake_modules(monkeypatch, record)
         assert record.accepts_raw_categoricals is False
-        pipeline = Pipeline([("imputer", Imputer()), ("model", getattr(Regressors, name)())])
+        pipeline = Pipeline([("imputer", Imputer()), ("model", getattr(regressors, name)())])
 
         with pytest.raises(PreprocessingError) as exc_info:
             pipeline.fit(
@@ -643,7 +643,7 @@ class TestEncoderRequirement:
         self, df_clean, monkeypatch, name
     ):
         install_fake_modules(monkeypatch, algorithm.get(name))
-        pipeline = Pipeline([("encoder", Encoder()), ("model", getattr(Regressors, name)())])
+        pipeline = Pipeline([("encoder", Encoder()), ("model", getattr(regressors, name)())])
 
         pipeline.fit(
             df_clean,
@@ -660,7 +660,7 @@ class TestEncoderRequirement:
             pipeline = Pipeline(
                 [
                     ("imputer", Imputer(numerical_strategy="mean")),
-                    ("model", Regressors.random_forest()),
+                    ("model", regressors.random_forest()),
                 ]
             )
             pipeline.fit(
@@ -690,7 +690,7 @@ class TestFeatureColumns:
 
     @pytest.mark.parametrize("method", ["onehot", "label"])
     def test_model_gets_numerical_cols_and_encoder_outputs_only(self, df_mixed, method):
-        pipeline = _full_pipeline(Regressors.random_forest(n_estimators=5, seed=1), method)
+        pipeline = _full_pipeline(regressors.random_forest(n_estimators=5, seed=1), method)
 
         pipeline.fit(
             df_mixed,
@@ -708,7 +708,7 @@ class TestFeatureColumns:
             assert pipeline.feature_cols == ["age", "income", "category"]
 
     def test_predict_ignores_extra_columns_and_unseen_categories(self, df_mixed):
-        pipeline = _full_pipeline(Classifiers.random_forest(n_estimators=5, seed=1))
+        pipeline = _full_pipeline(classifiers.random_forest(n_estimators=5, seed=1))
         pipeline.fit(
             df_mixed,
             label_col="label",
@@ -727,7 +727,7 @@ class TestFeatureColumns:
 
     def test_without_column_lists_the_model_infers_its_features_and_warns_once(self, df_mixed):
         numeric = df_mixed.drop("category").fillna({"age": 30.0})
-        pipeline = Pipeline([("model", Regressors.random_forest(n_estimators=5, seed=1))])
+        pipeline = Pipeline([("model", regressors.random_forest(n_estimators=5, seed=1))])
 
         with warnings.catch_warnings(record=True) as caught:
             warnings.simplefilter("always")
@@ -749,7 +749,7 @@ class TestFeatureColumns:
         assert pipeline["model"]._feature_cols == ["age", "income", "unlisted", "label"]
 
     def test_label_listed_as_a_feature_raises(self, df_clean):
-        pipeline = Pipeline([("model", Regressors.random_forest())])
+        pipeline = Pipeline([("model", regressors.random_forest())])
 
         with pytest.raises(ValidationError, match="target"):
             pipeline.fit(df_clean, label_col="target", numerical_cols=["age", "target"])
@@ -784,7 +784,7 @@ class TestSkippedSteps:
                 ("imputer", Imputer(numerical_strategy="mean")),
                 ("scaler", Scaler()),
                 ("encoder", Encoder()),
-                ("model", Regressors.random_forest(n_estimators=5, seed=1)),
+                ("model", regressors.random_forest(n_estimators=5, seed=1)),
             ]
         )
 
@@ -838,7 +838,7 @@ class TestDuckTypedSteps:
 class TestPredictionApi:
     @pytest.fixture
     def fitted_classifier(self, df_mixed):
-        pipeline = _full_pipeline(Classifiers.random_forest(n_estimators=5, seed=1))
+        pipeline = _full_pipeline(classifiers.random_forest(n_estimators=5, seed=1))
         return pipeline.fit(
             df_mixed,
             label_col="label",
@@ -848,7 +848,7 @@ class TestPredictionApi:
 
     @pytest.fixture
     def fitted_regressor(self, df_mixed):
-        pipeline = _full_pipeline(Regressors.random_forest(n_estimators=5, seed=1))
+        pipeline = _full_pipeline(regressors.random_forest(n_estimators=5, seed=1))
         return pipeline.fit(
             df_mixed,
             label_col="target",
@@ -902,7 +902,7 @@ class TestPredictionApi:
 
     @pytest.mark.parametrize("method", ["predict", "predict_proba", "evaluate"])
     def test_before_fit_raises(self, df_clean, method):
-        pipeline = Pipeline([("model", Classifiers.random_forest())])
+        pipeline = Pipeline([("model", classifiers.random_forest())])
 
         with pytest.raises(ModelNotFittedError):
             getattr(pipeline, method)(df_clean)

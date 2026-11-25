@@ -13,9 +13,9 @@ hyperopt is an optional dependency. Calling :func:`run` without it raises a
 Example:
     >>> from hyperopt import hp
     >>> from smallaxe.search import optimize
-    >>> from smallaxe.training import Regressors
+    >>> from smallaxe.training import regressors
     >>>
-    >>> model = Regressors.random_forest(seed=42)
+    >>> model = regressors.random_forest(seed=42)
     >>> result = optimize.run(
     ...     model,
     ...     dataframe,
@@ -269,7 +269,7 @@ def run(
     negating the score for metrics where higher is better.
 
     Args:
-        model: A smallaxe model instance (e.g. from ``Regressors.xgboost()``).
+        model: A smallaxe model instance (e.g. from ``regressors.xgboost()``).
             Its current parameters are used as the fixed baseline; only the
             parameters present in ``param_space`` are searched. Used as a
             template only — it is not mutated.

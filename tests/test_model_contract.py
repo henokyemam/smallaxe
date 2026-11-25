@@ -11,7 +11,7 @@ from pyspark.ml.functions import vector_to_array
 
 from smallaxe.exceptions import ModelNotFittedError
 from smallaxe.metrics import TASK_METRICS
-from smallaxe.training import Classifier, Classifiers, Regressor, Regressors, algorithm
+from smallaxe.training import Classifier, Regressor, algorithm, classifiers, regressors
 
 TASKS = ("simple_regression", "binary", "multiclass")
 CASES = [(name, task) for name in algorithm.names() for task in TASKS]
@@ -39,8 +39,8 @@ def _make(name, task, **params):
     if not algorithm.get(name).available():
         pytest.skip(f"{name} is not installed")
     if task == "simple_regression":
-        return getattr(Regressors, name)(**params)
-    return getattr(Classifiers, name)(task=task, **params)
+        return getattr(regressors, name)(**params)
+    return getattr(classifiers, name)(task=task, **params)
 
 
 def _fit(name, task, frame, **fit_kwargs):
@@ -113,7 +113,7 @@ class TestModelContract:
         path = str(tmp_path / "model")
         model.save(path)
 
-        factory = Regressors if task == "simple_regression" else Classifiers
+        factory = regressors if task == "simple_regression" else classifiers
         loaded = factory.load(path)
 
         assert type(loaded) is type(model)
@@ -138,7 +138,7 @@ class TestModelContract:
 
 def test_random_forest_depth_zero_is_a_single_leaf(frame):
     """PySpark's maxDepth 0 means one leaf node, not "unlimited"."""
-    assert "unlimited" not in Regressors.random_forest().params["max_depth"]
-    model = Regressors.random_forest(n_estimators=2, max_depth=0, seed=1)
+    assert "unlimited" not in regressors.random_forest().params["max_depth"]
+    model = regressors.random_forest(n_estimators=2, max_depth=0, seed=1)
     model.fit(frame, label_col="target", feature_cols=FEATURES)
     assert all(tree.numNodes == 1 for tree in model._spark_model.trees)

@@ -10,7 +10,7 @@ import pytest
 from pyspark import StorageLevel
 
 import smallaxe
-from smallaxe.training import Classifiers, Regressors
+from smallaxe.training import classifiers, regressors
 
 
 @pytest.fixture
@@ -40,11 +40,11 @@ def _predictions(model, df):
 
 class TestRefit:
     def test_train_test_keeps_a_model_trained_on_all_rows(self, frame):
-        model = Regressors.random_forest(n_estimators=3, seed=1)
+        model = regressors.random_forest(n_estimators=3, seed=1)
         model.fit(
             frame, label_col="target", feature_cols=["age", "income"], validation="train_test"
         )
-        full = Regressors.random_forest(n_estimators=3, seed=1)
+        full = regressors.random_forest(n_estimators=3, seed=1)
         full.fit(frame, label_col="target", feature_cols=["age", "income"])
 
         assert model.metadata["kept_model"] == "full"
@@ -53,7 +53,7 @@ class TestRefit:
         assert _predictions(model, frame) == _predictions(full, frame)
 
     def test_kfold_keeps_a_model_trained_on_all_rows(self, frame):
-        model = Regressors.random_forest(n_estimators=3, seed=1)
+        model = regressors.random_forest(n_estimators=3, seed=1)
         model.fit(
             frame,
             label_col="target",
@@ -65,7 +65,7 @@ class TestRefit:
         assert model.metadata["n_training_rows"] == 120
 
     def test_refit_false_keeps_the_train_split_model(self, frame):
-        model = Regressors.random_forest(n_estimators=3, seed=1)
+        model = regressors.random_forest(n_estimators=3, seed=1)
         model.fit(
             frame,
             label_col="target",
@@ -79,7 +79,7 @@ class TestRefit:
         assert 70 < model.metadata["n_training_rows"] < 110
 
     def test_refit_false_keeps_the_last_fold_model(self, frame):
-        model = Regressors.random_forest(n_estimators=3, seed=1)
+        model = regressors.random_forest(n_estimators=3, seed=1)
         model.fit(
             frame,
             label_col="target",
@@ -92,7 +92,7 @@ class TestRefit:
         assert 70 < model.metadata["n_training_rows"] < 110
 
     def test_refit_false_trains_once_per_split(self, frame, monkeypatch):
-        model = Regressors.random_forest(n_estimators=3, seed=1)
+        model = regressors.random_forest(n_estimators=3, seed=1)
         calls = []
         original = type(model)._fit_spark_model
 
@@ -112,7 +112,7 @@ class TestRefit:
         assert len(calls) == 3
 
     def test_validation_none_records_full(self, frame):
-        model = Regressors.random_forest(n_estimators=3, seed=1)
+        model = regressors.random_forest(n_estimators=3, seed=1)
         model.fit(frame, label_col="target", feature_cols=["age"])
         assert model.metadata["kept_model"] == "full"
         assert model.metadata["n_training_rows"] == 120
@@ -136,7 +136,7 @@ class TestCaching:
         cached = frame.persist(StorageLevel.MEMORY_AND_DISK)
         same_data = cached.select("*")
         try:
-            model = Regressors.random_forest(n_estimators=2, seed=1)
+            model = regressors.random_forest(n_estimators=2, seed=1)
             for strategy in (None, "memory", "disk", "none"):
                 model.fit(
                     same_data,
@@ -157,7 +157,7 @@ class TestCaching:
     def test_the_same_plan_cached_by_the_user_is_not_persisted_again(self, frame, monkeypatch):
         cached = frame.persist(StorageLevel.MEMORY_ONLY)
         try:
-            model = Regressors.random_forest(n_estimators=2, seed=1)
+            model = regressors.random_forest(n_estimators=2, seed=1)
             persisted = []
             original = type(frame).persist
 
@@ -173,7 +173,7 @@ class TestCaching:
             cached.unpersist()
 
     def test_default_caches_for_kfold_and_unpersists_afterwards(self, frame, monkeypatch):
-        model = Regressors.random_forest(n_estimators=2, seed=1)
+        model = regressors.random_forest(n_estimators=2, seed=1)
         seen = {}
         original = type(model)._fit_spark_model
 
@@ -188,7 +188,7 @@ class TestCaching:
         assert not _is_cached(frame)
 
     def test_default_does_not_cache_a_single_pass(self, frame, monkeypatch):
-        model = Regressors.random_forest(n_estimators=2, seed=1)
+        model = regressors.random_forest(n_estimators=2, seed=1)
         seen = {}
         original = type(model)._fit_spark_model
 
@@ -201,7 +201,7 @@ class TestCaching:
         assert not (seen["level"].useMemory or seen["level"].useDisk)
 
     def test_persist_failure_warns_and_continues(self, frame, monkeypatch):
-        model = Regressors.random_forest(n_estimators=2, seed=1)
+        model = regressors.random_forest(n_estimators=2, seed=1)
 
         def failing(self, level):
             raise RuntimeError("persist is disabled here")
@@ -218,9 +218,9 @@ class TestCaching:
 class TestSeeds:
     def test_global_seed_makes_two_fits_identical(self, frame):
         smallaxe.set_seed(42)
-        first = Regressors.random_forest(n_estimators=5)
+        first = regressors.random_forest(n_estimators=5)
         first.fit(frame, label_col="target", feature_cols=["age", "income"], validation="kfold")
-        second = Regressors.random_forest(n_estimators=5)
+        second = regressors.random_forest(n_estimators=5)
         second.fit(frame, label_col="target", feature_cols=["age", "income"], validation="kfold")
 
         assert _predictions(first, frame) == _predictions(second, frame)
@@ -230,19 +230,19 @@ class TestSeeds:
 
     def test_model_seed_beats_global_seed(self, frame):
         smallaxe.set_seed(42)
-        model = Regressors.random_forest(n_estimators=2, seed=7)
+        model = regressors.random_forest(n_estimators=2, seed=7)
         model.fit(frame, label_col="target", feature_cols=["age"], validation="train_test")
         assert model.metadata["seed"] == 7
         assert model.metadata["split_seed"] == 7
 
     def test_unseeded_fit_records_the_seed_it_drew(self, frame):
-        model = Regressors.random_forest(n_estimators=2)
+        model = regressors.random_forest(n_estimators=2)
         model.fit(frame, label_col="target", feature_cols=["age"], validation="train_test")
         assert model.metadata["seed"] is None
         assert isinstance(model.metadata["split_seed"], int)
 
     def test_no_validation_records_no_split_seed(self, frame):
-        model = Regressors.random_forest(n_estimators=2, seed=1)
+        model = regressors.random_forest(n_estimators=2, seed=1)
         model.fit(frame, label_col="target", feature_cols=["age"])
         assert model.metadata["split_seed"] is None
 
@@ -263,7 +263,7 @@ class TestSearchSettings:
         smallaxe.set_seed(3)
         with smallaxe.verbosity("quiet"):
             optimize.run(
-                Regressors.random_forest(n_estimators=2),
+                regressors.random_forest(n_estimators=2),
                 frame,
                 label_col="target",
                 param_space={"max_depth": [2, 3]},
@@ -294,7 +294,7 @@ class TestSearchSettings:
 
         monkeypatch.setattr(BaseModel, "fit", spy)
         optimize.run(
-            Regressors.random_forest(n_estimators=2),
+            regressors.random_forest(n_estimators=2),
             frame,
             label_col="target",
             param_space={"max_depth": [2, 3, 4]},
@@ -320,7 +320,7 @@ class TestSearchSettings:
 
         assert smallaxe.get_seed() is None
         result = optimize.run(
-            Regressors.random_forest(n_estimators=2),
+            regressors.random_forest(n_estimators=2),
             frame,
             label_col="target",
             param_space={"max_depth": [2, 3]},
@@ -351,7 +351,7 @@ class TestSearchSettings:
 
         monkeypatch.setattr(type(frame), "persist", spy)
         optimize.run(
-            Regressors.random_forest(n_estimators=2, seed=1),
+            regressors.random_forest(n_estimators=2, seed=1),
             frame,
             label_col="target",
             param_space={"max_depth": [2, 3]},
@@ -377,7 +377,7 @@ class TestSearchSettings:
 
         monkeypatch.setattr(BaseModel, "fit", spy)
         result = optimize.run(
-            Regressors.random_forest(n_estimators=2, seed=1),
+            regressors.random_forest(n_estimators=2, seed=1),
             frame,
             label_col="target",
             param_space={"max_depth": [2, 3]},
@@ -397,7 +397,7 @@ class TestSearchSettings:
 
 class TestFeatureInference:
     def test_boolean_is_a_feature_and_string_is_reported_once(self, frame):
-        model = Classifiers.random_forest(n_estimators=2, seed=1)
+        model = classifiers.random_forest(n_estimators=2, seed=1)
         with pytest.warns(UserWarning, match="customer \\(string\\)") as record:
             model.fit(frame, label_col="label", exclude_cols=["id", "target"])
 
@@ -408,21 +408,21 @@ class TestFeatureInference:
         assert model.metadata["ignored_cols"] == {"customer": "string"}
 
     def test_numeric_and_boolean_only_gives_no_warning(self, frame):
-        model = Regressors.random_forest(n_estimators=2, seed=1)
+        model = regressors.random_forest(n_estimators=2, seed=1)
         with warnings.catch_warnings():
             warnings.simplefilter("error", UserWarning)
             model.fit(frame.drop("customer"), label_col="target", exclude_cols=["id", "label"])
         assert model.metadata["ignored_cols"] == {}
 
     def test_excluded_columns_are_not_reported(self, frame):
-        model = Regressors.random_forest(n_estimators=2, seed=1)
+        model = regressors.random_forest(n_estimators=2, seed=1)
         with warnings.catch_warnings():
             warnings.simplefilter("error", UserWarning)
             model.fit(frame, label_col="target", exclude_cols=["id", "customer", "label"])
         assert model.metadata["feature_cols_inferred"] is True
 
     def test_explicit_feature_cols_are_not_inferred(self, frame):
-        model = Regressors.random_forest(n_estimators=2, seed=1)
+        model = regressors.random_forest(n_estimators=2, seed=1)
         model.fit(frame, label_col="target", feature_cols=["age"])
         assert model.metadata["feature_cols_inferred"] is False
 
@@ -433,7 +433,7 @@ class TestFeatureInference:
         with warnings.catch_warnings(record=True) as record:
             warnings.simplefilter("always")
             optimize.run(
-                Regressors.random_forest(n_estimators=2, seed=1),
+                regressors.random_forest(n_estimators=2, seed=1),
                 frame,
                 label_col="target",
                 param_space={"max_depth": [2, 3]},

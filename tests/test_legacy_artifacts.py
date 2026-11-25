@@ -19,7 +19,7 @@ import pytest
 
 import smallaxe
 from smallaxe import _artifact
-from smallaxe.training import Classifiers, Regressors, algorithm
+from smallaxe.training import algorithm, classifiers, regressors
 from smallaxe.training.base import Classifier, Regressor
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -77,7 +77,7 @@ def _require(name):
 def _load(version, name):
     """Load a fixture through its factory."""
     _require(name)
-    factory = Regressors if name.endswith("regressor") else Classifiers
+    factory = regressors if name.endswith("regressor") else classifiers
     return factory.load(str(_directory(version) / name))
 
 
@@ -176,7 +176,7 @@ def test_class1_multiclass_scores_warn_on_load(tmp_path, scores):
     path = _multiclass_artifact_with_scores(tmp_path, scores)
 
     with pytest.warns(UserWarning, match="class 1 only") as record:
-        model = Classifiers.load(path)
+        model = classifiers.load(path)
 
     assert record[0].filename == __file__
     assert model.validation_scores == scores
@@ -205,4 +205,4 @@ def test_macro_multiclass_scores_load_without_warning(tmp_path, scores):
 
     with warnings.catch_warnings():
         warnings.filterwarnings("error", message=".*class 1 only")
-        Classifiers.load(path)
+        classifiers.load(path)

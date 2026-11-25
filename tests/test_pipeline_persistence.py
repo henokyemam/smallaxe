@@ -21,7 +21,7 @@ import smallaxe
 from smallaxe.exceptions import ValidationError
 from smallaxe.pipeline import Pipeline
 from smallaxe.preprocessing import Encoder, Imputer, Scaler
-from smallaxe.training import Classifier, Classifiers, Regressor, Regressors, algorithm
+from smallaxe.training import Classifier, Regressor, algorithm, classifiers, regressors
 
 FIXTURES = Path(__file__).parent / "fixtures"
 LEGACY = FIXTURES / "pipeline_0_10"
@@ -74,8 +74,8 @@ def _model(name, task):
         pytest.skip(f"{name} is not installed")
     params = {"n_estimators": 5, "seed": 7}
     if task == "simple_regression":
-        return getattr(Regressors, name)(**params)
-    return getattr(Classifiers, name)(task=task, **params)
+        return getattr(regressors, name)(**params)
+    return getattr(classifiers, name)(task=task, **params)
 
 
 def _pipeline(model, encoder_method="onehot"):
@@ -271,7 +271,7 @@ class TestSkippedStepsPersist:
                 ("imputer", Imputer(numerical_strategy=0.0)),
                 ("scaler", Scaler(method="minmax")),
                 ("encoder", Encoder(method="label", max_categories=7, handle_rare="keep")),
-                ("model", Regressors.random_forest(n_estimators=5, seed=3)),
+                ("model", regressors.random_forest(n_estimators=5, seed=3)),
             ]
         )
         clean = frame.fillna({"age": 1.0, "income": 1.0})
@@ -302,7 +302,7 @@ class TestSkippedStepsPersist:
                 ("imputer", Imputer(numerical_strategy="mean")),
                 ("encoder", Encoder()),
                 ("scaler", Scaler()),
-                ("model", Regressors.random_forest(n_estimators=5, seed=3)),
+                ("model", regressors.random_forest(n_estimators=5, seed=3)),
             ]
         )
         pipeline.fit(frame, label_col="target", numerical_cols=NUMERICAL)
@@ -322,7 +322,7 @@ class TestLoadRejections:
     def saved(self, frame, tmp_path):
         path = tmp_path / "pipe"
         Pipeline(
-            [("scaler", Scaler()), ("model", Regressors.random_forest(n_estimators=5, seed=1))]
+            [("scaler", Scaler()), ("model", regressors.random_forest(n_estimators=5, seed=1))]
         ).fit(frame.fillna(0.0), label_col="target", numerical_cols=NUMERICAL).save(str(path))
         return path
 
@@ -523,7 +523,7 @@ class TestLoadAnyArtifact:
         imputer = Imputer(numerical_strategy="mean").fit(frame, numerical_cols=NUMERICAL)
         scaler = Scaler().fit(clean, numerical_cols=NUMERICAL)
         encoder = Encoder().fit(clean, categorical_cols=CATEGORICAL)
-        model = Regressors.random_forest(n_estimators=5).fit(
+        model = regressors.random_forest(n_estimators=5).fit(
             clean, label_col="target", feature_cols=NUMERICAL
         )
         pipeline = Pipeline([("scaler", Scaler())]).fit(clean, numerical_cols=NUMERICAL)

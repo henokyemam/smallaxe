@@ -24,7 +24,7 @@ from pyspark.sql import SparkSession
 
 from smallaxe.pipeline import Pipeline
 from smallaxe.preprocessing import Encoder, Imputer, Scaler
-from smallaxe.training import Regressors
+from smallaxe.training import regressors
 
 HERE = Path(__file__).parent
 SCHEMA = "id int, code string, age double, income double, city string, target double"
@@ -53,7 +53,7 @@ def _pipeline():
             ("imputer", Imputer(numerical_strategy="median", categorical_strategy="most_frequent")),
             ("scaler", Scaler()),
             ("encoder", Encoder(method="onehot")),
-            ("model", Regressors.random_forest(n_estimators=5, max_depth=3, seed=11)),
+            ("model", regressors.random_forest(n_estimators=5, max_depth=3, seed=11)),
         ]
     )
 

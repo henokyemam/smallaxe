@@ -166,13 +166,13 @@ class Pipeline:
     Example:
         >>> from smallaxe.pipeline import Pipeline
         >>> from smallaxe.preprocessing import Encoder, Imputer, Scaler
-        >>> from smallaxe.training import Classifiers
+        >>> from smallaxe.training import classifiers
         >>> pipeline = Pipeline([
         ...     ("imputer", Imputer(numerical_strategy="median",
         ...                         categorical_strategy="most_frequent")),
         ...     ("scaler", Scaler()),
         ...     ("encoder", Encoder()),
-        ...     ("model", Classifiers.random_forest()),
+        ...     ("model", classifiers.random_forest()),
         ... ])
         >>> pipeline.fit(dataframe, label_col="label", numerical_cols=["age"],
         ...              categorical_cols=["city"])

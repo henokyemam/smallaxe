@@ -1137,7 +1137,7 @@ class Model(BaseModel):
     column wiring, task-fixed settings, importances, dependency, session setup) is
     read from the algorithm record, so fit, predict, save, load, and clone are
     written once here. Use :class:`Regressor` or :class:`Classifier`, or the
-    ``Regressors`` / ``Classifiers`` factories.
+    ``regressors.<algorithm>()`` / ``classifiers.<algorithm>()`` functions.
 
     Args:
         algorithm: Algorithm name (``"xgboost"``) or record.
@@ -1307,8 +1307,8 @@ class Model(BaseModel):
     def load(cls, path: str) -> "Model":
         """Load a saved model, returning a :class:`Regressor` or :class:`Classifier`.
 
-        This is the one load rule: :func:`smallaxe.load_model`, ``Regressors.load`` and
-        ``Classifiers.load`` all come here. ``metadata.json`` is checked before anything
+        This is the one load rule: :func:`smallaxe.load_model`, ``regressors.load`` and
+        ``classifiers.load`` all come here. ``metadata.json`` is checked before anything
         is built: an artifact with the header must be a ``"model"`` one in a format this
         smallaxe reads; an artifact without it (smallaxe 0.10 and earlier) is accepted.
         ``algorithm`` names the algorithm; artifacts written by smallaxe 0.8.x record the
@@ -1429,14 +1429,14 @@ def _saved_params(
 
 
 class Regressor(Model, BaseRegressor):
-    """A regression model for any algorithm. Prefer ``Regressors.<algorithm>()``."""
+    """A regression model for any algorithm. Prefer ``regressors.<algorithm>()``."""
 
     def __init__(self, algorithm: Union[str, Algorithm], task: str = "simple_regression") -> None:
         super().__init__(algorithm, task)
 
 
 class Classifier(Model, BaseClassifier):
-    """A classification model for any algorithm. Prefer ``Classifiers.<algorithm>()``."""
+    """A classification model for any algorithm. Prefer ``classifiers.<algorithm>()``."""
 
     def __init__(self, algorithm: Union[str, Algorithm], task: str = "binary") -> None:
         super().__init__(algorithm, task)

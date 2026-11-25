@@ -8,7 +8,7 @@ import pytest
 from pyspark.ml.linalg import Vectors
 
 from smallaxe.exceptions import ValidationError
-from smallaxe.training import Classifiers, Regressors
+from smallaxe.training import classifiers, regressors
 
 
 @pytest.fixture
@@ -21,7 +21,7 @@ def frame_with_features_column(spark_session):
 
 
 def test_model_trains_on_feature_cols_not_the_features_column(frame_with_features_column):
-    model = Regressors.random_forest(n_estimators=2, seed=1)
+    model = regressors.random_forest(n_estimators=2, seed=1)
     model.fit(frame_with_features_column, label_col="y", feature_cols=["x", "z"])
 
     assert model.metadata["feature_cols"] == ["x", "z"]
@@ -29,7 +29,7 @@ def test_model_trains_on_feature_cols_not_the_features_column(frame_with_feature
 
 
 def test_predict_keeps_the_users_features_column(frame_with_features_column):
-    model = Regressors.random_forest(n_estimators=2, seed=1)
+    model = regressors.random_forest(n_estimators=2, seed=1)
     model.fit(frame_with_features_column, label_col="y", feature_cols=["x", "z"])
 
     out = model.predict(frame_with_features_column)
@@ -41,7 +41,7 @@ def test_predict_keeps_the_users_features_column(frame_with_features_column):
 def test_predict_keeps_user_prediction_and_probability_columns(spark_session):
     rows = [(float(i), float(i % 3), "mine", 0.5, i % 2) for i in range(40)]
     df = spark_session.createDataFrame(rows, ["x", "z", "prediction", "probability", "label"])
-    model = Classifiers.random_forest(n_estimators=2, seed=1)
+    model = classifiers.random_forest(n_estimators=2, seed=1)
     model.fit(df, label_col="label", feature_cols=["x", "z"])
 
     out = model.predict(df)
@@ -52,7 +52,7 @@ def test_predict_keeps_user_prediction_and_probability_columns(spark_session):
 
 
 def test_output_col_may_not_overwrite_a_user_column(frame_with_features_column):
-    model = Classifiers.random_forest(n_estimators=2, seed=1)
+    model = classifiers.random_forest(n_estimators=2, seed=1)
     model.fit(frame_with_features_column, label_col="label", feature_cols=["x", "z"])
 
     with pytest.raises(ValidationError, match="already exists"):
@@ -62,7 +62,7 @@ def test_output_col_may_not_overwrite_a_user_column(frame_with_features_column):
 
 
 def test_predict_proba_output_is_the_only_new_column(frame_with_features_column):
-    model = Classifiers.random_forest(n_estimators=2, seed=1)
+    model = classifiers.random_forest(n_estimators=2, seed=1)
     model.fit(frame_with_features_column, label_col="label", feature_cols=["x", "z"])
 
     out = model.predict_proba(frame_with_features_column, output_col="p")

@@ -236,6 +236,158 @@ def test_dataframe_rename_contract(frames):
             func(**kwargs)
 
 
+# --- 5. Regressors / Classifiers -> the regressors / classifiers module functions ------
+
+_CONSTRUCTORS = ["random_forest", "xgboost", "lightgbm", "catboost"]
+
+
+def _installed(name):
+    from smallaxe.training import algorithm
+
+    return algorithm.get(name).available()
+
+
+class TestFactoryFunctions:
+    def test_module_functions_and_all(self):
+        from smallaxe.training import classifiers, regressors
+
+        expected = _CONSTRUCTORS + ["load", "algorithms", "available_models"]
+        for module in (regressors, classifiers):
+            assert module.__all__ == expected
+            assert all(callable(getattr(module, name)) for name in expected)
+            assert not hasattr(module, "list_models")
+
+    def test_constructors_do_not_warn(self):
+        from smallaxe.training import Classifier, classifiers, regressors
+
+        with no_deprecation():
+            model = regressors.random_forest(max_depth=3)
+            clf = classifiers.random_forest(task="multiclass", max_depth=3)
+            assert regressors.algorithms() == _CONSTRUCTORS
+            assert classifiers.algorithms() == _CONSTRUCTORS
+            reg_report = regressors.available_models()
+            cls_report = classifiers.available_models()
+        assert isinstance(model, Regressor) and model.get_param("max_depth") == 3
+        assert isinstance(clf, Classifier) and clf.task == "multiclass"
+        for report in (reg_report, cls_report):
+            assert list(report) == _CONSTRUCTORS
+            assert report["random_forest"] == {
+                "available": True,
+                "dependency": None,
+                "install_hint": None,
+            }
+
+    def test_load_does_not_warn(self, tmp_path, frames):
+        from smallaxe.training import classifiers, regressors
+
+        path = str(tmp_path / "model")
+        regressors.random_forest(n_estimators=3, seed=1).fit(
+            frames["regression"], "y", feature_cols=["x"]
+        ).save(path)
+        with no_deprecation():
+            loaded = regressors.load(path)
+        assert loaded.algorithm.name == "random_forest"
+        with pytest.raises(ValidationError, match="not a supported classifier.*regressors.load"):
+            classifiers.load(path)
+
+
+class TestDeprecatedFactoryClasses:
+    def test_importing_the_classes_does_not_warn(self):
+        with no_deprecation():
+            from smallaxe.training import Classifiers, Regressors  # noqa: F401
+
+    @pytest.mark.parametrize("name", _CONSTRUCTORS)
+    def test_regressors_constructors(self, name):
+        from smallaxe.training import Regressors, regressors
+
+        if not _installed(name):
+            pytest.skip(f"{name} is not installed")
+        with warns_once(f"Regressors.{name}()", f"regressors.{name}()"):
+            model = getattr(Regressors, name)(max_depth=4)
+        expected = getattr(regressors, name)(max_depth=4)
+        assert type(model) is type(expected)
+        assert model.algorithm is expected.algorithm
+        assert model.get_params() == expected.get_params()
+
+    @pytest.mark.parametrize("name", _CONSTRUCTORS)
+    def test_classifiers_constructors(self, name):
+        from smallaxe.training import Classifiers, classifiers
+
+        if not _installed(name):
+            pytest.skip(f"{name} is not installed")
+        with warns_once(f"Classifiers.{name}()", f"classifiers.{name}()"):
+            model = getattr(Classifiers, name)(task="multiclass", max_depth=4)
+        expected = getattr(classifiers, name)(task="multiclass", max_depth=4)
+        assert model.task == "multiclass"
+        assert model.get_params() == expected.get_params()
+
+    @pytest.mark.parametrize("name", ["lightgbm", "catboost"])
+    def test_missing_dependency_still_raises(self, monkeypatch, name):
+        import sys
+
+        from smallaxe.exceptions import DependencyError
+        from smallaxe.training import Classifiers, Regressors, algorithm
+
+        if _installed(name):
+            pytest.skip(f"{name} is installed")
+        monkeypatch.setitem(sys.modules, algorithm.get(name).module, None)
+        for factory in (Regressors, Classifiers):
+            with warns_once(f"{factory.__name__}.{name}()"):
+                with pytest.raises(DependencyError):
+                    getattr(factory, name)()
+
+    def test_load(self, tmp_path, frames):
+        from smallaxe.training import Classifiers, Regressors, classifiers
+
+        path = str(tmp_path / "model")
+        model = Regressor("random_forest").set_params(n_estimators=3, seed=1)
+        model.fit(frames["regression"], "y", feature_cols=["x"]).save(path)
+        with warns_once("Regressors.load()", "regressors.load()"):
+            loaded = Regressors.load(path)
+        assert isinstance(loaded, Regressor)
+        assert loaded.get_param("n_estimators") == 3
+
+        clf_path = str(tmp_path / "clf")
+        classifiers.random_forest(n_estimators=3, seed=1).fit(
+            frames["classification"], "label"
+        ).save(clf_path)
+        with warns_once("Classifiers.load()", "classifiers.load()"):
+            assert Classifiers.load(clf_path).task == "binary"
+
+    def test_list_models(self):
+        from smallaxe.training import Classifiers, Regressors
+
+        for factory, suffix in ((Regressors, "Regressor"), (Classifiers, "Classifier")):
+            with warns_once(f"{factory.__name__}.list_models()", "algorithms()"):
+                names = factory.list_models()
+            assert f"RandomForest{suffix}" in names
+            assert all(name.endswith(suffix) for name in names)
+
+    def test_available_models_keeps_class_name(self):
+        from smallaxe.training import Classifiers, Regressors, classifiers, regressors
+
+        for factory, module, suffix in (
+            (Regressors, regressors, "Regressor"),
+            (Classifiers, classifiers, "Classifier"),
+        ):
+            with warns_once(f"{factory.__name__}.available_models()"):
+                report = factory.available_models()
+            assert list(report) == _CONSTRUCTORS
+            assert report["random_forest"] == {
+                "class_name": f"RandomForest{suffix}",
+                "available": True,
+                "dependency": None,
+                "install_hint": None,
+            }
+            assert report["xgboost"]["class_name"] == f"XGBoost{suffix}"
+            assert report["catboost"]["class_name"] == f"CatBoost{suffix}"
+            assert report["lightgbm"]["class_name"] == f"LightGBM{suffix}"
+            assert {
+                name: {k: v for k, v in entry.items() if k != "class_name"}
+                for name, entry in report.items()
+            } == module.available_models()
+
+
 # --- 3. fit(stratified=...) and optimize.run(stratified=...) have no effect -----------
 
 

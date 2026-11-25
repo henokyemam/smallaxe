@@ -356,7 +356,7 @@ class TestDeprecatedAliases:
     @pytest.mark.parametrize(
         "legacy, factory",
         [
-            (name, "Regressors" if kind == "regression" else "Classifiers")
+            (name, "regressors" if kind == "regression" else "classifiers")
             for name, (_, kind) in algorithm.LEGACY_CLASS_NAMES.items()
         ],
     )

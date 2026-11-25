@@ -7,7 +7,7 @@ which both patch pyspark.ml.wrapper process-wide, always in the order
 ``algorithm._PATCHES_PYSPARK`` fixes.
 """
 
-from smallaxe.training import algorithm
+from smallaxe.training import algorithm, classifiers, regressors
 from smallaxe.training.base import (
     BaseClassifier,
     BaseModel,
@@ -31,6 +31,9 @@ __all__ = [
     "Model",
     "Regressor",
     "Classifier",
+    "regressors",
+    "classifiers",
+    # Deprecated factory classes, removed in 1.0: use the regressors / classifiers functions.
     "Regressors",
     "Classifiers",
     # Deprecated 0.8.x class aliases, removed in 1.0.

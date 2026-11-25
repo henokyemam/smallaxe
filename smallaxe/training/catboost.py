@@ -224,20 +224,20 @@ def __getattr__(name: str) -> Any:
 
 
 class CatBoostRegressor(Regressor):
-    """Deprecated alias; use ``Regressors.catboost()``."""
+    """Deprecated alias; use ``regressors.catboost()``."""
 
     _alias_algorithm = "catboost"
 
     def __init__(self, task: str = "simple_regression") -> None:
-        _warn_deprecated_alias("CatBoostRegressor", "Regressors.catboost()")
+        _warn_deprecated_alias("CatBoostRegressor", "regressors.catboost()")
         super().__init__(ALGORITHM, task)
 
 
 class CatBoostClassifier(Classifier):
-    """Deprecated alias; use ``Classifiers.catboost()``."""
+    """Deprecated alias; use ``classifiers.catboost()``."""
 
     _alias_algorithm = "catboost"
 
     def __init__(self, task: str = "binary") -> None:
-        _warn_deprecated_alias("CatBoostClassifier", "Classifiers.catboost()")
+        _warn_deprecated_alias("CatBoostClassifier", "classifiers.catboost()")
         super().__init__(ALGORITHM, task)

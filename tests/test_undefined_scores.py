@@ -14,7 +14,7 @@ from pyspark.sql import functions as F
 
 import smallaxe
 from smallaxe.exceptions import ValidationError
-from smallaxe.training import Classifiers
+from smallaxe.training import classifiers
 from smallaxe.training.base import Model
 from smallaxe.training.mixins.validation_mixin import split_hash
 
@@ -63,7 +63,7 @@ def _undefined_warnings(record):
 
 class TestKFoldMean:
     def test_one_class_fold_is_skipped_with_one_warning(self, one_class_fold_frame):
-        model = Classifiers.random_forest(n_estimators=3, seed=SEED)
+        model = classifiers.random_forest(n_estimators=3, seed=SEED)
         with warnings.catch_warnings(record=True) as record:
             warnings.simplefilter("always")
             model.fit(
@@ -92,7 +92,7 @@ class TestKFoldMean:
         assert undefined[0].category is UserWarning
 
     def test_scores_with_undefined_folds_are_valid_json(self, one_class_fold_frame, tmp_path):
-        model = Classifiers.random_forest(n_estimators=3, seed=SEED)
+        model = classifiers.random_forest(n_estimators=3, seed=SEED)
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
             model.fit(
@@ -109,12 +109,12 @@ class TestKFoldMean:
         saved = (tmp_path / "model" / "metadata.json").read_text()
         assert "NaN" not in saved
         assert (
-            Classifiers.load(str(tmp_path / "model")).validation_scores["fold_scores"][2]["auc_roc"]
+            classifiers.load(str(tmp_path / "model")).validation_scores["fold_scores"][2]["auc_roc"]
             is None
         )
 
     def test_every_fold_undefined_leaves_the_mean_undefined(self):
-        model = Classifiers.random_forest()
+        model = classifiers.random_forest()
         folds = [
             {"accuracy": 0.5, "auc_roc": NAN, "log_loss": None, "fold": 0},
             {"accuracy": 0.7, "auc_roc": NAN, "log_loss": None, "fold": 1},
@@ -131,7 +131,7 @@ class TestKFoldMean:
         assert "mean_log_loss" not in result
 
     def test_all_defined_gives_no_warning(self):
-        model = Classifiers.random_forest()
+        model = classifiers.random_forest()
         folds = [{"auc_roc": 0.6, "fold": 0}, {"auc_roc": 0.8, "fold": 1}]
         with warnings.catch_warnings():
             warnings.simplefilter("error", UserWarning)
@@ -144,7 +144,7 @@ class TestTrainTest:
         monkeypatch.setattr(
             Model, "_evaluate", lambda self, df, label_col: {"accuracy": 1.0, "auc_roc": NAN}
         )
-        model = Classifiers.random_forest(n_estimators=2, seed=SEED)
+        model = classifiers.random_forest(n_estimators=2, seed=SEED)
         model.fit(
             one_class_fold_frame,
             label_col="label",
@@ -163,7 +163,7 @@ class TestBinaryProbabilityMetrics:
             raise RuntimeError("evaluator exploded")
 
         monkeypatch.setattr(classification, "auc_roc", broken)
-        model = Classifiers.random_forest(n_estimators=2, seed=SEED)
+        model = classifiers.random_forest(n_estimators=2, seed=SEED)
         with pytest.raises(RuntimeError, match="evaluator exploded"):
             model.fit(
                 one_class_fold_frame,
@@ -173,7 +173,7 @@ class TestBinaryProbabilityMetrics:
             )
 
     def test_model_without_probabilities_reports_none(self, spark_session):
-        model = Classifiers.random_forest()
+        model = classifiers.random_forest()
         df = spark_session.createDataFrame([(0.0, 0, 0.0), (1.0, 1, 1.0)], ["x", "y", "expected"])
 
         class NoProbabilityModel:
@@ -194,7 +194,7 @@ class TestBinaryProbabilityMetrics:
         # it has no positive-class probability, so the probability metrics are undefined.
         from pyspark.ml.linalg import Vectors, VectorUDT
 
-        model = Classifiers.random_forest()
+        model = classifiers.random_forest()
         df = spark_session.createDataFrame([(0.0, 0), (1.0, 1), (2.0, 0)], ["x", "y"])
 
         class OneClassModel:
@@ -231,7 +231,7 @@ class TestSingleClassTrainingSplit:
     """A training split with one class must not crash fit (Spark RF writes 1-wide vectors)."""
 
     def test_kfold(self, positives_share_one_key):
-        model = Classifiers.random_forest(n_estimators=3, seed=2)
+        model = classifiers.random_forest(n_estimators=3, seed=2)
         with warnings.catch_warnings(record=True) as record:
             warnings.simplefilter("always")
             model.fit(
@@ -266,7 +266,7 @@ class TestSingleClassTrainingSplit:
             .first()["b"]
             < 0.2
         )
-        model = Classifiers.random_forest(n_estimators=3, seed=seed)
+        model = classifiers.random_forest(n_estimators=3, seed=seed)
         model.fit(
             positives_share_one_key,
             label_col="label",
@@ -299,7 +299,7 @@ class TestSearch:
             warnings.simplefilter("ignore")
             with pytest.raises(ValidationError, match="All trials failed") as info:
                 optimize.run(
-                    Classifiers.random_forest(n_estimators=2, seed=SEED),
+                    classifiers.random_forest(n_estimators=2, seed=SEED),
                     one_class_fold_frame,
                     label_col="label",
                     param_space={"max_depth": [2, 3]},

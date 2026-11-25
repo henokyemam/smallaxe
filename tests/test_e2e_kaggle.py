@@ -13,7 +13,7 @@ import urllib.request
 import pytest
 
 from smallaxe.search import optimize
-from smallaxe.training import Classifiers, Regressors
+from smallaxe.training import classifiers, regressors
 
 hp = pytest.importorskip("hyperopt").hp
 
@@ -80,7 +80,7 @@ class TestTitanicEndToEnd:
         import smallaxe
 
         smallaxe.set_seed(42)
-        model = Classifiers.random_forest(task="binary", n_estimators=80, max_depth=5, seed=42)
+        model = classifiers.random_forest(task="binary", n_estimators=80, max_depth=5, seed=42)
         model.fit(
             titanic_df,
             label_col="Survived",
@@ -96,7 +96,7 @@ class TestTitanicEndToEnd:
         # Save/load must reproduce predictions exactly.
         model_dir = os.path.join(tempfile.mkdtemp(), "titanic_rf")
         model.save(model_dir)
-        loaded = Classifiers.load(model_dir)
+        loaded = classifiers.load(model_dir)
         before = model.predict(titanic_df).select("predict_label").collect()
         after = loaded.predict(titanic_df).select("predict_label").collect()
         assert [r.predict_label for r in before] == [r.predict_label for r in after]
@@ -106,7 +106,7 @@ class TestTitanicEndToEnd:
 
         smallaxe.set_seed(42)
         result = optimize.run(
-            Classifiers.random_forest(task="binary", seed=42),
+            classifiers.random_forest(task="binary", seed=42),
             titanic_df,
             label_col="Survived",
             feature_cols=TITANIC_FEATURES,
@@ -134,7 +134,7 @@ class TestHouseEndToEnd:
         import smallaxe
 
         smallaxe.set_seed(42)
-        model = Regressors.random_forest(n_estimators=80, max_depth=10, seed=42)
+        model = regressors.random_forest(n_estimators=80, max_depth=10, seed=42)
         model.fit(
             house_df,
             label_col="price",
@@ -148,7 +148,7 @@ class TestHouseEndToEnd:
         assert scores["rmse"] > 0
 
         result = optimize.run(
-            Regressors.random_forest(seed=42),
+            regressors.random_forest(seed=42),
             house_df,
             label_col="price",
             feature_cols=HOUSE_FEATURES,

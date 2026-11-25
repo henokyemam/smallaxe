@@ -144,9 +144,9 @@ def test_stratified_arguments_still_validate(rows):
 
 
 def test_fit_accepts_fold_key(rows):
-    from smallaxe.training import Regressors
+    from smallaxe.training import regressors
 
-    model = Regressors.random_forest(n_estimators=2, seed=1)
+    model = regressors.random_forest(n_estimators=2, seed=1)
     model.fit(
         rows,
         label_col="x",

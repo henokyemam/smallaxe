@@ -62,20 +62,20 @@ def __getattr__(name: str) -> Any:
 
 
 class XGBoostRegressor(Regressor):
-    """Deprecated alias; use ``Regressors.xgboost()``."""
+    """Deprecated alias; use ``regressors.xgboost()``."""
 
     _alias_algorithm = "xgboost"
 
     def __init__(self, task: str = "simple_regression") -> None:
-        _warn_deprecated_alias("XGBoostRegressor", "Regressors.xgboost()")
+        _warn_deprecated_alias("XGBoostRegressor", "regressors.xgboost()")
         super().__init__(ALGORITHM, task)
 
 
 class XGBoostClassifier(Classifier):
-    """Deprecated alias; use ``Classifiers.xgboost()``."""
+    """Deprecated alias; use ``classifiers.xgboost()``."""
 
     _alias_algorithm = "xgboost"
 
     def __init__(self, task: str = "binary") -> None:
-        _warn_deprecated_alias("XGBoostClassifier", "Classifiers.xgboost()")
+        _warn_deprecated_alias("XGBoostClassifier", "classifiers.xgboost()")
         super().__init__(ALGORITHM, task)
