@@ -632,6 +632,33 @@ class TestEncoderProperties:
         # Original should not be modified
         assert "new_key" not in encoder.category_mappings["color"]
 
+    def test_output_cols_label_are_the_encoded_columns(self, df_for_encoding):
+        encoder = Encoder(method="label").fit(df_for_encoding, categorical_cols=["size", "color"])
+
+        assert encoder.output_cols == ["size", "color"]
+
+    def test_output_cols_onehot_are_the_generated_columns_in_transform_order(self, df_for_encoding):
+        encoder = Encoder(method="onehot").fit(df_for_encoding, categorical_cols=["color", "size"])
+        result = encoder.transform(df_for_encoding)
+
+        assert encoder.output_cols == [c for c in result.columns if c != "id"]
+        assert encoder.output_cols[:4] == [
+            "color_blue",
+            "color_red",
+            "color_green",
+            "color_UNKNOWN",
+        ]
+
+    def test_output_cols_survive_save_and_load(self, df_for_encoding, tmp_path):
+        encoder = Encoder().fit(df_for_encoding, categorical_cols=["color"])
+        encoder.save(str(tmp_path / "e"))
+
+        assert Encoder.load(str(tmp_path / "e")).output_cols == encoder.output_cols
+
+    def test_output_cols_before_fit_raises(self):
+        with pytest.raises(ModelNotFittedError):
+            _ = Encoder().output_cols
+
 
 class TestEncoderEdgeCases:
     """Tests for Encoder edge cases."""

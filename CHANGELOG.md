@@ -125,6 +125,15 @@
 - `smallaxe.load_model(path)` loads any saved model, whatever its algorithm, returning the
   `Regressor` or `Classifier` it was, for artifacts of this and every earlier release.
   `import smallaxe` still imports no training code; it is imported on the first call.
+- `model.evaluate(df, label_col=None)` scores a fitted model on any DataFrame with the
+  metrics its validation computes for its task (the same keys as `validation_scores`,
+  without `validation_type` / `test_size` / fold bookkeeping), undefined metrics as
+  `None`. `label_col` defaults to the label the model was fitted with. It raises
+  `ModelNotFittedError` before `fit` and `ColumnNotFoundError` when the label or a
+  feature column is missing.
+- `Encoder.output_cols`: the columns `transform` writes for the encoded features, in
+  order (the encoded columns themselves for `'label'`, the generated columns for
+  `'onehot'`).
 
 
 ### Fixed

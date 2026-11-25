@@ -918,6 +918,37 @@ class BaseModel(
 
         return self._predict_spark_model(df, output_col=output_col)
 
+    def evaluate(self, df: DataFrame, label_col: Optional[str] = None) -> Dict[str, Any]:
+        """Score the fitted model on ``df`` with the metrics validation computes.
+
+        The keys are those of ``validation_scores`` for this task without the
+        validation bookkeeping: ``mse``, ``rmse``, ``mae``, ``r2``, ``mape`` for
+        regression; ``accuracy``, ``precision``, ``recall``, ``f1_score``, ``auc_roc``,
+        ``auc_pr``, ``log_loss`` for binary classification; accuracy and the macro and
+        weighted scores for multiclass. A metric that is undefined on ``df`` (for example
+        AUC-ROC when only one class is present) is None.
+
+        Args:
+            df: PySpark DataFrame holding the feature columns and the label. Other
+                columns are ignored.
+            label_col: The label column. Defaults to the label the model was fitted with.
+
+        Returns:
+            Dictionary mapping metric names to values.
+
+        Raises:
+            ModelNotFittedError: If the model has not been fitted.
+            ColumnNotFoundError: If the label or a feature column is not in ``df``.
+        """
+        if not self._is_fitted:
+            raise ModelNotFittedError("Model has not been fitted. Call fit() before evaluate().")
+        label = label_col or self._label_col or ""
+        available = list(df.columns)
+        for col in [label] + list(self._feature_cols):
+            if col not in available:
+                raise ColumnNotFoundError(column=col, available_columns=available)
+        return _undefined_to_none(self._evaluate(df, label))
+
     def clone(self) -> "BaseModel":
         """Return an unfitted copy with the same task and parameter values."""
         clone = type(self)(task=self._task)
