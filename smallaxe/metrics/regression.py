@@ -5,15 +5,22 @@ errors propagate. A metric that is mathematically undefined on the rows given is
 ``float("nan")``, never 0.0, which would read as a perfect error score.
 """
 
+from typing import Literal
+
 from pyspark.ml.evaluation import RegressionEvaluator
 from pyspark.sql import DataFrame
 from pyspark.sql import functions as F
 
-from smallaxe.metrics._checks import require_rows
+from smallaxe.metrics._checks import require_numeric, require_rows
 from smallaxe.metrics._checks import validate_columns as _validate_columns
 
 
-def _evaluate(df: DataFrame, label_col: str, prediction_col: str, metric: str) -> float:
+def _evaluate(
+    df: DataFrame,
+    label_col: str,
+    prediction_col: str,
+    metric: Literal["mse", "rmse", "mae", "r2"],
+) -> float:
     evaluator = RegressionEvaluator(
         labelCol=label_col, predictionCol=prediction_col, metricName=metric
     )
@@ -148,9 +155,11 @@ def mape(df: DataFrame, label_col: str = "label", prediction_col: str = "predict
 
     Raises:
         ColumnNotFoundError: If label_col or prediction_col is not in the DataFrame.
-        ValidationError: If the DataFrame has no rows.
+        ValidationError: If label_col or prediction_col is not numeric, or the
+            DataFrame has no rows.
     """
     _validate_columns(df, label_col, prediction_col)
+    require_numeric(df, "mape", label_col, prediction_col)
     require_rows(df, "mape")
 
     label = F.col(label_col)

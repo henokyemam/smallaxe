@@ -14,7 +14,7 @@ from pyspark.sql import functions as F
 from pyspark.sql.types import NumericType
 
 from smallaxe.exceptions import ValidationError
-from smallaxe.metrics._checks import require_rows
+from smallaxe.metrics._checks import require_numeric, require_rows
 from smallaxe.metrics._checks import validate_columns as _validate_columns
 
 MULTICLASS_AVERAGED_METRICS = {
@@ -384,9 +384,11 @@ def log_loss(
 
     Raises:
         ColumnNotFoundError: If label_col or probability_col is not in the DataFrame.
-        ValidationError: If the DataFrame has no rows.
+        ValidationError: If label_col or probability_col is not numeric, or the
+            DataFrame has no rows.
     """
     _validate_columns(df, label_col, probability_col)
+    require_numeric(df, "log_loss", label_col, probability_col)
     require_rows(df, "log_loss")
 
     # Clip probabilities to avoid log(0)

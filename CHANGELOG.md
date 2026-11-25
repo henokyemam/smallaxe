@@ -14,7 +14,9 @@
   when Spark's evaluator yields NaN. `r2` keeps scikit-learn's rule for constant labels
   (1.0 on exact predictions, else 0.0), and per-class precision, recall, and F1 with a
   zero denominator are still 0.0. An empty validation split or fold now makes `fit`
-  raise instead of scoring it 0.0.
+  raise instead of scoring it 0.0. `mape` and `log_loss` raise `ValidationError` for a
+  non-numeric column, as the evaluator-based metrics already raised; earlier, without
+  ANSI mode Spark cast the strings to null and they returned 0.0.
 - **Undefined validation scores are None, and k-fold means skip them.** In
   `validation_scores` (and the saved `metadata.json`) an undefined metric is stored as
   `None`. A k-fold `mean_` / `std_` uses only the folds where the metric was defined and

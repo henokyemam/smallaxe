@@ -522,6 +522,14 @@ class TestLogLoss:
         expected = math.log(2)  # ≈ 0.693
         assert math.isclose(result, expected, rel_tol=1e-4)
 
+    @pytest.mark.parametrize("column", ["label", "probability"])
+    def test_log_loss_non_numeric_column_raises(self, spark_session, column):
+        """A string column is an error, not an 'undefined' NaN from a silent null cast."""
+        df = spark_session.createDataFrame([(1, 0.9), (0, 0.2)], ["label", "probability"])
+        df = df.withColumn(column, df[column].cast("string"))
+        with pytest.raises(ValidationError, match=f"log_loss.*'{column}'.*numeric"):
+            log_loss(df)
+
     def test_log_loss_missing_column_raises_error(self, probability_df):
         """Test that missing column raises ColumnNotFoundError."""
         with pytest.raises(ColumnNotFoundError, match="missing"):

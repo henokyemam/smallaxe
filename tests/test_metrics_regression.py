@@ -293,6 +293,14 @@ class TestMAPE:
         result = mape(all_zeros_df)
         assert math.isnan(result)
 
+    @pytest.mark.parametrize("column", ["label", "predict_label"])
+    def test_mape_non_numeric_column_raises(self, spark_session, column):
+        """A string column is an error, not an 'undefined' NaN from a silent null cast."""
+        df = spark_session.createDataFrame([(1.0, 2.0), (3.0, 4.0)], ["label", "predict_label"])
+        df = df.withColumn(column, df[column].cast("string"))
+        with pytest.raises(ValidationError, match=f"mape.*'{column}'.*numeric"):
+            mape(df)
+
     def test_mape_missing_column_raises_error(self, regression_df):
         """Test that missing column raises ColumnNotFoundError."""
         with pytest.raises(ColumnNotFoundError, match="not_here"):

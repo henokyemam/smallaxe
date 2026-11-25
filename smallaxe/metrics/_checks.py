@@ -3,6 +3,7 @@
 from typing import List
 
 from pyspark.sql import DataFrame
+from pyspark.sql.types import NumericType
 
 from smallaxe.exceptions import ColumnNotFoundError, ValidationError
 
@@ -13,6 +14,22 @@ def validate_columns(df: DataFrame, *cols: str) -> None:
     for col in cols:
         if col not in available_columns:
             raise ColumnNotFoundError(column=col, available_columns=available_columns)
+
+
+def require_numeric(df: DataFrame, metric: str, *cols: str) -> None:
+    """Raise ``ValidationError`` naming ``metric`` if any of ``cols`` is not numeric.
+
+    For the metrics computed with column arithmetic rather than a Spark evaluator:
+    without ANSI mode Spark casts a string to null in arithmetic, which would turn a
+    wrong input into an "undefined" NaN instead of an error.
+    """
+    for col in cols:
+        data_type = df.schema[col].dataType
+        if not isinstance(data_type, NumericType):
+            raise ValidationError(
+                f"Cannot compute {metric}: column '{col}' must be numeric, "
+                f"got {data_type.simpleString()}."
+            )
 
 
 def require_rows(df: DataFrame, metric: str) -> None:
