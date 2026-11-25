@@ -273,13 +273,16 @@ class TestImputerErrors:
 class TestImputerEdgeCases:
     """Tests for Imputer edge cases."""
 
-    def test_empty_column_lists(self, df_with_nulls):
-        """Test that empty column lists work without error."""
-        imputer = Imputer()
-        result = imputer.fit_transform(df_with_nulls)
-
-        # Should return unchanged DataFrame
-        assert result.count() == df_with_nulls.count()
+    @pytest.mark.parametrize(
+        "kwargs",
+        [{}, {"numerical_cols": [], "categorical_cols": []}, {"numerical_cols": None}],
+    )
+    def test_empty_column_lists_raise(self, df_with_nulls, kwargs):
+        """fit with nothing to impute raises, like Scaler and Encoder do."""
+        imputer = Imputer(numerical_strategy="mean", categorical_strategy="most_frequent")
+        with pytest.raises(ValidationError, match="cannot both be empty"):
+            imputer.fit(df_with_nulls, **kwargs)
+        assert not imputer._is_fitted
 
     def test_all_nulls_in_column(self, spark_session):
         """Test handling of column with all null values."""
@@ -326,3 +329,70 @@ class TestImputerEdgeCases:
             F.col("age").isNull() | F.col("income").isNull() | F.col("category").isNull()
         ).count()
         assert null_count == 0
+
+
+class TestImputerNonStringCategorical:
+    """Every declared categorical column is really imputed, in its own type, or fit raises.
+
+    DataFrame.fillna with a string skips non-string columns, so before 0.11 an integer or
+    boolean categorical column kept its nulls without a message.
+    """
+
+    @pytest.fixture
+    def df_int_category(self, spark_session):
+        rows = [(1, 3), (2, 3), (3, 5), (4, None), (5, 5), (6, 3)]
+        return spark_session.createDataFrame(rows, "id int, code int")
+
+    def test_most_frequent_fills_integer_column(self, df_int_category):
+        imputer = Imputer(categorical_strategy="most_frequent")
+        result = imputer.fit_transform(df_int_category, categorical_cols=["code"])
+
+        assert imputer.categorical_fill_values == {"code": "3"}
+        assert dict(result.dtypes)["code"] == "int"
+        assert result.filter(F.col("code").isNull()).count() == 0
+        assert result.filter(F.col("id") == 4).first()["code"] == 3
+
+    def test_custom_value_of_the_column_type_fills_integer_column(self, df_int_category):
+        imputer = Imputer(categorical_strategy="-1")
+        result = imputer.fit_transform(df_int_category, categorical_cols=["code"])
+
+        assert dict(result.dtypes)["code"] == "int"
+        assert result.filter(F.col("id") == 4).first()["code"] == -1
+        assert result.filter(F.col("code").isNull()).count() == 0
+
+    def test_custom_value_of_another_type_is_rejected_at_fit(self, df_int_category):
+        imputer = Imputer(categorical_strategy="UNKNOWN")
+        with pytest.raises(ValidationError, match="'code' of type int") as info:
+            imputer.fit(df_int_category, categorical_cols=["code"])
+        assert "'UNKNOWN'" in str(info.value)
+
+    def test_most_frequent_on_all_null_integer_column_is_rejected(self, spark_session):
+        df = spark_session.createDataFrame([(1, None), (2, None)], "id int, code int")
+        with pytest.raises(ValidationError, match="'code' of type int"):
+            Imputer(categorical_strategy="most_frequent").fit(df, categorical_cols=["code"])
+
+    def test_most_frequent_fills_boolean_column(self, spark_session):
+        df = spark_session.createDataFrame(
+            [(1, True), (2, None), (3, True), (4, False)], "id int, flag boolean"
+        )
+        imputer = Imputer(categorical_strategy="most_frequent")
+        result = imputer.fit_transform(df, categorical_cols=["flag"])
+
+        assert imputer.categorical_fill_values == {"flag": "true"}
+        assert result.filter(F.col("id") == 2).first()["flag"] is True
+
+    def test_string_column_is_unchanged(self, df_with_nulls):
+        imputer = Imputer(categorical_strategy="most_frequent")
+        result = imputer.fit_transform(df_with_nulls, categorical_cols=["category"])
+
+        assert dict(result.dtypes)["category"] == "string"
+        assert result.columns == df_with_nulls.columns
+
+    def test_most_frequent_ties_go_to_the_smallest_value(self, spark_session):
+        df = spark_session.createDataFrame(
+            [(1, "b"), (2, "a"), (3, "b"), (4, "a"), (5, None)], "id int, c string"
+        )
+        for partitions in (1, 3):
+            imputer = Imputer(categorical_strategy="most_frequent")
+            imputer.fit(df.repartition(partitions), categorical_cols=["c"])
+            assert imputer.categorical_fill_values == {"c": "a"}
