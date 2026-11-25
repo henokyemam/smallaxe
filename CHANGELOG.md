@@ -30,13 +30,13 @@
   the wrong kind of artifact, or one written by a newer smallaxe raises
   `ValidationError` with the reason.
 - `Imputer.fit` raises `ValidationError` when given neither `numerical_cols` nor
-  `categorical_cols`, as `Scaler` and `Encoder` already did for empty input.
+  `categorical_cols`, as `Scaler` and `Encoder` already did for empty input. A `Pipeline`
+  fitted with no columns leaves its `Imputer` unfitted and passes the data through.
 - `Imputer` `most_frequent` ties go to the smallest value (by its string form), so the
   fill value no longer depends on partitioning. Categorical fill values are stored as
   Spark's string form of the value (`"3"`, `"true"`).
 - `Scaler.fit` raises `ValidationError` naming the column and its type when an input
-  column is not numeric. This includes **boolean columns, which 0.10 accepted** (and
-  scaled as 0/1); cast them to a numeric type first.
+  column is neither numeric nor boolean (booleans scale as 0/1, as before).
 - One-hot `Encoder.transform` raises `ValidationError` when an output column would
   overwrite a column the Encoder does not encode (for example a pass-through column
   `c_a` when `c` has the category `a`). 0.10 overwrote it without a message.

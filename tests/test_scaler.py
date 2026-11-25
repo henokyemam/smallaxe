@@ -263,7 +263,6 @@ class TestScalerErrors:
         "ddl,type_name",
         [
             ("id int, value double, name string", "string"),
-            ("id int, value double, name boolean", "boolean"),
             ("id int, value double, name date", "date"),
         ],
     )
@@ -274,6 +273,12 @@ class TestScalerErrors:
         with pytest.raises(ValidationError, match=f"'name' has type {type_name}"):
             scaler.fit(df, numerical_cols=["value", "name"])
         assert not scaler._is_fitted
+
+    def test_boolean_column_is_scaled_as_zero_one(self, spark_session):
+        """Booleans are features everywhere else in smallaxe, so the Scaler takes them."""
+        df = spark_session.createDataFrame([(1, True), (2, False), (3, True)], "id int, flag boolean")
+        result = Scaler(method="minmax").fit_transform(df, numerical_cols=["flag"])
+        assert [row["flag"] for row in result.orderBy("id").collect()] == [1.0, 0.0, 1.0]
 
     def test_numeric_types_are_accepted(self, spark_session):
         df = spark_session.createDataFrame(

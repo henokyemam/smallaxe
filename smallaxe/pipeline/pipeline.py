@@ -383,6 +383,10 @@ class Pipeline:
         step_type = type(step).__name__
 
         if step_type == "Imputer":
+            if not numerical_cols and not categorical_cols:
+                # Nothing to impute: like a Scaler or Encoder with no columns, the
+                # step is left unfitted and transform passes the data through.
+                return df
             step.fit(df, numerical_cols=numerical_cols, categorical_cols=categorical_cols)
             return step.transform(df)
         elif step_type == "Scaler":
@@ -460,8 +464,9 @@ class Pipeline:
             if self._is_model_step(step):
                 # Skip model steps in transform - use predict instead
                 break
-            else:
-                # Preprocessing step
+            elif getattr(step, "_is_fitted", True):
+                # Preprocessing step. One the pipeline had no columns for was never
+                # fitted (see _fit_preprocessing_step) and passes the data through.
                 current_df = step.transform(current_df)
 
         return current_df

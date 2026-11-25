@@ -19,7 +19,7 @@ from pyspark.ml.feature import (
 )
 from pyspark.ml.functions import vector_to_array
 from pyspark.sql import DataFrame
-from pyspark.sql.types import NumericType
+from pyspark.sql.types import BooleanType, NumericType
 
 from smallaxe import _artifact, _fs
 from smallaxe.exceptions import (
@@ -94,11 +94,12 @@ class Scaler:
                 raise ColumnNotFoundError(column=col, available_columns=available_columns)
 
     def _validate_numeric(self, df: DataFrame, numerical_cols: List[str]) -> None:
-        """Raise ValidationError naming the first input column that is not numeric."""
+        """Raise ValidationError naming the first input column that is not numeric or boolean."""
         types = {field.name: field.dataType for field in df.schema.fields}
         for col in numerical_cols:
             data_type = types[col]
-            if not isinstance(data_type, NumericType):
+            # Booleans scale as 0/1, as VectorAssembler and feature inference treat them.
+            if not isinstance(data_type, (NumericType, BooleanType)):
                 raise ValidationError(
                     f"Scaler can only scale numeric columns, but column '{col}' has type "
                     f"{data_type.simpleString()}. Encode or cast it before scaling."
