@@ -29,7 +29,8 @@ Install with optional algorithm dependencies:
 pip install smallaxe[xgboost]    # XGBoost support
 pip install smallaxe[lightgbm]   # LightGBM support (SynapseML)
 pip install smallaxe[catboost]   # CatBoost support
-pip install smallaxe[all]        # All algorithms
+pip install smallaxe[viz]        # plotly, for the planned visualizations
+pip install smallaxe[all]        # All of the above
 ```
 
 > **Note on optional algorithms.** Random Forest and XGBoost run anywhere PySpark
@@ -309,7 +310,7 @@ export PYSPARK_DRIVER_PYTHON=$(which python)
 
 pytest -q                      # run the test suite
 black . && ruff check .        # format + lint
-mypy smallaxe/                 # type check
+mypy smallaxe                  # type check (strict; settings in pyproject.toml)
 ```
 
 The optional-algorithm and end-to-end Kaggle tests skip automatically when their

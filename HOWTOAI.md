@@ -42,8 +42,8 @@ pytest tests/test_xgboost.py -v
 # Format and lint
 black . && ruff check .
 
-# Type check
-mypy smallaxe/
+# Type check (strict settings in pyproject.toml; CI blocks on it)
+mypy smallaxe
 ```
 
 ## Architecture Decisions to Respect
@@ -53,7 +53,8 @@ mypy smallaxe/
 - **A frozen public API** — semantic versioning from 1.0. Changing a public name or signature changes the `tests/test_public_api.py` snapshot and needs a CHANGELOG entry; a removal is deprecated for at least one minor release first (one `DeprecationWarning` naming the replacement, attributed with `smallaxe._warn.caller_stacklevel()`) and happens only in a major release
 - **smallaxe exceptions for user errors** — public methods check arguments up front (`smallaxe/_checks.py`) and raise `ValidationError`, `ColumnNotFoundError`, `ModelNotFittedError` or `ConfigurationError`, never a raw `ValueError` / `KeyError` / `TypeError`
 - **PySpark MLlib under the hood** — models wrap Spark's native ML pipeline internally
-- **Optional algorithm dependencies** — XGBoost, LightGBM, CatBoost are extras, not core deps
+- **Optional algorithm dependencies** — XGBoost, LightGBM, CatBoost (and plotly, `viz`) are extras, not core deps; the hard dependencies are exactly what smallaxe imports at runtime
+- **Typed package** — smallaxe ships `py.typed`; `mypy smallaxe` passes under the strict settings in `pyproject.toml`. Fix a type error by correcting the type; a `# type: ignore` needs an error code and a reason
 - **Session-scoped SparkSession in tests** — expensive to create, shared across all tests in a run
 
 ## Pitfalls
