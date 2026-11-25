@@ -12,6 +12,8 @@
   Python 3.8 with PySpark 3.3.0 and every other runtime dependency at its declared
   floor. Python 3.12 is tested with PySpark 3.5 and Java 17 only: no PySpark 3.x
   release declares Python 3.12, but Databricks Runtime 16.4 LTS ships that combination.
+  On Python 3.12 smallaxe now depends on `setuptools`, which supplies the `distutils`
+  module PySpark 3.5 imports.
   The classifiers no longer claim "OS Independent" (now "POSIX :: Linux"). README and AGENTS.md state the same matrix. A release now reaches
   PyPI only after this CI passes on the release commit and the built version equals
   the release tag.

@@ -199,7 +199,8 @@ CI tests every pair below on Linux with Java 11, plus Java 8 with PySpark 3.3 an
 Java 17 with PySpark 3.5 (both on Python 3.10). The pairs are the ones PySpark itself
 supports, per the Python classifiers of each PySpark release, plus Python 3.12 with
 PySpark 3.5 and Java 17. No PySpark 3.x release declares Python 3.12; that combination
-is tested because Databricks Runtime 16.4 LTS ships it.
+is tested because Databricks Runtime 16.4 LTS ships it. PySpark 3.5 imports
+`distutils`, which Python 3.12 removed, so smallaxe installs `setuptools` there.
 
 | PySpark | Python |
 |---------|--------|

@@ -50,7 +50,8 @@ jobs:
   # with the oldest Spark line and Java 17 with the newest.
   test:
     name: test (py${{ matrix.python-version }}, spark ${{ matrix.spark-version }}, java ${{ matrix.java-version }})
-    runs-on: ubuntu-latest
+    # ubuntu-latest (26.04) has no Python 3.8 or 3.9 build, so those legs use 22.04.
+    runs-on: ${{ (matrix.python-version == '3.8' || matrix.python-version == '3.9') && 'ubuntu-22.04' || 'ubuntu-latest' }}
     strategy:
       fail-fast: false
       matrix:
@@ -102,7 +103,8 @@ jobs:
   # supported Python and the oldest PySpark release.
   test-lowest:
     name: test (lowest versions, py3.8, pyspark 3.3.0, java 11)
-    runs-on: ubuntu-latest
+    # ubuntu-latest (26.04) has no Python 3.8 build.
+    runs-on: ubuntu-22.04
 
     steps:
       - uses: actions/checkout@v4
