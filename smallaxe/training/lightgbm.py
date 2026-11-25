@@ -83,7 +83,12 @@ ALGORITHM = Algorithm(
     ),
 )
 
-LIGHTGBM_AVAILABLE = ALGORITHM.available()
+
+def __getattr__(name: str) -> Any:
+    """``LIGHTGBM_AVAILABLE``, probed on access so importing this module imports no SynapseML."""
+    if name == "LIGHTGBM_AVAILABLE":
+        return ALGORITHM.available()
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 class LightGBMRegressor(Regressor):

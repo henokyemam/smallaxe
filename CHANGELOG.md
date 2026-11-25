@@ -42,6 +42,19 @@
   random split seed, so trials were compared on different folds despite the docstring.
   The search now draws one split seed up front and every trial splits with it (the
   trials' `metadata["split_seed"]` is identical). Unseeded estimators stay unseeded.
+- **`import smallaxe.training` no longer imports the optional algorithm packages.**
+  Computing `XGBOOST_AVAILABLE`, `LIGHTGBM_AVAILABLE`, and `CATBOOST_AVAILABLE` at import
+  imported `xgboost.spark` (and with it scikit-learn), `synapse.ml.lightgbm`, and
+  `catboost_spark`, and the last two patch `pyspark.ml.wrapper` for the whole process.
+  The three names are still importable from their modules, but are now probed when
+  read. The packages are imported when an algorithm is first checked or used; the first
+  time either JVM package is needed, `catboost_spark` is imported before
+  `synapse.ml.lightgbm` (each skipped if missing), the order the CatBoost compatibility
+  shim needs, whichever algorithm comes first.
+- **A broken optional install is reported as such.** When an algorithm's package is
+  present but fails to import (for example a missing dependency of its own),
+  `DependencyError` now says it could not be imported and includes the original error,
+  instead of claiming the package is not installed.
 
 ## 0.10.1 (unreleased)
 

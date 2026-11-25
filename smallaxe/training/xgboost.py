@@ -53,7 +53,12 @@ ALGORITHM = Algorithm(
     accepts_missing=True,
 )
 
-XGBOOST_AVAILABLE = ALGORITHM.available()
+
+def __getattr__(name: str) -> Any:
+    """``XGBOOST_AVAILABLE``, probed on access so importing this module imports no xgboost."""
+    if name == "XGBOOST_AVAILABLE":
+        return ALGORITHM.available()
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 class XGBoostRegressor(Regressor):
