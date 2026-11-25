@@ -35,7 +35,15 @@
   fill value no longer depends on partitioning. Categorical fill values are stored as
   Spark's string form of the value (`"3"`, `"true"`).
 - `Scaler.fit` raises `ValidationError` naming the column and its type when an input
-  column is not numeric.
+  column is not numeric. This includes **boolean columns, which 0.10 accepted** (and
+  scaled as 0/1); cast them to a numeric type first.
+- One-hot `Encoder.transform` raises `ValidationError` when an output column would
+  overwrite a column the Encoder does not encode (for example a pass-through column
+  `c_a` when `c` has the category `a`). 0.10 overwrote it without a message.
+- An `Encoder` pickled by 0.10 (as `Pipeline.save` stored it, `step_N_encoder.pkl`)
+  still loads. Unpickling adds the `__UNKNOWN__` entry to every mapping without an
+  `__OTHER__` bucket, so seen values and nulls encode as before and unseen values follow
+  the new rule above instead of becoming null.
 
 ### Added
 
@@ -48,16 +56,26 @@
   `Encoder.fit` built category keys with Python's `str()` (`"True"`) while `transform`
   looked them up with Spark's cast (`"true"`), so those categories never matched
   (label encoding returned null for every such value).
-- **`Imputer` imputes integer, boolean and other non-string categorical columns.**
-  `DataFrame.fillna` with a string skips non-string columns, so their nulls were kept
-  without a message. The fill is now cast to the column's type, and `fit` raises
-  `ValidationError` when it cannot be (for example `categorical_strategy="UNKNOWN"` on
-  an integer column).
+- **`Imputer` no longer leaves a non-string categorical column unfilled without a
+  message.** 0.10 cast the fill to the column's type, and when the cast failed
+  (`categorical_strategy="UNKNOWN"` on an integer column, `"-1"` on a boolean or date
+  column, `most_frequent` on an all-null integer column) the nulls stayed null. When the
+  cast lost the value (`"1.5"` on an integer column) it filled `1`. `fit` now raises
+  `ValidationError` in both cases; a fill that fits the column's type works as before.
+- `Imputer` `most_frequent` on a float or double categorical column no longer counts
+  NaN as a value (it could pick NaN as the fill). NaN in such a column is filled like
+  null, as 0.10 did and as the numerical strategies do.
 - **`Scaler` leaves user columns named `_assembled_features`, `_scaled_features` or
   `_scaled_array` untouched.** Its working columns now get names that no input column
   uses; before, such a user column made `fit` fail or was dropped by `transform`.
+- One-hot `Encoder.transform` keeps an output column whose name equals another encoded
+  input column (with `categorical_cols=["c", "c_a"]`, `c`'s category `a` gives `c_a`).
+  0.10 dropped it together with the input `c_a`, so rows with `c = "a"` encoded like a
+  null.
 - `Imputer.load`, `Scaler.load` and `Encoder.load` raise `ValidationError` instead of
-  `FileNotFoundError` / `KeyError` for missing or incomplete artifacts.
+  `FileNotFoundError` / `KeyError` / `TypeError` for missing, incomplete or corrupted
+  artifacts, including a `metadata.json` edited after saving whose Hadoop `.crc` no
+  longer matches. Errors that are not Spark's own load failures are no longer wrapped.
 - `Imputer` and `Scaler` metadata was written with local `open()`, so `save` / `load`
   on `dbfs:/` or other non-local paths wrote the metadata somewhere other than the
   Spark model.
