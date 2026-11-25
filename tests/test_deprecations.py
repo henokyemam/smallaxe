@@ -702,3 +702,45 @@ def test_smallaxe_does_not_trigger_its_own_deprecations(spark_session, tmp_path)
         loaded.predict_proba(churn)
         loaded.evaluate(churn)
         smallaxe.load(str(tmp_path / "pipeline"))
+
+
+# --- 8. The deprecations of earlier releases use the same wording ---------------------
+
+
+@pytest.mark.parametrize(
+    "call, fragment",
+    [
+        (lambda smallaxe: smallaxe.set_cache_strategy("auto"), "cache_strategy="),
+        (lambda smallaxe: smallaxe.get_cache_strategy(), "fit()"),
+        (lambda smallaxe: smallaxe.set_spark_session(None), "session of the DataFrame"),
+        (lambda smallaxe: smallaxe.get_spark_session(), "sparkSession"),
+    ],
+    ids=["set_cache_strategy", "get_cache_strategy", "set_spark_session", "get_spark_session"],
+)
+def test_deprecated_globals_say_removed_in_smallaxe_1_0(call, fragment):
+    import smallaxe
+
+    with warns_once(fragment):
+        call(smallaxe)
+
+
+@pytest.mark.parametrize(
+    "legacy",
+    [
+        "RandomForestRegressor",
+        "RandomForestClassifier",
+        "XGBoostRegressor",
+        "XGBoostClassifier",
+    ],
+)
+def test_class_aliases_name_the_module_function(legacy):
+    from smallaxe import training
+
+    algorithm_name = {"RandomForest": "random_forest", "XGBoost": "xgboost"}[
+        legacy.replace("Regressor", "").replace("Classifier", "")
+    ]
+    if not _installed(algorithm_name):
+        pytest.skip(f"{algorithm_name} is not installed")
+    module = "regressors" if legacy.endswith("Regressor") else "classifiers"
+    with warns_once(f"{legacy} is deprecated", f"{module}.{algorithm_name}()"):
+        getattr(training, legacy)()
