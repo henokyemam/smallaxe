@@ -393,3 +393,30 @@ def test_smallaxe_emits_no_deprecation_warning(spark_session, tmp_path):
         )
     ]
     assert ours == []
+
+
+class TestDeprecationWarningFilter:
+    """pyproject.toml makes a DeprecationWarning raised from smallaxe's modules an error in
+    the test suite; one raised elsewhere (a third-party package) stays a warning."""
+
+    def test_deprecation_warning_from_smallaxe_is_an_error(self):
+        with pytest.raises(DeprecationWarning, match="old spelling"):
+            warnings.warn_explicit(
+                "old spelling", DeprecationWarning, "base.py", 1, module="smallaxe.training.base"
+            )
+
+    def test_deprecation_warning_from_a_third_party_module_stays_a_warning(self):
+        with warnings.catch_warnings(record=True) as record:
+            warnings.warn_explicit(
+                "old spelling", DeprecationWarning, "functions.py", 1, module="pyspark.sql"
+            )
+
+        assert [str(w.message) for w in record] == ["old spelling"]
+
+    def test_module_name_merely_starting_with_smallaxe_stays_a_warning(self):
+        with warnings.catch_warnings(record=True) as record:
+            warnings.warn_explicit(
+                "old spelling", DeprecationWarning, "x.py", 1, module="smallaxe_plugin"
+            )
+
+        assert [str(w.message) for w in record] == ["old spelling"]
