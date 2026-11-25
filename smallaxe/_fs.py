@@ -13,7 +13,7 @@ optional dependencies.
 """
 
 import json
-from typing import Any, Dict, Tuple, Type
+from typing import Any, Dict, List, Tuple, Type
 
 
 def _spark() -> Any:
@@ -63,6 +63,24 @@ def delete(path: str, recursive: bool = False) -> None:
     """Delete ``path`` (with its Hadoop checksum file) on the resolved filesystem, if present."""
     _jvm, fs, hpath = _fs_and_path(path)
     fs.delete(hpath, recursive)
+
+
+def list_names(path: str) -> List[str]:
+    """Names of the entries directly inside the directory ``path`` (Hadoop ``.crc`` files too)."""
+    _jvm, fs, hpath = _fs_and_path(path)
+    return [str(status.getPath().getName()) for status in fs.listStatus(hpath)]
+
+
+def read_bytes(path: str) -> bytes:
+    """Read the whole file at ``path`` on the resolved filesystem."""
+    jvm, fs, hpath = _fs_and_path(path)
+    stream = fs.open(hpath)
+    try:
+        buffer = jvm.java.io.ByteArrayOutputStream()
+        jvm.org.apache.hadoop.io.IOUtils.copyBytes(stream, buffer, 65536, False)
+        return bytes(buffer.toByteArray())
+    finally:
+        stream.close()
 
 
 def jvm_error_types() -> Tuple[Type[BaseException], ...]:

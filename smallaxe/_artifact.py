@@ -80,6 +80,51 @@ def is_unversioned(metadata: Dict[str, Any]) -> bool:
     return "format_version" not in metadata and "kind" not in metadata
 
 
+# Preprocessing artifacts written by smallaxe 0.10 and earlier have no metadata.json, only
+# one of these files.
+LEGACY_STEP_FILES = (("imputer", "imputer_metadata.json"), ("scaler", "scaler_metadata.json"))
+
+
+def saved_kind(path: str) -> str:
+    """The kind of smallaxe artifact at ``path``, read from its files, without loading it.
+
+    An artifact with the header reports its ``kind``. Unversioned layouts (smallaxe 0.10
+    and earlier) are recognised too: a ``metadata.json`` with ``step_names`` is a
+    pipeline, any other unversioned ``metadata.json`` a model, and a directory holding
+    only ``imputer_metadata.json`` / ``scaler_metadata.json`` an imputer / scaler.
+
+    Args:
+        path: The artifact directory.
+
+    Returns:
+        The kind (``"model"``, ``"pipeline"``, ``"imputer"``, ...), as recorded.
+
+    Raises:
+        ValidationError: If the path does not exist, holds no smallaxe artifact, or its
+            ``metadata.json`` cannot be read or names no kind.
+    """
+    if not path or not _fs.exists(path):
+        raise ValidationError(f"Cannot load artifact: path {path!r} does not exist.")
+    metadata_path = _fs.join(path, METADATA_FILE)
+    if _fs.exists(metadata_path):
+        metadata = read_json(metadata_path, "artifact")
+        if not isinstance(metadata, dict):
+            raise ValidationError(f"Cannot load artifact: {metadata_path!r} is not a JSON object.")
+        if is_unversioned(metadata):
+            return "pipeline" if "step_names" in metadata else "model"
+        kind = metadata.get("kind")
+        if not isinstance(kind, str):
+            raise ValidationError(f"Cannot load artifact: {metadata_path!r} names no 'kind'.")
+        return kind
+    for kind, legacy_file in LEGACY_STEP_FILES:
+        if _fs.exists(_fs.join(path, legacy_file)):
+            return kind
+    raise ValidationError(
+        f"Cannot load artifact: {path!r} is not a smallaxe artifact (expected {METADATA_FILE} "
+        "in it)."
+    )
+
+
 def read_metadata(path: str, kind: str, allow_unversioned: bool = False) -> Dict[str, Any]:
     """Read ``<path>/metadata.json`` and check it holds a readable ``kind`` artifact.
 
