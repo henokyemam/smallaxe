@@ -75,16 +75,30 @@ def jvm_error_summary(exc: BaseException) -> str:
     return text.splitlines()[0] if text else type(exc).__name__
 
 
-def read_metadata(path: str, kind: str) -> Dict[str, Any]:
+def is_unversioned(metadata: Dict[str, Any]) -> bool:
+    """Whether ``metadata`` predates the header: it has neither ``format_version`` nor ``kind``."""
+    return "format_version" not in metadata and "kind" not in metadata
+
+
+def read_metadata(path: str, kind: str, allow_unversioned: bool = False) -> Dict[str, Any]:
     """Read ``<path>/metadata.json`` and check it holds a readable ``kind`` artifact.
+
+    Args:
+        path: The artifact directory.
+        kind: The kind of artifact expected (``"model"``, ``"imputer"``, ...).
+        allow_unversioned: Accept a ``metadata.json`` written before the header existed
+            (neither ``format_version`` nor ``kind``, as every model artifact of smallaxe
+            0.10 and earlier) and return it as is; the caller validates its keys. Only for
+            kinds that have such legacy artifacts. A file with either header key is checked
+            in full whatever this says.
 
     Returns:
         The whole metadata dict, header keys included.
 
     Raises:
         ValidationError: If the path or its ``metadata.json`` does not exist, the file
-            cannot be read or is not a JSON object, ``kind`` differs, or ``format_version`` is missing or newer
-            than :data:`FORMAT_VERSION`.
+            cannot be read or is not a JSON object, ``kind`` differs, or ``format_version``
+            is missing or newer than :data:`FORMAT_VERSION`.
     """
     if not path or not _fs.exists(path):
         raise ValidationError(f"Cannot load {kind}: path {path!r} does not exist.")
@@ -97,6 +111,8 @@ def read_metadata(path: str, kind: str) -> Dict[str, Any]:
     metadata = read_json(metadata_path, kind)
     if not isinstance(metadata, dict):
         raise ValidationError(f"Cannot load {kind}: {metadata_path!r} is not a JSON object.")
+    if allow_unversioned and is_unversioned(metadata):
+        return metadata
 
     saved_kind = metadata.get("kind")
     if saved_kind != kind:

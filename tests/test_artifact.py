@@ -148,3 +148,48 @@ class TestReadMetadata:
         (tmp_path / "a" / "metadata.json").write_text("[1, 2]")
         with pytest.raises(ValidationError, match="JSON object"):
             _artifact.read_metadata(str(tmp_path / "a"), "encoder")
+
+
+class TestReadUnversionedMetadata:
+    """Kinds that had artifacts before format_version existed opt in to reading them."""
+
+    def test_unversioned_metadata_is_returned_as_is(self, tmp_path):
+        document = {"task": "binary", "params": {}, "__class__": "Classifier"}
+        _write_raw(tmp_path / "a", document)
+
+        metadata = _artifact.read_metadata(str(tmp_path / "a"), "model", allow_unversioned=True)
+
+        assert metadata == document
+
+    def test_unversioned_metadata_is_rejected_by_default(self, tmp_path):
+        _write_raw(tmp_path / "a", {"task": "binary"})
+        with pytest.raises(ValidationError):
+            _artifact.read_metadata(str(tmp_path / "a"), "model")
+
+    def test_versioned_wrong_kind_still_raises(self, tmp_path):
+        path = str(tmp_path / "a")
+        _artifact.write_metadata(path, "imputer", {})
+
+        with pytest.raises(ValidationError, match="'imputer' artifact, not a 'model'"):
+            _artifact.read_metadata(path, "model", allow_unversioned=True)
+
+    def test_versioned_newer_format_still_raises(self, tmp_path):
+        _write_raw(
+            tmp_path / "a", {"format_version": 999, "kind": "model", "smallaxe_version": "9.0"}
+        )
+        with pytest.raises(ValidationError, match="newer smallaxe"):
+            _artifact.read_metadata(str(tmp_path / "a"), "model", allow_unversioned=True)
+
+    @pytest.mark.parametrize(
+        "document",
+        [{"kind": "model"}, {"format_version": 1}, {"format_version": "1", "kind": "model"}],
+        ids=["kind-only", "format-version-only", "string-format-version"],
+    )
+    def test_half_versioned_metadata_still_raises(self, tmp_path, document):
+        _write_raw(tmp_path / "a", document)
+        with pytest.raises(ValidationError):
+            _artifact.read_metadata(str(tmp_path / "a"), "model", allow_unversioned=True)
+
+    def test_missing_path_still_raises(self, tmp_path):
+        with pytest.raises(ValidationError, match="does not exist"):
+            _artifact.read_metadata(str(tmp_path / "nope"), "model", allow_unversioned=True)
