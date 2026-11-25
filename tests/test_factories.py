@@ -1,7 +1,4 @@
-"""The regressors / classifiers functions: construction, availability, and loading.
-
-The deprecated Regressors / Classifiers classes are tested in test_deprecations.py.
-"""
+"""The regressors / classifiers functions: construction, availability, and loading."""
 
 import os
 import sys
@@ -149,7 +146,7 @@ class TestRegressorsFactory:
             save_path = os.path.join(tmpdir, "model")
             model.save(save_path)
 
-            with pytest.raises(ValidationError, match="not a supported regressor"):
+            with pytest.raises(ValidationError, match="Cannot load a regressor"):
                 regressors.load(save_path)
 
 
@@ -247,7 +244,7 @@ class TestClassifiersFactory:
             save_path = os.path.join(tmpdir, "model")
             model.save(save_path)
 
-            with pytest.raises(ValidationError, match="not a supported classifier"):
+            with pytest.raises(ValidationError, match="Cannot load a classifier"):
                 classifiers.load(save_path)
 
 
@@ -318,3 +315,39 @@ class TestFactoryIntegration:
                 regressors.load(clf_path)
             with pytest.raises(ValidationError):
                 classifiers.load(reg_path)
+
+
+def _documented_params(doc):
+    """``[(name, description, default text)]`` from a factory docstring's parameter list."""
+    import re
+
+    lines = doc.splitlines()
+    start = next(i for i, line in enumerate(lines) if "The parameters are:" in line)
+    entries = []
+    for line in lines[start + 1 :]:
+        text = line.strip()
+        if text.startswith("Returns:"):
+            break
+        if text.startswith("- "):
+            entries.append(text[2:])
+        elif text and entries:
+            entries[-1] += " " + text
+    parsed = []
+    for entry in entries:
+        match = re.fullmatch(r"(\w+): (.*) \(default: (.*)\)", entry)
+        assert match, entry
+        parsed.append(match.groups())
+    return parsed
+
+
+@pytest.mark.parametrize("module", [regressors, classifiers], ids=["regressors", "classifiers"])
+@pytest.mark.parametrize("name", ["random_forest", "xgboost", "lightgbm", "catboost"])
+def test_factory_docstring_lists_the_param_table(module, name):
+    """Each factory documents exactly its algorithm's parameters, descriptions and defaults."""
+    from smallaxe.training import algorithm
+
+    task = "simple_regression" if module is regressors else "binary"
+    expected = [
+        (p.name, p.description, repr(p.default)) for p in algorithm.get(name).visible_params(task)
+    ]
+    assert _documented_params(getattr(module, name).__doc__) == expected

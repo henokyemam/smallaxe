@@ -8,6 +8,8 @@ from pyspark.sql import DataFrame
 import smallaxe
 from smallaxe.exceptions import ModelNotFittedError
 
+__all__ = ["MetadataMixin"]
+
 
 class MetadataMixin:
     """Mixin providing metadata capture and storage functionality.

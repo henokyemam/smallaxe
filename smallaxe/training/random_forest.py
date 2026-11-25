@@ -3,7 +3,8 @@
 from typing import Any, List, Optional
 
 from smallaxe.training.algorithm import Algorithm, Param
-from smallaxe.training.base import Classifier, Regressor, _warn_deprecated_alias
+
+__all__ = ["ALGORITHM"]
 
 
 def _importances(model: Any, n_features: int) -> Optional[List[float]]:
@@ -60,23 +61,3 @@ ALGORITHM = Algorithm(
     },
     importances=_importances,
 )
-
-
-class RandomForestRegressor(Regressor):
-    """Deprecated alias; use ``regressors.random_forest()``."""
-
-    _alias_algorithm = "random_forest"
-
-    def __init__(self, task: str = "simple_regression") -> None:
-        _warn_deprecated_alias("RandomForestRegressor", "regressors.random_forest()")
-        super().__init__(ALGORITHM, task)
-
-
-class RandomForestClassifier(Classifier):
-    """Deprecated alias; use ``classifiers.random_forest()``."""
-
-    _alias_algorithm = "random_forest"
-
-    def __init__(self, task: str = "binary") -> None:
-        _warn_deprecated_alias("RandomForestClassifier", "classifiers.random_forest()")
-        super().__init__(ALGORITHM, task)

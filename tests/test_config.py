@@ -51,8 +51,21 @@ class TestVerbosity:
 
     def test_set_verbosity_none_raises_error(self):
         """Test that None verbosity raises ConfigurationError."""
-        with pytest.raises(ConfigurationError):
+        with pytest.raises(ConfigurationError) as exc_info:
             smallaxe.set_verbosity(None)
+
+        assert "None" in str(exc_info.value)
+        assert "verbosity" in str(exc_info.value)
+
+    @pytest.mark.parametrize("value", ["", 0, None])
+    def test_set_verbosity_falsy_value_names_setting_and_value(self, value):
+        """A falsy invalid value still gets the message naming the setting and value."""
+        with pytest.raises(ConfigurationError) as exc_info:
+            smallaxe.set_verbosity(value)
+
+        message = str(exc_info.value)
+        assert message.startswith(f"Invalid value {value!r} for setting 'verbosity'.")
+        assert "Allowed values: ['quiet', 'normal', 'verbose']" in message
 
 
 class TestVerbosityContextManager:
@@ -106,22 +119,6 @@ class TestVerbosityContextManager:
         assert smallaxe.get_verbosity() == "normal"
 
 
-class TestSparkSession:
-    """set_spark_session / get_spark_session are deprecated and warn."""
-
-    def test_get_spark_session_default(self):
-        with pytest.warns(DeprecationWarning):
-            assert smallaxe.get_spark_session() is None
-
-    def test_set_spark_session_warns_and_stores(self, spark_session):
-        with pytest.warns(DeprecationWarning, match="no effect"):
-            smallaxe.set_spark_session(spark_session)
-        with pytest.warns(DeprecationWarning):
-            assert smallaxe.get_spark_session() is spark_session
-        with pytest.warns(DeprecationWarning):
-            smallaxe.set_spark_session(None)
-
-
 class TestSeed:
     """Tests for random seed configuration."""
 
@@ -162,33 +159,19 @@ class TestSeed:
         with pytest.raises(ConfigurationError):
             smallaxe.set_seed("42")
 
+    @pytest.mark.parametrize("value", [True, False])
+    def test_set_seed_bool_raises_error(self, value):
+        """A bool is an int to Python, but never a seed."""
+        with pytest.raises(ConfigurationError, match="bool"):
+            smallaxe.set_seed(value)
+        assert smallaxe.get_seed() is None
+
     def test_set_seed_none_resets_seed(self):
         """Test that None seed resets the seed (valid behavior)."""
         smallaxe.set_seed(42)
         assert smallaxe.get_seed() == 42
         smallaxe.set_seed(None)
         assert smallaxe.get_seed() is None
-
-
-class TestCacheStrategy:
-    """set_cache_strategy / get_cache_strategy are deprecated and warn."""
-
-    def test_get_cache_strategy_default(self):
-        with pytest.warns(DeprecationWarning):
-            assert smallaxe.get_cache_strategy() == "auto"
-
-    def test_set_cache_strategy_warns_and_stores(self):
-        with pytest.warns(DeprecationWarning, match="no effect"):
-            smallaxe.set_cache_strategy("never")
-        with pytest.warns(DeprecationWarning):
-            assert smallaxe.get_cache_strategy() == "never"
-
-    def test_set_cache_strategy_invalid_raises_error(self):
-        with pytest.warns(DeprecationWarning), pytest.raises(ConfigurationError) as exc_info:
-            smallaxe.set_cache_strategy("invalid")
-
-        assert exc_info.value.setting == "cache_strategy"
-        assert exc_info.value.value == "invalid"
 
 
 class TestConfigReset:
@@ -199,9 +182,6 @@ class TestConfigReset:
         # Change all settings
         smallaxe.set_verbosity("quiet")
         smallaxe.set_seed(42)
-        with pytest.warns(DeprecationWarning):
-            smallaxe.set_cache_strategy("never")
-            smallaxe.set_spark_session("mock")
 
         # Reset
         _config.reset()
@@ -209,5 +189,3 @@ class TestConfigReset:
         # Verify defaults
         assert smallaxe.get_verbosity() == "normal"
         assert smallaxe.get_seed() is None
-        assert _config._cache_strategy == "auto"
-        assert _config._spark_session is None

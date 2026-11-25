@@ -136,13 +136,6 @@ def test_vector_columns_are_left_out_of_the_hash(spark_session):
     assert df.select(_split_hash(df, 1).alias("h")).count() == 10
 
 
-def test_stratified_arguments_still_validate(rows):
-    with pytest.raises(Exception, match="label_col must be specified"):
-        _Splitter()._train_test_split(rows, stratified=True)
-    with pytest.raises(Exception, match="label_col must be specified"):
-        list(_Splitter()._kfold_split(rows, stratified=True))
-
-
 def test_fit_accepts_fold_key(rows):
     from smallaxe.training import regressors
 

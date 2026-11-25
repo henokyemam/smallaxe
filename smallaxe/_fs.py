@@ -15,6 +15,18 @@ optional dependencies.
 import json
 from typing import Any, Dict, List, Tuple, Type
 
+__all__ = [
+    "join",
+    "exists",
+    "makedirs",
+    "delete",
+    "list_names",
+    "read_bytes",
+    "jvm_error_types",
+    "write_json",
+    "read_json",
+]
+
 
 def _spark() -> Any:
     """Return the active SparkSession (models are always fit through Spark)."""

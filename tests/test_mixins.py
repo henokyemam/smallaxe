@@ -79,26 +79,40 @@ class ConcreteMetadataMixin(MetadataMixin):
 
 
 class ConcreteSparkModelMixin(SparkModelMixin):
-    """Concrete implementation of SparkModelMixin for regression testing."""
+    """Concrete implementation of SparkModelMixin for regression testing.
+
+    Supplies the two abstract methods the way ``Model`` does: assemble the features and
+    fit an MLlib estimator; read MLlib's importances.
+    """
 
     def __init__(self):
         self._spark_model = None
         self._feature_cols = None
         self._label_col = None
 
-    def _create_spark_estimator(self, **kwargs) -> Any:
+    def _estimator(self) -> Any:
         return SparkRFRegressor(numTrees=5, maxDepth=3)
 
+    def _fit_spark_model(self, dataframe, label_col, feature_cols) -> Any:
+        self._features_col = self.FEATURES_COL
+        assembled = self._assemble_features(dataframe, feature_cols)
+        estimator = self._estimator()
+        estimator.setLabelCol(label_col).setFeaturesCol(self.FEATURES_COL)
+        self._feature_cols = feature_cols
+        self._label_col = label_col
+        self._spark_model = estimator.fit(assembled)
+        return self._spark_model
 
-class ConcreteSparkClassifierMixin(SparkModelMixin):
+    def _get_feature_importance(self):
+        if self._spark_model is None:
+            raise ModelNotFittedError("Model has not been fitted.")
+        return list(self._spark_model.featureImportances.toArray())
+
+
+class ConcreteSparkClassifierMixin(ConcreteSparkModelMixin):
     """Concrete implementation of SparkModelMixin for classification testing."""
 
-    def __init__(self):
-        self._spark_model = None
-        self._feature_cols = None
-        self._label_col = None
-
-    def _create_spark_estimator(self, **kwargs) -> Any:
+    def _estimator(self) -> Any:
         return SparkRFClassifier(numTrees=5, maxDepth=3)
 
 
@@ -346,21 +360,16 @@ class TestValidationMixin:
         with pytest.raises(ValidationError, match="test_size must be between"):
             mixin._train_test_split(regression_df, test_size=1.5)
 
-    def test_train_test_split_stratified_without_label_raises_error(self, classification_df):
-        """Test that stratified split without label_col raises ValidationError."""
+    @pytest.mark.parametrize("test_size", ["0.2", True, None])
+    def test_train_test_split_non_numeric_test_size(self, regression_df, test_size):
         mixin = ConcreteValidationMixin()
-        with pytest.raises(ValidationError, match="label_col must be specified"):
-            mixin._train_test_split(classification_df, stratified=True)
+        with pytest.raises(ValidationError, match="test_size must be between"):
+            mixin._train_test_split(regression_df, test_size=test_size)
 
-    def test_train_test_split_stratified(self, classification_df):
-        """Test stratified train_test_split preserves class distribution."""
+    def test_train_test_split_keeps_both_classes(self, classification_df):
+        """The content hash is label-independent: both splits hold both classes."""
         mixin = ConcreteValidationMixin()
-        train_df, test_df = mixin._train_test_split(
-            classification_df,
-            test_size=0.3,
-            stratified=True,
-            label_col="label",
-        )
+        train_df, test_df = mixin._train_test_split(classification_df, test_size=0.3, seed=1)
 
         # Both splits should have both classes
         train_classes = [r["label"] for r in train_df.select("label").distinct().collect()]
@@ -384,26 +393,15 @@ class TestValidationMixin:
     def test_kfold_split_invalid_n_folds(self, regression_df):
         """Test that n_folds < 2 raises ValidationError."""
         mixin = ConcreteValidationMixin()
-        with pytest.raises(ValidationError, match="n_folds must be at least 2"):
+        with pytest.raises(ValidationError, match="n_folds must be an integer of at least 2"):
             list(mixin._kfold_split(regression_df, n_folds=1))
+        with pytest.raises(ValidationError, match="n_folds must be an integer of at least 2"):
+            list(mixin._kfold_split(regression_df, n_folds=2.5))
 
-    def test_kfold_split_stratified_without_label_raises_error(self, classification_df):
-        """Test that stratified kfold without label_col raises ValidationError."""
+    def test_kfold_split_keeps_both_classes(self, classification_df):
+        """Every fold's training rows hold both classes."""
         mixin = ConcreteValidationMixin()
-        with pytest.raises(ValidationError, match="label_col must be specified"):
-            list(mixin._kfold_split(classification_df, stratified=True))
-
-    def test_kfold_split_stratified(self, classification_df):
-        """Test stratified kfold_split preserves class distribution in each fold."""
-        mixin = ConcreteValidationMixin()
-        folds = list(
-            mixin._kfold_split(
-                classification_df,
-                n_folds=3,
-                stratified=True,
-                label_col="label",
-            )
-        )
+        folds = list(mixin._kfold_split(classification_df, n_folds=3, seed=1))
 
         assert len(folds) == 3
 
