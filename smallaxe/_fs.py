@@ -35,6 +35,18 @@ def _fs_and_path(path: str):
     return jvm, fs, hpath
 
 
+def join(path: str, *parts: str) -> str:
+    """Join ``parts`` onto ``path`` with ``/``.
+
+    Unlike ``os.path.join`` this never uses the driver's path separator, so it is safe
+    for URIs such as ``dbfs:/...``, ``s3://...`` and ``hdfs://...`` as well as local paths.
+    """
+    result = path
+    for part in parts:
+        result = result.rstrip("/") + "/" + part.lstrip("/")
+    return result
+
+
 def exists(path: str) -> bool:
     """Return whether ``path`` exists on the resolved filesystem."""
     _jvm, fs, hpath = _fs_and_path(path)
