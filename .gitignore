@@ -134,3 +134,6 @@ temp/
 
 # Keep the tiny Spark models saved by smallaxe 0.8.1 that the legacy-load tests read.
 !tests/fixtures/**/*.parquet
+
+# Scratch space for local and agent work
+.scratch/
