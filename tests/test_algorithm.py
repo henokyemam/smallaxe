@@ -195,6 +195,25 @@ class TestRecordTranslation:
             assert ("setPredictionCol", "prediction") in estimator.calls
 
 
+class TestXGBoost:
+    @pytest.fixture(autouse=True)
+    def fake(self, monkeypatch):
+        install_fake_modules(monkeypatch, algorithm.get("xgboost"))
+
+    @pytest.mark.parametrize("task", TASKS)
+    def test_n_estimators_is_forwarded_as_n_estimators(self, task):
+        """xgboost.spark reads the round count from n_estimators; num_round is ignored."""
+        kind = Classifier if task in CLASSIFICATION_TASKS else Regressor
+        model = kind("xgboost", task).set_param({"n_estimators": 7})
+        estimator = model._create_spark_estimator(label_col="y")
+        assert estimator.kwargs["n_estimators"] == 7
+        assert "num_round" not in estimator.kwargs
+
+    def test_seed_is_forwarded_as_seed(self):
+        estimator = Regressor("xgboost").set_param({"seed": 3})._create_spark_estimator("y")
+        assert estimator.kwargs["seed"] == 3
+
+
 class TestLightGBM:
     @pytest.fixture(autouse=True)
     def fake(self, monkeypatch):

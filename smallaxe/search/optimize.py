@@ -33,6 +33,7 @@ Example:
     >>> predictions = result.best_model.predict(df)
 """
 
+import math
 from typing import Any, Dict, List, Optional
 
 from pyspark.sql import DataFrame
@@ -42,6 +43,7 @@ from smallaxe.exceptions import DependencyError, ValidationError
 from smallaxe.metrics import TASK_METRICS
 from smallaxe.metrics.classification import MULTICLASS_AVERAGED_METRICS
 from smallaxe.training.base import check_training_data, infer_feature_cols, warn_ignored_cols
+from smallaxe.training.mixins.validation_mixin import resolve_split_seed
 
 # hyperopt is an optional dependency. Guard the import so the module remains
 # importable (and the rest of smallaxe keeps working) when it is absent.
@@ -200,7 +202,13 @@ def _extract_metric(
     metric: str,
     validation: str,
 ) -> float:
-    """Pull a single scalar metric out of a model's ``validation_scores``."""
+    """Pull a single scalar metric out of a model's ``validation_scores``.
+
+    Raises:
+        ValidationError: If the metric is missing, or present but undefined (None or
+            NaN) on this trial's validation data, so the trial fails rather than
+            scoring.
+    """
     if not validation_scores:
         raise ValidationError(
             "No validation scores were produced. Use validation='train_test' or "
@@ -210,6 +218,13 @@ def _extract_metric(
     # k-fold aggregates each metric under a 'mean_<metric>' key.
     key = f"mean_{metric}" if validation == "kfold" else metric
     value = validation_scores.get(key)
+    if key in validation_scores and (value is None or math.isnan(float(value))):
+        where = "every fold" if validation == "kfold" else "the test split"
+        raise ValidationError(
+            f"Metric '{metric}' is undefined on {where} of this trial (looked up as "
+            f"'{key}'), for example AUC on validation data with a single class. "
+            "The trial is not scored."
+        )
     if value is None:
         available = sorted(k for k, v in validation_scores.items() if isinstance(v, (int, float)))
         raise ValidationError(
@@ -278,8 +293,9 @@ def run(
         fold_key: Column whose value alone decides a row's fold or split, as in
             ``fit``. Every trial scores on the same folds either way.
         seed: Seed for hyperopt's sampler and for the data splits. Defaults to
-            the global ``smallaxe.set_seed`` value; with neither, the search is
-            unseeded. Every trial scores on the same folds either way.
+            the global ``smallaxe.set_seed`` value; with neither, the sampler and
+            the estimators are unseeded and one random split seed is drawn for the
+            whole search. Every trial scores on the same folds either way.
         refit: If True (default), refit a final model on the full dataset with
             the best params and expose it as ``best_model``.
         verbose: If True, show hyperopt's progress bar. Defaults to the global
@@ -340,10 +356,20 @@ def run(
         seed = smallaxe.get_seed()
     if verbose is None:
         verbose = smallaxe.get_verbosity() != "quiet"
+    # Every trial must score on the same split. Unseeded, each fit would draw its own
+    # random split seed, so draw one here for all trials. It only decides the split:
+    # unseeded estimators stay unseeded.
+    split_seed = seed if seed is not None else resolve_split_seed()
 
-    def _build_model(overrides: Dict[str, Any]) -> Any:
-        """Create a fresh model with base params overridden by ``overrides``."""
+    def _build_model(overrides: Dict[str, Any], trial: bool = True) -> Any:
+        """Create a fresh model with base params overridden by ``overrides``.
+
+        Only trial models get the search's split seed; ``best_model`` is handed to the
+        caller and must not carry it into later fits.
+        """
         candidate = model.clone()
+        if trial:
+            candidate._split_seed_fallback = split_seed
         candidate.set_param(overrides)
         if (
             seed is not None
@@ -403,6 +429,9 @@ def run(
         fmin_kwargs["early_stop_fn"] = no_progress_loss(early_stopping_rounds)
 
     # Persist once for the whole search; each trial runs with cache_strategy="none".
+    # "kfold" here is deliberate, not the search's validation: the two arguments say
+    # whether one fit reads the data more than once, and a search reads it once per
+    # trial whatever the validation, so it always qualifies (unless already cached).
     dataframe, persisted = model._apply_cache_strategy(dataframe, None, "kfold", True)
     try:
         fmin(**fmin_kwargs)
@@ -444,7 +473,7 @@ def run(
 
     best_model = None
     if refit:
-        best_model = _build_model(best_params)
+        best_model = _build_model(best_params, trial=False)
         best_model.fit(
             dataframe,
             label_col=label_col,

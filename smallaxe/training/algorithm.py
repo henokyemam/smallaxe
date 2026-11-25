@@ -14,6 +14,7 @@ optional package, at import time.
 """
 
 import importlib
+import sys
 from dataclasses import dataclass, field
 from typing import (
     Any,
@@ -123,43 +124,74 @@ class Algorithm:
         """The parameter rows that apply to ``task``, in table order."""
         return tuple(p for p in self.params if task in p.tasks)
 
+    @property
+    def module(self) -> str:
+        """The Python module the estimator classes live in (``"xgboost.spark"``)."""
+        return next(iter(self.estimators.values())).rpartition(".")[0]
+
+    def _import_error(self) -> Optional[ImportError]:
+        """Import the estimator module; return the ImportError if that fails."""
+        try:
+            _import_estimator_module(self, self.module)
+        except ImportError as exc:
+            return exc
+        return None
+
     def available(self) -> bool:
         """Whether the estimator module imports right now.
 
         Re-probed on every call rather than cached, because catboost_spark only
         becomes importable once the JVM package is on the Spark classpath.
         """
-        module_name = next(iter(self.estimators.values())).rpartition(".")[0]
-        try:
-            importlib.import_module(module_name)
-        except ImportError:
-            return False
-        return True
+        return self._import_error() is None
 
     def require(self) -> None:
-        """Raise ``DependencyError`` with an install hint if the algorithm is unavailable."""
-        if self.available():
+        """Raise ``DependencyError`` with an install hint if the algorithm is unavailable.
+
+        A plain "module not found" for the estimator module (or a parent package) says
+        the package is not installed. Any other ImportError, such as a missing
+        dependency of the package, is a broken install, and its text is included.
+        """
+        error = self._import_error()
+        if error is None:
             return
-        if self.dependency is None:
-            raise DependencyError(package=self.name)
-        raise DependencyError(
-            package=self.dependency.package,
-            install_command=self.dependency.install_hint,
-        )
+        package = self.dependency.package if self.dependency is not None else self.name
+        hint = self.dependency.install_hint if self.dependency is not None else None
+        if _is_missing_module(error, self.module):
+            raise DependencyError(package=package, install_command=hint) from error
+        message = f"{package} could not be imported: {type(error).__name__}: {error}."
+        if hint:
+            message += f" Install or repair it with: {hint}"
+        broken = DependencyError(message)
+        broken.package = package
+        broken.install_command = hint
+        raise broken from error
 
     def estimator_class(self, task: str) -> Any:
         """Resolve the Spark estimator class for ``task``."""
-        return resolve(self.estimators[task])
+        return self._resolve(self.estimators[task])
 
     def model_class(self, task: str) -> Any:
         """Resolve the fitted Spark model class for ``task``."""
-        return resolve(self.models[task])
+        return self._resolve(self.models[task])
+
+    def _resolve(self, path: str) -> Any:
+        module_name, _, attr = path.rpartition(".")
+        return getattr(_import_estimator_module(self, module_name), attr)
 
 
 def resolve(path: str) -> Any:
     """Import a dotted ``module.Attribute`` path."""
     module_name, _, attr = path.rpartition(".")
     return getattr(importlib.import_module(module_name), attr)
+
+
+def _is_missing_module(error: ImportError, module_name: str) -> bool:
+    """Whether ``error`` only says ``module_name`` (or a parent package) does not exist."""
+    missing = getattr(error, "name", None)
+    if not isinstance(error, ModuleNotFoundError) or not missing:
+        return False
+    return module_name == missing or module_name.startswith(missing + ".")
 
 
 def estimator_kwargs(
@@ -215,6 +247,35 @@ _MODULES: Dict[str, str] = {
     "lightgbm": "smallaxe.training.lightgbm",
     "catboost": "smallaxe.training.catboost",
 }
+
+
+# Algorithms whose estimator module patches ``pyspark.ml.wrapper`` process-wide when
+# imported, in the order those modules must first be imported. CatBoost's
+# compatibility shim (``catboost._ensure_synapseml_compat``) assumes SynapseML's
+# patches were applied last, so catboost_spark is imported before synapse.ml.lightgbm.
+_PATCHES_PYSPARK: Tuple[str, ...] = ("catboost", "lightgbm")
+
+
+def _import_estimator_module(record: Algorithm, module_name: str) -> Any:
+    """Import one of ``record``'s estimator or model modules, keeping the JVM import order.
+
+    The first time any :data:`_PATCHES_PYSPARK` algorithm's module is about to be
+    imported, every one of those modules is imported first, in that order; each is
+    skipped if it is not installed. Everything else is a plain import.
+
+    Raises:
+        ImportError: If ``module_name`` itself cannot be imported.
+    """
+    if record.name in _PATCHES_PYSPARK and module_name not in sys.modules:
+        for name in _PATCHES_PYSPARK:
+            other = record.module if name == record.name else get(name).module
+            if other in sys.modules:
+                continue
+            try:
+                importlib.import_module(other)
+            except ImportError:
+                pass  # Not installed (or not on the classpath yet); the next may be.
+    return importlib.import_module(module_name)
 
 
 def names() -> List[str]:

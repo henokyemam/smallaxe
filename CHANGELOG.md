@@ -4,6 +4,32 @@
 
 ### Changed
 
+- **Metrics no longer turn a failure into a score.** Every function in
+  `smallaxe.metrics` raises `ValidationError` naming the metric when the DataFrame has
+  no rows; earlier releases returned 0.0, a perfect `mse` / `rmse` / `mae`. `mse`,
+  `rmse`, `mae`, and `r2` no longer catch every exception and return 0.0: Spark's
+  errors propagate. A metric that is undefined on the rows given is `NaN`, not 0.0:
+  `auc_roc` with one class present, `auc_pr` with no positive labels, `mape` when every
+  label is zero, `log_loss` and `multiclass_scores` when no row is complete, and `r2`
+  when Spark's evaluator yields NaN. `r2` keeps scikit-learn's rule for constant labels
+  (1.0 on exact predictions, else 0.0), and per-class precision, recall, and F1 with a
+  zero denominator are still 0.0. An empty validation split or fold now makes `fit`
+  raise instead of scoring it 0.0. `mape` and `log_loss` raise `ValidationError` for a
+  non-numeric column, as the evaluator-based metrics already raised; earlier, without
+  ANSI mode Spark cast the strings to null and they returned 0.0.
+- **Undefined validation scores are None, and k-fold means skip them.** In
+  `validation_scores` (and the saved `metadata.json`) an undefined metric is stored as
+  `None`. A k-fold `mean_` / `std_` uses only the folds where the metric was defined and
+  `fit` emits one `UserWarning` naming each such metric and how many folds were
+  undefined; a metric undefined on every fold has `mean_<metric>` of `None`. Earlier
+  releases averaged the 0.0 scores in. In `optimize.run`, a trial whose metric is
+  undefined fails with an error saying so, instead of competing with a 0.0 score.
+- Binary `auc_roc`, `auc_pr`, and `log_loss` in `validation_scores` are `None` in two
+  cases only: the fitted model writes no probability column, or it was fitted on a
+  training split holding a single class (label 0 only), so its probability vectors have
+  no positive-class entry and the metrics are undefined (counted as undefined folds in a
+  k-fold mean). Any other error while computing them now propagates; earlier releases
+  replaced every error with `None`.
 - **The declared support matrix is now exactly what CI tests.** CI runs every
   (Python, PySpark) pair that PySpark itself supports, per the Python classifiers of
   each PySpark release on PyPI: PySpark 3.3 on Python 3.8 – 3.10, PySpark 3.4 and 3.5
@@ -25,6 +51,46 @@
 ### Added
 
 - The wheel ships `smallaxe/py.typed`, so type checkers read smallaxe's annotations.
+
+### Fixed
+
+- **XGBoost trains the number of rounds `n_estimators` asks for.** Every earlier release
+  sent it to `xgboost.spark` as `num_round`, which that package does not know: it filed
+  the value under `arbitrary_params_dict` and trained its default 100 rounds whatever
+  `n_estimators` said. `n_estimators` is now forwarded under its own name, so models
+  with a non-default `n_estimators` train a different number of trees and give
+  different predictions and validation scores than before. XGBoost models saved by
+  earlier releases keep their 100 trees when loaded; refit them to get the requested
+  number. XGBoost's `seed` was not affected: it reaches the booster and controls
+  training.
+- **Every `optimize.run` trial scores on the same split, even unseeded.** With no
+  `seed` argument, no `set_seed`, and no model `seed`, each trial's `fit` drew its own
+  random split seed, so trials were compared on different folds despite the docstring.
+  The search now draws one split seed up front and every trial splits with it (the
+  trials' `metadata["split_seed"]` is identical). Unseeded estimators stay unseeded, and
+  `best_model` does not keep the search's split seed for later fits.
+- **`import smallaxe.training` no longer imports the optional algorithm packages.**
+  Computing `XGBOOST_AVAILABLE`, `LIGHTGBM_AVAILABLE`, and `CATBOOST_AVAILABLE` at import
+  imported `xgboost.spark` (and with it scikit-learn), `synapse.ml.lightgbm`, and
+  `catboost_spark`, and the last two patch `pyspark.ml.wrapper` for the whole process.
+  The three names are still importable from their modules, but are now probed when
+  read. The packages are imported when an algorithm is first checked or used; the first
+  time either JVM package is needed, `catboost_spark` is imported before
+  `synapse.ml.lightgbm` (each skipped if missing), the order the CatBoost compatibility
+  shim needs, whichever algorithm comes first.
+- **A broken optional install is reported as such.** When an algorithm's package is
+  present but fails to import (for example a missing dependency of its own),
+  `DependencyError` now says it could not be imported and includes the original error,
+  instead of claiming the package is not installed.
+- **Loading a sample dataset no longer reseeds Python's `random` module.**
+  `load_sample_regression` and `load_sample_classification` called `random.seed(seed)`,
+  which also fixed the random split seed of every later unseeded `fit`. They now use
+  their own `random.Random(seed)`; the rows generated for a given seed are unchanged.
+- An error while reading a model's parameters no longer silently leaves the model
+  unseeded during `fit`; it propagates.
+- The Random Forest `max_depth` description said 0 meant unlimited. In PySpark depth 0
+  is a single leaf node, and the maximum is 30.
+
 
 ## 0.10.1 (unreleased)
 

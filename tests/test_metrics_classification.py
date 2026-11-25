@@ -68,9 +68,17 @@ class TestMulticlassMetrics:
         expected = getattr(sk, sk_name)(labels, predictions, average=average, zero_division=0)
         assert metric(df, average=average) == pytest.approx(expected)
 
-    def test_empty_frame(self, spark_session):
+    def test_empty_frame_raises(self, spark_session):
         df = spark_session.createDataFrame([], "label int, predict_label double")
-        assert set(multiclass_scores(df).values()) == {0.0}
+        with pytest.raises(ValidationError, match="multiclass_scores.*no rows"):
+            multiclass_scores(df)
+
+    @pytest.mark.parametrize("metric", [precision, recall, f1_score])
+    @pytest.mark.parametrize("average", ["macro", "weighted"])
+    def test_empty_frame_raises_for_averaged_scores(self, spark_session, metric, average):
+        df = spark_session.createDataFrame([], "label int, predict_label double")
+        with pytest.raises(ValidationError, match=f"{metric.__name__}.*no rows"):
+            metric(df, average=average)
 
     def test_missing_column(self, spark_session):
         df = spark_session.createDataFrame([(0, 1)], ["label", "predict_label"])
@@ -418,18 +426,18 @@ class TestAucRoc:
             auc_roc(probability_df, probability_col="missing_prob")
 
     def test_auc_roc_no_positives(self, spark_session):
-        """Test AUC-ROC returns 0.0 when there are no positive labels."""
+        """AUC-ROC is undefined (NaN) when there are no positive labels."""
         data = [(1, 0, 0.9), (2, 0, 0.1)]
         df = spark_session.createDataFrame(data, ["id", "label", "probability"])
         result = auc_roc(df)
-        assert result == 0.0
+        assert math.isnan(result)
 
     def test_auc_roc_no_negatives(self, spark_session):
-        """Test AUC-ROC returns 0.0 when there are no negative labels."""
+        """AUC-ROC is undefined (NaN) when there are no negative labels."""
         data = [(1, 1, 0.9), (2, 1, 0.1)]
         df = spark_session.createDataFrame(data, ["id", "label", "probability"])
         result = auc_roc(df)
-        assert result == 0.0
+        assert math.isnan(result)
 
     def test_auc_roc_custom_columns(self, custom_columns_df):
         """Test AUC-ROC with custom column names."""
@@ -456,11 +464,17 @@ class TestAucPr:
             auc_pr(probability_df, label_col="bad_col")
 
     def test_auc_pr_no_positives(self, spark_session):
-        """Test AUC-PR returns 0.0 when there are no positive labels."""
+        """AUC-PR is undefined (NaN) when there are no positive labels."""
         data = [(1, 0, 0.9), (2, 0, 0.1)]
         df = spark_session.createDataFrame(data, ["id", "label", "probability"])
         result = auc_pr(df)
-        assert result == 0.0
+        assert math.isnan(result)
+
+    def test_auc_pr_no_negatives_is_defined(self, spark_session):
+        """With only positives, every threshold has precision 1, so AUC-PR is defined."""
+        data = [(1, 1, 0.9), (2, 1, 0.1)]
+        df = spark_session.createDataFrame(data, ["id", "label", "probability"])
+        assert not math.isnan(auc_pr(df))
 
     def test_auc_pr_custom_columns(self, custom_columns_df):
         """Test AUC-PR with custom column names."""
@@ -507,6 +521,14 @@ class TestLogLoss:
         result = log_loss(random_probability_df)
         expected = math.log(2)  # ≈ 0.693
         assert math.isclose(result, expected, rel_tol=1e-4)
+
+    @pytest.mark.parametrize("column", ["label", "probability"])
+    def test_log_loss_non_numeric_column_raises(self, spark_session, column):
+        """A string column is an error, not an 'undefined' NaN from a silent null cast."""
+        df = spark_session.createDataFrame([(1, 0.9), (0, 0.2)], ["label", "probability"])
+        df = df.withColumn(column, df[column].cast("string"))
+        with pytest.raises(ValidationError, match=f"log_loss.*'{column}'.*numeric"):
+            log_loss(df)
 
     def test_log_loss_missing_column_raises_error(self, probability_df):
         """Test that missing column raises ColumnNotFoundError."""
@@ -583,22 +605,30 @@ class TestEdgeCases:
         assert precision(df) == 0.0  # The one positive prediction is wrong
         assert recall(df) == 0.0  # No true positives to find
 
-    def test_empty_dataframe(self, spark_session):
-        """Test metrics with empty DataFrame."""
+    @pytest.mark.parametrize(
+        "metric_fn", [accuracy, precision, recall, f1_score], ids=lambda fn: fn.__name__
+    )
+    def test_empty_dataframe_raises_naming_the_metric(self, spark_session, metric_fn):
         df = spark_session.createDataFrame([], "id: int, label: int, predict_label: int")
+        with pytest.raises(ValidationError, match=f"{metric_fn.__name__}.*no rows"):
+            metric_fn(df)
 
-        assert accuracy(df) == 0.0
-        assert precision(df) == 0.0
-        assert recall(df) == 0.0
-        assert f1_score(df) == 0.0
-
-    def test_empty_probability_df(self, spark_session):
-        """Test probability metrics with empty DataFrame."""
+    @pytest.mark.parametrize("metric_fn", [auc_roc, auc_pr, log_loss], ids=lambda fn: fn.__name__)
+    def test_empty_probability_df_raises_naming_the_metric(self, spark_session, metric_fn):
         df = spark_session.createDataFrame([], "id: int, label: int, probability: double")
+        with pytest.raises(ValidationError, match=f"{metric_fn.__name__}.*no rows"):
+            metric_fn(df)
 
-        assert auc_roc(df) == 0.0
-        assert auc_pr(df) == 0.0
-        assert log_loss(df) == 0.0
+    def test_log_loss_is_nan_when_no_row_has_a_label(self, spark_session):
+        df = spark_session.createDataFrame([(None, 0.4)], "label: int, probability: double")
+        assert math.isnan(log_loss(df))
+
+    def test_evaluator_errors_propagate(self, spark_session):
+        """A label column the evaluator cannot read is an error, not a score."""
+        df = spark_session.createDataFrame([("a", 0.9), ("b", 0.1)], ["label", "probability"])
+        with pytest.raises(Exception) as info:
+            auc_roc(df)
+        assert not isinstance(info.value, ValidationError)
 
     def test_probability_edge_values(self, spark_session):
         """Test log loss with probability values at 0 and 1."""
