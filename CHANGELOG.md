@@ -122,6 +122,9 @@
   `synapse.ml.lightgbm` (each skipped if missing), the order the CatBoost compatibility
   shim needs, whichever algorithm comes first.
 - **A broken optional install is reported as such.** When an algorithm's package is
+- `smallaxe.load_model(path)` loads any saved model, whatever its algorithm, returning the
+  `Regressor` or `Classifier` it was, for artifacts of this and every earlier release.
+  `import smallaxe` still imports no training code; it is imported on the first call.
   present but fails to import (for example a missing dependency of its own),
   `DependencyError` now says it could not be imported and includes the original error,
   instead of claiming the package is not installed.

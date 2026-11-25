@@ -42,6 +42,22 @@ def test_importing_smallaxe_imports_no_optional_package():
     assert json.loads(result.stdout.strip().splitlines()[-1]) == []
 
 
+def test_importing_smallaxe_alone_stays_light():
+    """``smallaxe.load_model`` imports the training package when called, not at import."""
+    code = (
+        "import json, sys\n"
+        "import smallaxe\n"
+        "assert 'load_model' in smallaxe.__all__ and callable(smallaxe.load_model)\n"
+        "print(json.dumps(sorted(m for m in sys.modules if m.split('.')[0] in "
+        "('smallaxe', 'pyspark', 'py4j'))))\n"
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", code], cwd=str(ROOT), capture_output=True, text=True, check=True
+    )
+    loaded = json.loads(result.stdout.strip().splitlines()[-1])
+    assert loaded == ["smallaxe", "smallaxe._config", "smallaxe.exceptions"]
+
+
 @pytest.mark.parametrize(
     "module, flag, name",
     [
