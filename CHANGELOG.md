@@ -1,5 +1,67 @@
 # Changelog
 
+## 0.11.0 (unreleased)
+
+### Changed
+
+- **`Encoder` always has an index for categories it did not see at fit.** If the
+  column has an `__OTHER__` bucket (`handle_rare="other"` with more than
+  `max_categories` levels), unseen values go there as before. Otherwise the mapping
+  ends with a reserved `__UNKNOWN__` entry. Label encoding maps an unseen category to
+  that index instead of null; one-hot encoding no longer fails on it. This holds for
+  every `handle_rare`, including `keep` and `error`. A null input stays distinct:
+  null under label encoding, 0.0 in every one-hot column of the feature. Rows are never
+  dropped, and `transform` does not raise on data values. `category_mappings` includes
+  the bucket entry.
+- **One-hot encoding adds a `{col}_UNKNOWN` column** (last in the column's block)
+  whenever the column has no `{col}_OTHER` column. Other one-hot names are unchanged,
+  except that a category whose name collides with a bucket column or, ignoring case, with
+  another category's column now gets `_{index}` appended instead of overwriting it.
+- **Encoder categories are ranked by count, then by the category string**, so ties no
+  longer depend on partitioning and the same data always gives the same mapping.
+- `Encoder.fit` raises `ValidationError` when a column contains the literal value
+  `__OTHER__` or `__UNKNOWN__`.
+- **`Imputer`, `Scaler` and `Encoder` artifacts are a directory with a versioned
+  `metadata.json`** (`format_version`, `kind`, `smallaxe_version`, the constructor
+  arguments and the fitted state); the Scaler keeps its `spark_model/` next to it. All
+  IO goes through the Hadoop FileSystem layer, so `dbfs:/`, `s3://` and `hdfs://` paths
+  work. Imputer and Scaler artifacts saved by 0.10 and earlier
+  (`imputer_metadata.json` / `scaler_metadata.json`) still load. Loading a missing path,
+  the wrong kind of artifact, or one written by a newer smallaxe raises
+  `ValidationError` with the reason.
+- `Imputer.fit` raises `ValidationError` when given neither `numerical_cols` nor
+  `categorical_cols`, as `Scaler` and `Encoder` already did for empty input.
+- `Imputer` `most_frequent` ties go to the smallest value (by its string form), so the
+  fill value no longer depends on partitioning. Categorical fill values are stored as
+  Spark's string form of the value (`"3"`, `"true"`).
+- `Scaler.fit` raises `ValidationError` naming the column and its type when an input
+  column is not numeric.
+
+### Added
+
+- `Encoder.save(path)` and `Encoder.load(path)`. A fitted Encoder holds only plain data
+  (no Spark models), so it also pickles.
+
+### Fixed
+
+- **Boolean, double, date and other non-string categorical columns encode correctly.**
+  `Encoder.fit` built category keys with Python's `str()` (`"True"`) while `transform`
+  looked them up with Spark's cast (`"true"`), so those categories never matched
+  (label encoding returned null for every such value).
+- **`Imputer` imputes integer, boolean and other non-string categorical columns.**
+  `DataFrame.fillna` with a string skips non-string columns, so their nulls were kept
+  without a message. The fill is now cast to the column's type, and `fit` raises
+  `ValidationError` when it cannot be (for example `categorical_strategy="UNKNOWN"` on
+  an integer column).
+- **`Scaler` leaves user columns named `_assembled_features`, `_scaled_features` or
+  `_scaled_array` untouched.** Its working columns now get names that no input column
+  uses; before, such a user column made `fit` fail or was dropped by `transform`.
+- `Imputer.load`, `Scaler.load` and `Encoder.load` raise `ValidationError` instead of
+  `FileNotFoundError` / `KeyError` for missing or incomplete artifacts.
+- `Imputer` and `Scaler` metadata was written with local `open()`, so `save` / `load`
+  on `dbfs:/` or other non-local paths wrote the metadata somewhere other than the
+  Spark model.
+
 ## 0.10.1 (unreleased)
 
 ### Fixed
