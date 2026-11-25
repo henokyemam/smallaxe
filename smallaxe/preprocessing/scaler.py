@@ -1,6 +1,6 @@
 """Scaler for numerical feature scaling in PySpark DataFrames."""
 
-from typing import Dict, List, Type, Union
+from typing import Dict, List, Optional, Type, Union
 
 from pyspark.ml.feature import (
     MaxAbsScaler as SparkMaxAbsScaler,
@@ -74,7 +74,7 @@ class Scaler:
         self._validate_method(method)
         self._method = method
         self._numerical_cols: List[str] = []
-        self._scaler_model = None
+        self._scaler_model: Optional[_ScalerModel] = None
         self._is_fitted = False
 
     def _validate_method(self, method: str) -> None:
@@ -220,6 +220,7 @@ class Scaler:
         # The saved model carries the working names of its fit (artifacts from 0.10 and
         # earlier: "_assembled_features"); point it at this call's collision-free names.
         model = self._scaler_model
+        assert model is not None  # fit and load set it together with _is_fitted
         scaled_df = model.transform(
             assembled_df,
             {model.inputCol: names["assembled"], model.outputCol: names["scaled"]},
@@ -306,7 +307,9 @@ class Scaler:
 
         # The Spark model first: metadata.json is written last, so a directory that has
         # it holds a complete artifact.
-        self._scaler_model.write().overwrite().save(_fs.join(path, _SPARK_MODEL_DIR))
+        model = self._scaler_model
+        assert model is not None  # fit and load set it together with _is_fitted
+        model.write().overwrite().save(_fs.join(path, _SPARK_MODEL_DIR))
         _artifact.write_metadata(
             path,
             _ARTIFACT_KIND,

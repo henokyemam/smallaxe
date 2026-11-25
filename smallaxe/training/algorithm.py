@@ -408,7 +408,8 @@ def get(name: str) -> Algorithm:
         raise ValidationError(f"Algorithm name must be a string, got {type(name).__name__}.")
     if name not in _MODULES:
         raise ValidationError(f"Unknown algorithm '{name}'. Known algorithms are: {names()}")
-    return importlib.import_module(_MODULES[name]).ALGORITHM
+    record: Algorithm = importlib.import_module(_MODULES[name]).ALGORITHM
+    return record
 
 
 def _availability() -> Dict[str, Dict[str, Any]]:

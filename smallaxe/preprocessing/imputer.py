@@ -228,7 +228,9 @@ class Imputer:
         elif self._numerical_strategy == "median":
             # Compute median for each column using approx_percentile
             for col in numerical_cols:
-                median_value = dataframe.select(F.percentile_approx(_present(col), 0.5)).first()[0]
+                median_value = _checks.one_row(
+                    dataframe.select(F.percentile_approx(_present(col), 0.5))
+                )[0]
                 self._numerical_fill_values[col] = (
                     float(median_value) if median_value is not None else 0.0
                 )
@@ -291,9 +293,8 @@ class Imputer:
         typed = _fill_literal(fill, data_type)
         exact = isinstance(data_type, (IntegralType, DecimalType))
         try:
-            row = (
-                dataframe.sparkSession.range(1)
-                .select(
+            row = _checks.one_row(
+                dataframe.sparkSession.range(1).select(
                     typed.isNotNull().alias("cast_ok"),
                     (
                         (typed.cast(_EXACT) == F.lit(fill).cast(_EXACT)).alias("exact")
@@ -301,7 +302,6 @@ class Imputer:
                         else F.lit(True).alias("exact")
                     ),
                 )
-                .first()
             )
             valid = bool(row["cast_ok"]) and bool(row["exact"])
         except _fs.jvm_error_types():  # an invalid cast fails under ANSI mode, or for
@@ -343,7 +343,11 @@ class Imputer:
 
         # Fill numerical columns
         if self._numerical_fill_values:
-            result_df = result_df.fillna(self._numerical_fill_values)
+            # fillna's dict parameter is typed with every literal type it accepts.
+            numerical_fills: Dict[str, Union[bool, float, int, str]] = dict(
+                self._numerical_fill_values
+            )
+            result_df = result_df.fillna(numerical_fills)
 
         # Fill categorical columns in their own type (fit checked the fill fits it). For a
         # floating column NaN counts as missing, as DataFrame.fillna treats it.

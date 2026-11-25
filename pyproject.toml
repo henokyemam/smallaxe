@@ -100,9 +100,24 @@ ignore = [
 ]
 
 [tool.mypy]
-python_version = "3.8"
+# mypy 2.x checks Python 3.10 and later only; the code stays 3.8-compatible (ruff's
+# target-version and the test-lowest CI job on Python 3.8 hold that).
+python_version = "3.10"
+files = ["smallaxe"]
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+check_untyped_defs = true
+no_implicit_optional = true
+warn_redundant_casts = true
+warn_unused_ignores = true
 warn_return_any = true
 warn_unused_configs = true
+
+[[tool.mypy.overrides]]
+# Imported directly but untyped: hyperopt and py4j ship no stubs or py.typed, and
+# catboost_spark (a JVM package's Python half) is not installed where the check runs.
+# SynapseML and xgboost.spark are resolved from strings at runtime, so mypy never sees them.
+module = ["hyperopt", "hyperopt.*", "py4j", "py4j.*", "catboost_spark"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]

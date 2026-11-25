@@ -85,10 +85,13 @@ def _ensure_synapseml_compat() -> None:
         def _make_java_param_pair(self: Any, param: Any, value: Any) -> Any:
             if isinstance(value, _CATBOOST_CONVERTED_TYPES):
                 java_param = self._java_obj.getParam(self._resolveParam(param).name)
-                return java_param.w(wrapper._py2java(SparkContext._active_spark_context, value))
+                sc = SparkContext._active_spark_context
+                assert sc is not None  # a stage with a Java object implies a live context
+                return java_param.w(wrapper._py2java(sc, value))
             return make_pair(self, param, value)
 
-        JavaParams._make_java_param_pair = _make_java_param_pair
+        # Deliberate process-wide monkeypatch of PySpark's method (see the docstring).
+        JavaParams._make_java_param_pair = _make_java_param_pair  # type: ignore[method-assign]
 
     from_java = JavaParams._from_java
     catboost_from_java = _catboost_from_java()
@@ -99,7 +102,8 @@ def _ensure_synapseml_compat() -> None:
                 return catboost_from_java(java_stage)
             return from_java(java_stage)
 
-        JavaParams._from_java = staticmethod(_from_java)
+        # Deliberate process-wide monkeypatch of PySpark's method (see the docstring).
+        JavaParams._from_java = staticmethod(_from_java)  # type: ignore[method-assign]
 
     call_java = JavaWrapper._call_java
     converters = _catboost_converters()
@@ -113,7 +117,8 @@ def _ensure_synapseml_compat() -> None:
             java_args = [py2java(sc, arg) for arg in args]
             return java2py(sc, getattr(self._java_obj, name)(*java_args))
 
-        JavaWrapper._call_java = _call_java
+        # Deliberate process-wide monkeypatch of PySpark's method (see the docstring).
+        JavaWrapper._call_java = _call_java  # type: ignore[method-assign]
 
 
 @contextmanager
