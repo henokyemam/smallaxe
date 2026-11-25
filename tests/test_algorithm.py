@@ -182,7 +182,7 @@ class TestRecordTranslation:
     def test_model_builds_the_estimator(self, record, task):
         kind = Classifier if task in CLASSIFICATION_TASKS else Regressor
         model = kind(record, task)
-        model.set_param({"n_estimators": 3, "seed": 11})
+        model.set_params(n_estimators=3, seed=11)
         estimator = model._create_spark_estimator(label_col="y")
 
         assert isinstance(estimator, FakeEstimator)
@@ -204,13 +204,13 @@ class TestXGBoost:
     def test_n_estimators_is_forwarded_as_n_estimators(self, task):
         """xgboost.spark reads the round count from n_estimators; num_round is ignored."""
         kind = Classifier if task in CLASSIFICATION_TASKS else Regressor
-        model = kind("xgboost", task).set_param({"n_estimators": 7})
+        model = kind("xgboost", task).set_params(n_estimators=7)
         estimator = model._create_spark_estimator(label_col="y")
         assert estimator.kwargs["n_estimators"] == 7
         assert "num_round" not in estimator.kwargs
 
     def test_seed_is_forwarded_as_seed(self):
-        estimator = Regressor("xgboost").set_param({"seed": 3})._create_spark_estimator("y")
+        estimator = Regressor("xgboost").set_params(seed=3)._create_spark_estimator("y")
         assert estimator.kwargs["seed"] == 3
 
 
@@ -232,7 +232,7 @@ class TestLightGBM:
         assert "objective" not in estimator.kwargs
 
     def test_seed_goes_through_setter(self):
-        estimator = Regressor("lightgbm").set_param({"seed": 3})._create_spark_estimator("y")
+        estimator = Regressor("lightgbm").set_params(seed=3)._create_spark_estimator("y")
         assert ("setSeed", 3) in estimator.calls
         assert "seed" not in estimator.kwargs
 
@@ -255,7 +255,7 @@ class TestCatBoost:
         assert "scale_pos_weight" in Classifier("catboost").params
         assert "scale_pos_weight" not in Regressor("catboost").params
         with pytest.raises(ValidationError, match="Invalid parameter"):
-            Regressor("catboost").set_param({"scale_pos_weight": 2.0})
+            Regressor("catboost").set_params(scale_pos_weight=2.0)
 
     def test_optional_params_are_not_forwarded_when_unset(self):
         estimator = Regressor("catboost")._create_spark_estimator(label_col="y")
@@ -336,7 +336,7 @@ class TestModelConstruction:
         assert model.default_params["n_estimators"] == 20
 
     def test_clone_copies_algorithm_task_and_params(self):
-        model = Classifier("random_forest", "multiclass").set_param({"max_depth": 9})
+        model = Classifier("random_forest", "multiclass").set_params(max_depth=9)
         clone = model.clone()
         assert type(clone) is Classifier
         assert clone.algorithm is model.algorithm

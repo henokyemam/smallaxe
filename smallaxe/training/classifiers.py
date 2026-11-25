@@ -29,7 +29,7 @@ class Classifiers:
     def _create(name: str, task: str, params: Dict[str, Any]) -> Classifier:
         model = Classifier(name, task=task)
         if params:
-            model.set_param(params)
+            model.set_params(**params)
         return model
 
     @staticmethod

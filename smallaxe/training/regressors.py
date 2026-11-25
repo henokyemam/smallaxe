@@ -29,7 +29,7 @@ class Regressors:
     def _create(name: str, params: Dict[str, Any]) -> Regressor:
         model = Regressor(name)
         if params:
-            model.set_param(params)
+            model.set_params(**params)
         return model
 
     @staticmethod

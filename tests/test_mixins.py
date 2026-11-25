@@ -164,30 +164,30 @@ class TestParamMixin:
         assert defaults["max_depth"] == 5
         assert defaults["learning_rate"] == 0.1
 
-    def test_set_param_single(self):
+    def test_set_params_single(self):
         """Test setting a single parameter."""
         mixin = ConcreteParamMixin()
-        mixin.set_param({"n_estimators": 200})
+        mixin.set_params(n_estimators=200)
         assert mixin.get_param("n_estimators") == 200
 
-    def test_set_param_multiple(self):
+    def test_set_params_multiple(self):
         """Test setting multiple parameters."""
         mixin = ConcreteParamMixin()
-        mixin.set_param({"n_estimators": 200, "max_depth": 10})
+        mixin.set_params(n_estimators=200, max_depth=10)
         assert mixin.get_param("n_estimators") == 200
         assert mixin.get_param("max_depth") == 10
 
-    def test_set_param_returns_self(self):
-        """Test that set_param returns self for chaining."""
+    def test_set_params_returns_self(self):
+        """Test that set_params returns self for chaining."""
         mixin = ConcreteParamMixin()
-        result = mixin.set_param({"n_estimators": 200})
+        result = mixin.set_params(n_estimators=200)
         assert result is mixin
 
-    def test_set_param_invalid_name_raises_error(self):
+    def test_set_params_invalid_name_raises_error(self):
         """Test that invalid parameter name raises ValidationError."""
         mixin = ConcreteParamMixin()
         with pytest.raises(ValidationError, match="Invalid parameter"):
-            mixin.set_param({"invalid_param": 100})
+            mixin.set_params(invalid_param=100)
 
     def test_get_param_invalid_name_raises_error(self):
         """Test that getting invalid parameter raises ValidationError."""
@@ -198,22 +198,22 @@ class TestParamMixin:
     def test_get_params_returns_all(self):
         """Test that get_params returns all current values."""
         mixin = ConcreteParamMixin()
-        mixin.set_param({"n_estimators": 200})
+        mixin.set_params(n_estimators=200)
         params = mixin.get_params()
         assert params["n_estimators"] == 200
         assert params["max_depth"] == 5  # default
         assert params["learning_rate"] == 0.1  # default
 
-    def test_set_param_type_validation(self):
+    def test_set_params_type_validation(self):
         """Test that type validation works."""
         mixin = ConcreteParamMixin()
         with pytest.raises(ValidationError, match="must be of type"):
-            mixin.set_param({"n_estimators": "not an int"})
+            mixin.set_params(n_estimators="not an int")
 
-    def test_set_param_int_for_float_allowed(self):
+    def test_set_params_int_for_float_allowed(self):
         """Test that int is allowed for float parameters."""
         mixin = ConcreteParamMixin()
-        mixin.set_param({"learning_rate": 1})  # int instead of float
+        mixin.set_params(learning_rate=1)  # int instead of float
         assert mixin.get_param("learning_rate") == 1
 
 

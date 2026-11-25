@@ -370,13 +370,13 @@ def run(
         candidate = model.clone()
         if trial:
             candidate._split_seed_fallback = split_seed
-        candidate.set_param(overrides)
+        candidate.set_params(**overrides)
         if (
             seed is not None
             and "seed" in type_reference
             and candidate.get_params().get("seed") is None
         ):
-            candidate.set_param({"seed": seed})
+            candidate.set_params(seed=seed)
         return candidate
 
     def objective(sampled: Dict[str, Any]) -> Dict[str, Any]:

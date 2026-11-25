@@ -112,7 +112,7 @@ class TestFitWiring:
     def test_fit_assembles_features_and_builds_the_estimator(self, monkeypatch, df):
         record = _record()
         install_fake_modules(monkeypatch, record)
-        model = Regressor(record).set_param({"seed": 5})
+        model = Regressor(record).set_params(seed=5)
 
         model._fit_spark_model(df, "y", ["a", "b"])
 
@@ -165,7 +165,7 @@ class TestFitWiring:
 
         record = _record(fit_context=training_context)
         install_fake_modules(monkeypatch, record)
-        model = Regressor(record).set_param({"n_estimators": 3})
+        model = Regressor(record).set_params(n_estimators=3)
 
         model._fit_spark_model(df, "y", ["a", "b"])
         assert model._spark_model.estimator.kwargs["trainDir"] == "/scratch/catboost"
@@ -376,7 +376,7 @@ class TestOptimizeUsesClone:
 
         record = _record(importances=None)
         install_fake_modules(monkeypatch, record)
-        model = Regressor(record).set_param({"seed": 1})
+        model = Regressor(record).set_params(seed=1)
         clones = []
         original_clone = Regressor.clone
 
