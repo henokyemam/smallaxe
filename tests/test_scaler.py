@@ -276,7 +276,9 @@ class TestScalerErrors:
 
     def test_boolean_column_is_scaled_as_zero_one(self, spark_session):
         """Booleans are features everywhere else in smallaxe, so the Scaler takes them."""
-        df = spark_session.createDataFrame([(1, True), (2, False), (3, True)], "id int, flag boolean")
+        df = spark_session.createDataFrame(
+            [(1, True), (2, False), (3, True)], "id int, flag boolean"
+        )
         result = Scaler(method="minmax").fit_transform(df, numerical_cols=["flag"])
         assert [row["flag"] for row in result.orderBy("id").collect()] == [1.0, 0.0, 1.0]
 
