@@ -1,8 +1,6 @@
 """Scaler for numerical feature scaling in PySpark DataFrames."""
 
-import json
-import os
-from typing import List
+from typing import Dict, List, Type, Union
 
 from pyspark.ml.feature import (
     MaxAbsScaler as SparkMaxAbsScaler,
@@ -21,15 +19,33 @@ from pyspark.ml.feature import (
 )
 from pyspark.ml.functions import vector_to_array
 from pyspark.sql import DataFrame
-from pyspark.sql import functions as F
+from pyspark.sql.types import NumericType
 
+from smallaxe import _artifact, _fs
 from smallaxe.exceptions import (
     ColumnNotFoundError,
     ModelNotFittedError,
     ValidationError,
 )
+from smallaxe.preprocessing._common import (
+    column_ref,
+    read_step_metadata,
+    require_keys,
+    unique_column_name,
+)
 
 VALID_METHODS = {"standard", "minmax", "maxabs"}
+
+ARTIFACT_KIND = "scaler"
+LEGACY_METADATA_FILE = "scaler_metadata.json"
+SPARK_MODEL_DIR = "spark_model"
+
+_ScalerModel = Union[StandardScalerModel, MinMaxScalerModel, MaxAbsScalerModel]
+_MODEL_CLASSES: Dict[str, Type[_ScalerModel]] = {
+    "standard": StandardScalerModel,
+    "minmax": MinMaxScalerModel,
+    "maxabs": MaxAbsScalerModel,
+}
 
 
 class Scaler:
@@ -37,6 +53,9 @@ class Scaler:
 
     Supports StandardScaler (zero mean, unit variance), MinMaxScaler (0-1 range),
     and MaxAbsScaler (scales by maximum absolute value).
+
+    The scaled columns replace the input columns in place; every other column, including
+    user columns named like the Scaler's internal working columns, is returned unchanged.
 
     Args:
         method: Scaling method. One of 'standard', 'minmax', 'maxabs'.
@@ -73,27 +92,65 @@ class Scaler:
             if col not in available_columns:
                 raise ColumnNotFoundError(column=col, available_columns=available_columns)
 
-    def _create_scaler(self):
+    def _validate_numeric(self, df: DataFrame, numerical_cols: List[str]) -> None:
+        """Raise ValidationError naming the first input column that is not numeric."""
+        types = {field.name: field.dataType for field in df.schema.fields}
+        for col in numerical_cols:
+            data_type = types[col]
+            if not isinstance(data_type, NumericType):
+                raise ValidationError(
+                    f"Scaler can only scale numeric columns, but column '{col}' has type "
+                    f"{data_type.simpleString()}. Encode or cast it before scaling."
+                )
+
+    def _create_scaler(
+        self, input_col: str, output_col: str
+    ) -> Union[SparkStandardScaler, SparkMinMaxScaler, SparkMaxAbsScaler]:
         """Create the appropriate PySpark scaler based on method."""
         if self._method == "standard":
             return SparkStandardScaler(
-                inputCol="_assembled_features",
-                outputCol="_scaled_features",
+                inputCol=input_col,
+                outputCol=output_col,
                 withMean=True,
                 withStd=True,
             )
-        elif self._method == "minmax":
+        if self._method == "minmax":
             return SparkMinMaxScaler(
-                inputCol="_assembled_features",
-                outputCol="_scaled_features",
+                inputCol=input_col,
+                outputCol=output_col,
                 min=0.0,
                 max=1.0,
             )
-        elif self._method == "maxabs":
+        if self._method == "maxabs":
             return SparkMaxAbsScaler(
-                inputCol="_assembled_features",
-                outputCol="_scaled_features",
+                inputCol=input_col,
+                outputCol=output_col,
             )
+        raise ValidationError(
+            f"Invalid method '{self._method}'. Must be one of {sorted(VALID_METHODS)}."
+        )
+
+    @staticmethod
+    def _working_names(columns: List[str]) -> Dict[str, str]:
+        """Names for the assembled, scaled and array columns that no column in df uses."""
+        taken = list(columns)
+        names = {}
+        for role, base in (
+            ("assembled", "_assembled_features"),
+            ("scaled", "_scaled_features"),
+            ("array", "_scaled_array"),
+        ):
+            names[role] = unique_column_name(base, taken)
+            taken.append(names[role])
+        return names
+
+    @staticmethod
+    def _assemble(df: DataFrame, input_cols: List[str], output_col: str) -> DataFrame:
+        return VectorAssembler(
+            inputCols=input_cols,
+            outputCol=output_col,
+            handleInvalid="keep",
+        ).transform(df)
 
     def fit(
         self,
@@ -110,26 +167,21 @@ class Scaler:
             self: The fitted Scaler instance.
 
         Raises:
-            ValidationError: If numerical_cols is empty.
+            ValidationError: If numerical_cols is empty or a column is not numeric.
             ColumnNotFoundError: If any specified column is not in the DataFrame.
         """
         if not numerical_cols:
             raise ValidationError("numerical_cols cannot be empty for Scaler.")
 
         self._validate_columns(df, numerical_cols)
-        self._numerical_cols = numerical_cols
+        self._validate_numeric(df, numerical_cols)
+        cols = list(numerical_cols)
 
-        # Assemble features into a vector
-        assembler = VectorAssembler(
-            inputCols=numerical_cols,
-            outputCol="_assembled_features",
-            handleInvalid="keep",
-        )
-        assembled_df = assembler.transform(df)
-
-        # Create and fit the scaler
-        scaler = self._create_scaler()
+        names = self._working_names(df.columns)
+        assembled_df = self._assemble(df, cols, names["assembled"])
+        scaler = self._create_scaler(names["assembled"], names["scaled"])
         self._scaler_model = scaler.fit(assembled_df)
+        self._numerical_cols = cols
         self._is_fitted = True
 
         return self
@@ -141,7 +193,7 @@ class Scaler:
             df: PySpark DataFrame to transform.
 
         Returns:
-            DataFrame with scaled numerical columns.
+            DataFrame with scaled numerical columns, in the input's column order.
 
         Raises:
             ModelNotFittedError: If transform is called before fit.
@@ -153,31 +205,30 @@ class Scaler:
         # Validate that all fitted columns exist
         self._validate_columns(df, self._numerical_cols)
 
-        # Assemble features into a vector
-        assembler = VectorAssembler(
-            inputCols=self._numerical_cols,
-            outputCol="_assembled_features",
-            handleInvalid="keep",
+        names = self._working_names(df.columns)
+        assembled_df = self._assemble(df, self._numerical_cols, names["assembled"])
+
+        # The saved model carries the working names of its fit (artifacts from 0.10 and
+        # earlier: "_assembled_features"); point it at this call's collision-free names.
+        model = self._scaler_model
+        scaled_df = model.transform(
+            assembled_df,
+            {model.inputCol: names["assembled"], model.outputCol: names["scaled"]},
         )
-        assembled_df = assembler.transform(df)
+        scaled_df = scaled_df.withColumn(
+            names["array"], vector_to_array(column_ref(names["scaled"]))
+        )
 
-        # Apply the scaler
-        scaled_df = self._scaler_model.transform(assembled_df)
-
-        # Extract scaled values back to individual columns
-        result_df = self._extract_scaled_columns(scaled_df)
-
-        return result_df
-
-    def _extract_scaled_columns(self, df: DataFrame) -> DataFrame:
-        """Extract scaled values from vector column back to individual columns."""
-        result_df = df.withColumn("_scaled_array", vector_to_array(F.col("_scaled_features")))
-
-        for idx, col_name in enumerate(self._numerical_cols):
-            result_df = result_df.withColumn(col_name, F.col("_scaled_array")[idx].cast("double"))
-
-        result_df = result_df.drop("_assembled_features", "_scaled_features", "_scaled_array")
-        return result_df
+        positions = {col: idx for idx, col in enumerate(self._numerical_cols)}
+        array = column_ref(names["array"])
+        return scaled_df.select(
+            *[
+                array[positions[col]].cast("double").alias(col)
+                if col in positions
+                else column_ref(col)
+                for col in df.columns
+            ]
+        )
 
     def fit_transform(
         self,
@@ -222,56 +273,64 @@ class Scaler:
         return self._numerical_cols.copy()
 
     def save(self, path: str) -> None:
-        """Save the scaler to disk.
+        """Save the scaler as a directory: ``metadata.json`` plus ``spark_model/``.
+
+        IO goes through the Hadoop FileSystem layer, so the metadata lands on the same
+        filesystem as the Spark model (local, ``dbfs:/``, ``s3://``, ``hdfs://``).
 
         Args:
             path: The directory path to save the scaler to.
 
         Raises:
             ModelNotFittedError: If save is called before fit.
+            ValidationError: If path is empty.
         """
         if not self._is_fitted:
             raise ModelNotFittedError("Scaler has not been fitted. Call fit() before saving.")
+        if not path:
+            raise ValidationError("Path cannot be empty.")
 
-        os.makedirs(path, exist_ok=True)
-
-        metadata = {
-            "method": self._method,
-            "numerical_cols": self._numerical_cols,
-            "is_fitted": self._is_fitted,
-        }
-
-        with open(os.path.join(path, "scaler_metadata.json"), "w") as f:
-            json.dump(metadata, f, indent=2)
-
-        # Save the Spark ML model
-        model_path = os.path.join(path, "spark_model")
-        self._scaler_model.write().overwrite().save(model_path)
+        # The Spark model first: metadata.json is written last, so a directory that has
+        # it holds a complete artifact.
+        self._scaler_model.write().overwrite().save(_fs.join(path, SPARK_MODEL_DIR))
+        _artifact.write_metadata(
+            path,
+            ARTIFACT_KIND,
+            {"method": self._method, "numerical_cols": list(self._numerical_cols)},
+        )
 
     @classmethod
     def load(cls, path: str) -> "Scaler":
-        """Load a scaler from disk.
+        """Load a scaler saved by :meth:`save`, or by smallaxe 0.10 and earlier.
 
         Args:
             path: The directory path to load the scaler from.
 
         Returns:
-            The loaded Scaler instance.
+            The loaded, fitted Scaler.
+
+        Raises:
+            ValidationError: If the path does not exist, is not a scaler artifact, was
+                written by a newer smallaxe, or its metadata or Spark model is missing or
+                unreadable.
         """
-        with open(os.path.join(path, "scaler_metadata.json")) as f:
-            metadata = json.load(f)
+        metadata = read_step_metadata(path, ARTIFACT_KIND, LEGACY_METADATA_FILE)
+        require_keys(metadata, ["method", "numerical_cols"], ARTIFACT_KIND, path)
 
         scaler = cls(method=metadata["method"])
-        scaler._numerical_cols = metadata["numerical_cols"]
-        scaler._is_fitted = metadata["is_fitted"]
-
-        # Load the Spark ML model based on method
-        model_path = os.path.join(path, "spark_model")
-        if metadata["method"] == "standard":
-            scaler._scaler_model = StandardScalerModel.load(model_path)
-        elif metadata["method"] == "minmax":
-            scaler._scaler_model = MinMaxScalerModel.load(model_path)
-        elif metadata["method"] == "maxabs":
-            scaler._scaler_model = MaxAbsScalerModel.load(model_path)
+        model_path = _fs.join(path, SPARK_MODEL_DIR)
+        if not _fs.exists(model_path):
+            raise ValidationError(
+                f"Cannot load {ARTIFACT_KIND}: {path!r} has no {SPARK_MODEL_DIR}/ directory."
+            )
+        try:
+            scaler._scaler_model = _MODEL_CLASSES[scaler._method].load(model_path)
+        except Exception as exc:  # Py4J / Spark errors carry no common smallaxe type
+            raise ValidationError(
+                f"Cannot load {ARTIFACT_KIND}: the Spark model at {model_path!r} could not "
+                f"be read as a {_MODEL_CLASSES[scaler._method].__name__} ({exc})."
+            ) from exc
+        scaler._numerical_cols = list(metadata["numerical_cols"])
+        scaler._is_fitted = True
 
         return scaler
