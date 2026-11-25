@@ -1,22 +1,27 @@
 # Development dependencies for smallaxe
 # Install with: pip install -r requirements-dev.txt
+# (equivalent to: pip install -e ".[dev]"; keep both in step with pyproject.toml)
 
-# Core dependencies
+# Core dependencies ([project] dependencies in pyproject.toml)
 pyspark>=3.3,<4.0
+py4j>=0.10.9.5
+numpy>=1.17.3
+pandas>=1.0.0
 hyperopt>=0.2.7
-plotly>=5.0.0
+setuptools>=68; python_version >= "3.12"
 
 # Testing
 pytest>=7.0.0
 pytest-spark>=0.6.0
 
-# Code quality (exact pins, matching the dev extra in pyproject.toml; CI lints with
-# these versions; black 26 needs Python 3.10+)
+# Code quality (exact pins, matching the dev extra in pyproject.toml; CI lints and
+# type-checks with these versions; black 26 and mypy 2 need Python 3.10+)
 black==26.10.0; python_version >= "3.10"
 ruff==0.16.10
-mypy>=1.0.0
+mypy==2.4.0; python_version >= "3.10"
 
-# Optional: algorithm dependencies (uncomment as needed)
-# xgboost>=1.7.0
-# lightgbm>=3.3.0
-# catboost>=1.1.0
+# Optional extras (uncomment as needed; see [project.optional-dependencies])
+# xgboost: xgboost>=1.7.0, scikit-learn>=1.0, pandas>=1.2, pyarrow>=4.0
+# lightgbm: lightgbm>=3.3.0, synapseml>=1.0.0
+# catboost: catboost>=1.1.0
+# viz: plotly>=5.0.0
