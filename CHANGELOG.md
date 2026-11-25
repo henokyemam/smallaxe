@@ -1,5 +1,30 @@
 # Changelog
 
+## 0.11.0 (unreleased)
+
+### Changed
+
+- **The declared support matrix is now exactly what CI tests.** CI runs every
+  (Python, PySpark) pair that PySpark itself supports, per the Python classifiers of
+  each PySpark release on PyPI: PySpark 3.3 on Python 3.8 – 3.10, PySpark 3.4 and 3.5
+  on Python 3.8 – 3.11, each with the latest patch release, on Linux with Java 11.
+  Java 8 is tested with PySpark 3.3 and Java 17 with PySpark 3.5. A further job runs
+  Python 3.8 with PySpark 3.3.0 and every other runtime dependency at its declared
+  floor. `requires-python` is now `>=3.8,<3.12` and the classifiers no longer claim
+  Python 3.12 (no PySpark 3.x release declares it) or "OS Independent" (now
+  "POSIX :: Linux"). README and AGENTS.md state the same matrix. A release now reaches
+  PyPI only after this CI passes on the release commit and the built version equals
+  the release tag.
+- **The source distribution contains only the library, its tests, the examples, and
+  the README, CHANGELOG and LICENSE.** A new `MANIFEST.in` leaves out `.claude/`,
+  `.github/`, the binary 0.8.1 model fixtures under `tests/fixtures/`, agent and
+  planning notes, and tooling files. `tests/test_legacy_artifacts.py` needs those
+  fixtures, so run it from a git checkout.
+
+### Added
+
+- The wheel ships `smallaxe/py.typed`, so type checkers read smallaxe's annotations.
+
 ## 0.10.1 (unreleased)
 
 ### Fixed

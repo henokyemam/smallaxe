@@ -8,7 +8,7 @@ dynamic = ["version"]
 description = "A PySpark MLOps library for simplified model training and optimization"
 readme = "README.md"
 license = {text = "MIT"}
-requires-python = ">=3.8,<3.13"
+requires-python = ">=3.8,<3.12"
 authors = [
     {name = "Henok Yemam"}
 ]
@@ -18,13 +18,12 @@ classifiers = [
     "Intended Audience :: Developers",
     "Intended Audience :: Science/Research",
     "License :: OSI Approved :: MIT License",
-    "Operating System :: OS Independent",
+    "Operating System :: POSIX :: Linux",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.8",
     "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
-    "Programming Language :: Python :: 3.12",
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
     "Topic :: Software Development :: Libraries :: Python Modules",
 ]
@@ -78,7 +77,7 @@ smallaxe = ["py.typed"]
 
 [tool.black]
 line-length = 100
-target-version = ["py38", "py39", "py310", "py311", "py312"]
+target-version = ["py38", "py39", "py310", "py311"]
 
 [tool.ruff]
 line-length = 100

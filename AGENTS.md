@@ -91,9 +91,10 @@ The `Pipeline` class chains preprocessing steps and a model into a single `fit()
 
 ### Prerequisites
 
-- Python 3.8 - 3.12
-- PySpark 3.3+
-- Java 8 or 11 (for Spark)
+- Python 3.8 - 3.11 (3.11 needs PySpark 3.4 or 3.5; PySpark 3.3 supports 3.8 - 3.10)
+- PySpark 3.3 - 3.5
+- Java 11 (CI also tests Java 8 with PySpark 3.3 and Java 17 with PySpark 3.5)
+- Linux (CI runs on Ubuntu only)
 
 ### Setup
 
