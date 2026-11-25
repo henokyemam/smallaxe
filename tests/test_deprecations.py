@@ -333,3 +333,23 @@ class TestDatasetInfo:
         for caught in (ValidationError, ValueError):
             with pytest.raises(caught, match="Unknown dataset: 'nope'"):
                 dataset_info("nope", verbose=False)
+
+
+# --- 6. log_loss eps is keyword-only --------------------------------------------------
+
+
+class TestLogLossEps:
+    def test_keyword_eps_does_not_warn(self, frames):
+        from smallaxe.metrics import log_loss
+
+        with no_deprecation():
+            keyword = log_loss(frames["scored"], "label", "probability", eps=1e-3)
+        assert keyword == pytest.approx(log_loss(frames["scored"], eps=1e-3))
+
+    def test_positional_eps_warns_and_gives_the_same_result(self, frames):
+        from smallaxe.metrics import log_loss
+
+        with warns_once("eps", "log_loss"):
+            positional = log_loss(frames["scored"], "label", "probability", 0.3)
+        assert positional == log_loss(frames["scored"], "label", "probability", eps=0.3)
+        assert positional != log_loss(frames["scored"], "label", "probability")

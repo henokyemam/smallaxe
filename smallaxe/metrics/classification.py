@@ -383,10 +383,12 @@ def auc_pr(
 
 
 @_deprecation.df_keyword
+@_deprecation.keyword_only("eps")
 def log_loss(
     dataframe: DataFrame,
     label_col: str = "label",
     probability_col: str = "probability",
+    *,
     eps: float = 1e-15,
 ) -> float:
     """Compute logarithmic loss (cross-entropy loss).
@@ -397,7 +399,8 @@ def log_loss(
         dataframe: PySpark DataFrame containing true labels and probability scores.
         label_col: Name of the column containing true labels (0 or 1). Default is 'label'.
         probability_col: Name of the column containing probability scores. Default is 'probability'.
-        eps: Small value to avoid log(0). Default is 1e-15.
+        eps: Small value to avoid log(0). Default is 1e-15. Keyword-only; passing it
+            positionally is deprecated (it warns, and is removed in smallaxe 1.0).
 
     Returns:
         Log loss as a float. Lower values indicate better predictions. NaN when no
