@@ -1,7 +1,8 @@
 """Raw data generators for sample datasets."""
 
+import copy
 import random
-from typing import List, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from pyspark.sql import DataFrame, SparkSession
 from pyspark.sql.types import (
@@ -11,6 +12,9 @@ from pyspark.sql.types import (
     StructField,
     StructType,
 )
+
+from smallaxe import _deprecation
+from smallaxe.exceptions import ValidationError
 
 # Regression dataset constants
 LOCATIONS = ["urban", "suburban", "rural"]
@@ -182,17 +186,65 @@ def load_sample_classification(
     return spark.createDataFrame(data, schema)
 
 
-def dataset_info(dataset_name: str) -> None:
-    """Print information about a sample dataset.
+_INFO: Dict[str, Dict[str, Any]] = {
+    "regression": {
+        "name": "regression",
+        "title": "Housing Prices",
+        "task": "simple_regression",
+        "columns": {
+            "bedrooms": {"type": "int", "description": "Number of bedrooms (1-5)"},
+            "bathrooms": {"type": "int", "description": "Number of bathrooms (1-5)"},
+            "sqft": {"type": "int", "description": "Square footage of the home (400+)"},
+            "age": {"type": "int", "description": "Age of the home in years (0-50)"},
+            "location": {"type": "str", "description": "'urban', 'suburban', or 'rural'"},
+            "condition": {
+                "type": "str",
+                "description": "'excellent', 'good', 'fair', or 'poor'",
+            },
+            "price": {"type": "float", "description": "House price in dollars (label)"},
+        },
+        "numerical_features": ["bedrooms", "bathrooms", "sqft", "age"],
+        "categorical_features": ["location", "condition"],
+        "label": "price",
+        "loader": "load_sample_regression",
+    },
+    "classification": {
+        "name": "classification",
+        "title": "Customer Churn",
+        "task": "binary",
+        "columns": {
+            "tenure": {"type": "int", "description": "Number of months as a customer (1-72)"},
+            "monthly_charges": {"type": "float", "description": "Monthly bill amount (20-120)"},
+            "total_charges": {
+                "type": "float",
+                "description": "Total amount charged over tenure",
+            },
+            "contract": {
+                "type": "str",
+                "description": "'month-to-month', 'one_year', or 'two_year'",
+            },
+            "payment_method": {
+                "type": "str",
+                "description": (
+                    "'credit_card', 'bank_transfer', 'electronic_check', or 'mailed_check'"
+                ),
+            },
+            "churn": {
+                "type": "int",
+                "description": "1 if customer churned, 0 otherwise (label)",
+            },
+        },
+        "numerical_features": ["tenure", "monthly_charges", "total_charges"],
+        "categorical_features": ["contract", "payment_method"],
+        "label": "churn",
+        "loader": "load_sample_classification",
+        "class_distribution": {"1": 0.3, "0": 0.7},
+    },
+}
 
-    Args:
-        dataset_name: Either 'regression' or 'classification'.
-
-    Raises:
-        ValueError: If dataset_name is not recognized.
-    """
-    if dataset_name == "regression":
-        info = """
+# What dataset_info prints, unchanged from 0.10.
+_TEXT = {
+    "regression": """
 Sample Regression Dataset: Housing Prices
 ==========================================
 
@@ -212,9 +264,8 @@ Label: price
 Usage:
   from smallaxe.datasets import load_sample_regression
   dataframe = load_sample_regression(spark)
-"""
-    elif dataset_name == "classification":
-        info = """
+""",
+    "classification": """
 Sample Classification Dataset: Customer Churn
 ==============================================
 
@@ -235,10 +286,50 @@ Class distribution: ~30% churn (1), ~70% no churn (0)
 Usage:
   from smallaxe.datasets import load_sample_classification
   dataframe = load_sample_classification(spark)
-"""
-    else:
-        raise ValueError(
+""",
+}
+
+
+class _UnknownDatasetError(ValidationError, ValueError):
+    """An unknown dataset name. Also a ``ValueError``, which 0.10 raised, until 1.0."""
+
+
+def dataset_info(dataset_name: str, *, verbose: Optional[bool] = None) -> Dict[str, Any]:
+    """Describe a sample dataset: its columns, features, label and loader.
+
+    Args:
+        dataset_name: Either 'regression' or 'classification'.
+        verbose: Whether to also print the description. ``None`` (the default) prints
+            it, as 0.10 did, with a ``DeprecationWarning``: from smallaxe 1.0 the default
+            prints nothing. Pass ``False`` for the 1.0 behaviour, ``True`` to keep
+            printing; neither warns.
+
+    Returns:
+        A new dict with ``name``, ``title``, ``task``, ``columns`` (column name ->
+        ``{"type", "description"}``), ``numerical_features``, ``categorical_features``,
+        ``label`` and ``loader`` (the function in :mod:`smallaxe.datasets` that loads
+        it); the classification dataset adds ``class_distribution``.
+
+    Raises:
+        ValidationError: If dataset_name is not recognized. In 0.11 the error is also a
+            ``ValueError``, which earlier releases raised; that ends in smallaxe 1.0.
+
+    Example:
+        >>> info = dataset_info('regression', verbose=False)
+        >>> info['label']
+        'price'
+    """
+    if dataset_name not in _INFO:
+        raise _UnknownDatasetError(
             f"Unknown dataset: '{dataset_name}'. Use 'regression' or 'classification'."
         )
-
-    print(info)
+    if verbose is None:
+        _deprecation.warn(
+            "dataset_info() printing by default is deprecated and will be removed in "
+            "smallaxe 1.0, where it only returns the information as a dict. Pass "
+            "verbose=False to stop printing, or verbose=True to keep it."
+        )
+        verbose = True
+    if verbose:
+        print(_TEXT[dataset_name])
+    return copy.deepcopy(_INFO[dataset_name])

@@ -298,3 +298,38 @@ class TestStratified:
                 seed=1,
                 verbose=False,
             )
+
+
+# --- 4. datasets.dataset_info returns a dict ------------------------------------------
+
+
+class TestDatasetInfo:
+    @pytest.mark.parametrize("name", ["regression", "classification"])
+    def test_returns_dict_and_prints_with_a_warning(self, capsys, name):
+        from smallaxe.datasets import dataset_info
+
+        with warns_once("dataset_info", "verbose="):
+            info = dataset_info(name)
+        printed = capsys.readouterr().out
+        assert "Columns:" in printed and info["label"] in printed
+        assert info["name"] == name
+        assert set(info) >= {"title", "columns", "numerical_features", "label", "loader"}
+
+    @pytest.mark.parametrize("verbose", [True, False])
+    def test_verbose_does_not_warn(self, capsys, verbose):
+        from smallaxe.datasets import dataset_info
+
+        with no_deprecation():
+            info = dataset_info("regression", verbose=verbose)
+        assert info["label"] == "price"
+        assert info["numerical_features"] == ["bedrooms", "bathrooms", "sqft", "age"]
+        assert info["categorical_features"] == ["location", "condition"]
+        assert info["loader"] == "load_sample_regression"
+        assert bool(capsys.readouterr().out) is verbose
+
+    def test_unknown_name_is_a_validation_error_and_still_a_value_error(self):
+        from smallaxe.datasets import dataset_info
+
+        for caught in (ValidationError, ValueError):
+            with pytest.raises(caught, match="Unknown dataset: 'nope'"):
+                dataset_info("nope", verbose=False)
