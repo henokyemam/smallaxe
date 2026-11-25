@@ -129,12 +129,15 @@ def write_json(path: str, obj: Dict[str, Any]) -> None:
         writer.close()  # flushes and closes the underlying stream
 
 
-def read_json(path: str) -> Any:
+def read_json(path: str) -> object:
     """Read and parse JSON from ``path`` on the resolved filesystem.
 
+    Args:
+        path: The file to read, local or a Hadoop URI.
+
     Returns:
-        The parsed value, of whatever JSON type the file holds; callers check it is an
-        object.
+        The parsed value, of whatever JSON type the file holds (typed ``object``, so a
+        caller narrows it, for example with ``isinstance(value, dict)``, before use).
     """
     jvm, fs, hpath = _fs_and_path(path)
     stream = fs.open(hpath)
