@@ -116,7 +116,12 @@ deprecated in 0.11"), naming its replacement. In 1.0 a removed name raises
   `classifiers`. The task names are defined once, in `smallaxe.training.algorithm`
   (`REGRESSION_TASKS`, `CLASSIFICATION_TASKS`, `ALL_TASKS`).
   `tests/test_public_api.py` pins every public module's `__all__` and the parameters of
-  every public function, method and class.
+  every public function, method and class, including those implemented in a private
+  module and exported by a public one (the `smallaxe.datasets` functions). The
+  implementation classes `BaseModel`, `BaseRegressor`, `BaseClassifier` and the mixins
+  of `smallaxe.training.mixins` stay in their modules' `__all__`, but the README's
+  stability policy leaves them out of the public API: their members are public as
+  members of `Model`, `Regressor` and `Classifier`.
 - **`fit`, `set_params` and `clone` return the model's own type.** They were typed as
   the base class; now `regressors.xgboost().fit(...)` is typed as a `Regressor`, so
   chained calls type-check. Runtime behaviour is unchanged.
@@ -144,6 +149,38 @@ deprecated in 0.11"), naming its replacement. In 1.0 a removed name raises
     a `param_space` naming a parameter the model does not have (before any trial runs;
     it used to fail every trial), and a non-integer `max_evals`, `seed` or
     `early_stopping_rounds`.
+  - `optimize.run` also checks before any trial: a `param_space` key that is not a
+    string (was hyperopt's `TypeError`), a choice or constant that is not a number for a
+    numeric parameter (`{"max_depth": ["a", "b"]}` or `{"max_depth": "ab"}`, was
+    `TypeError` mid-search), a `validation` that is not one of its strings (`[]` was a
+    `TypeError`), a `verbose`, `early_stopping` or `refit` that is not a bool (`refit="y"`
+    used to be accepted; `verbose="y"` was a `TypeError` from hyperopt), and `test_size`,
+    `n_folds` and `fold_key` as `fit` checks them (they used to fail every trial). All
+    raise `ValidationError`.
+  - A task that is not a string (`Classifier("random_forest", task=["binary"])`,
+    `classifiers.random_forest(task=[...])`, `Model(..., task={})`) raises
+    `ValidationError` (was `TypeError: unhashable type`).
+  - A label column that is not numeric (a string or boolean) in `fit`, `evaluate` or
+    `optimize.run` raises `ValidationError` naming it (was Spark's
+    `IllegalArgumentException`, or an `AnalysisException` for XGBoost).
+  - `predict` / `predict_proba` with an `output_col` that is not a non-empty string
+    raises `ValidationError` (was a `Py4JError`), and so does a feature column of the
+    wrong type in the frame to predict (was Spark's `IllegalArgumentException`).
+  - A parameter value the Spark estimator rejects when `fit` runs (Random Forest
+    `max_depth=-3`, `subsampling_rate=5.0`, `feature_subset_strategy="bogus"`) raises
+    `ValidationError` with Spark's message, chained to Spark's
+    `IllegalArgumentException`. `set_params` still checks only types, not ranges.
+    XGBoost checks its parameters inside the training job, so a bad XGBoost value still
+    fails with Spark's `Py4JJavaError`.
+  - `metrics.mse`, `rmse`, `mae` and `r2` raise `ValidationError` for a non-numeric label
+    or prediction column, and `auc_roc` / `auc_pr` for a non-numeric label or a
+    probability column that is neither a number nor a vector (all were Spark's
+    `IllegalArgumentException`). Any other argument Spark's evaluator rejects is a
+    `ValidationError` too.
+  - `Algorithm.estimator_class(task)` and `model_class(task)` for a task the algorithm
+    does not have raise `ValidationError` (was `KeyError`). `algorithm.get()` with a
+    name that is not a string raises `ValidationError` saying so (was a `TypeError` for
+    an unhashable value, and "Unknown algorithm" for any other).
   - Metric functions raise `ValidationError` for a column name that is not a string.
   - `pipeline["name"]` for a missing step raises `ValidationError` (was `KeyError`).
   - `dataset_info` raises only `ValidationError` for an unknown name; in 0.11 the error
@@ -180,8 +217,10 @@ deprecated in 0.11"), naming its replacement. In 1.0 a removed name raises
   validates on the preprocessed frame. The preprocessing steps are fitted on all rows
   first, so their statistics (imputed values, scaling ranges, encoder categories) see
   the validation rows; the docstring says so. On a pipeline without a model, any of them
-  other than its default raises `ValidationError`. A duck-typed model receives only the
-  options that differ from the defaults.
+  given raises `ValidationError`; a value counts as given unless it equals its default
+  and has the default's type, so `refit=1` and `n_folds=5.0` raise while an explicit
+  `refit=True` does not (it cannot be told from leaving it out). A duck-typed model
+  receives only the options given in that sense.
 - **`Pipeline.validation_scores`**: the model step's `validation_scores`, or None for a
   pipeline without a model. It survives `save` / `load`.
 - **`load_sample_regression()` / `load_sample_classification()` default to the active

@@ -202,7 +202,12 @@ The public API is:
   written by a newer one says so instead of guessing.
 
 Names starting with `_`, the private modules, the exact text of messages and warnings,
-and `metadata` keys not listed in a docstring are not part of it.
+and `metadata` keys not listed in a docstring are not part of it. Nor are the
+implementation classes `BaseModel`, `BaseRegressor` and `BaseClassifier` in
+`smallaxe.training.base` and the five mixins in `smallaxe.training.mixins`: they are
+listed in their modules' `__all__` so that type hints and `isinstance` checks can name
+them, but what they provide is public only as members of `Model`, `Regressor` and
+`Classifier`. Build on `Model`, not on them.
 
 Before anything public is removed or changed incompatibly, it is deprecated: it keeps
 working and emits a `DeprecationWarning` naming its replacement for at least one minor
