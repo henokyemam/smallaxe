@@ -1,6 +1,6 @@
 """Encoder for categorical feature encoding in PySpark DataFrames."""
 
-from typing import Dict, List, Set, Tuple
+from typing import Any, Dict, List, Set, Tuple
 
 from pyspark.sql import Column, DataFrame
 from pyspark.sql import functions as F
@@ -12,6 +12,7 @@ from smallaxe.exceptions import (
     ValidationError,
 )
 from smallaxe.preprocessing._common import (
+    column_list,
     column_ref,
     read_step_metadata,
     require_keys,
@@ -56,6 +57,9 @@ class Encoder:
       ``categorical_cols`` order, one double column per index in index order, named
       ``{col}_{category}`` (spaces and hyphens become underscores; a name already
       used gets ``_{index}`` appended), and ``{col}_OTHER`` or ``{col}_UNKNOWN`` last.
+      An output name may equal an encoded input column's name (that input is replaced);
+      if it equals a column the Encoder does not encode, ``transform`` raises
+      ``ValidationError`` rather than overwrite it.
 
     Args:
         method: Encoding method. One of 'onehot', 'label'. Default is 'onehot'.
@@ -90,6 +94,27 @@ class Encoder:
         self._categorical_cols: List[str] = []
         self._category_mappings: Dict[str, Dict[str, int]] = {}
         self._is_fitted = False
+
+    def __setstate__(self, state: Dict[str, Any]) -> None:
+        """Restore a pickled Encoder, upgrading one pickled by smallaxe 0.10.
+
+        0.10 had no ``save()``, so ``Pipeline.save`` pickled the Encoder. Its state held
+        ``_indexer_models`` / ``_onehot_models`` and mappings with no bucket for unseen
+        values. Those are dropped, and ``"__UNKNOWN__"`` is appended to every mapping
+        that has no ``"__OTHER__"``, so the current unseen-category rule applies.
+        """
+        state = dict(state)
+        state.pop("_indexer_models", None)
+        state.pop("_onehot_models", None)
+        mappings = state.get("_category_mappings") or {}
+        upgraded = {}
+        for col, mapping in mappings.items():
+            mapping = dict(mapping)
+            if OTHER not in mapping and UNKNOWN not in mapping:
+                mapping[UNKNOWN] = len(mapping)
+            upgraded[col] = mapping
+        state["_category_mappings"] = upgraded
+        self.__dict__.update(state)
 
     def _validate_method(self, method: str) -> None:
         """Validate the encoding method."""
@@ -287,6 +312,8 @@ class Encoder:
         Raises:
             ModelNotFittedError: If transform is called before fit.
             ColumnNotFoundError: If any fitted column is not in the DataFrame.
+            ValidationError: For 'onehot', if an output column name is already used by a
+                column the Encoder does not encode (it would be overwritten).
         """
         if not self._is_fitted:
             raise ModelNotFittedError("Encoder has not been fitted. Call fit() before transform().")
@@ -304,25 +331,45 @@ class Encoder:
 
     def _transform_onehot(self, df: DataFrame) -> DataFrame:
         """Transform using one-hot encoding built from the Encoder's own mapping."""
-        taken = list(df.columns)
+        layout = self._onehot_layout()
+        taken = list(df.columns) + [name for columns in layout.values() for name, _ in columns]
         index_cols: Dict[str, str] = {}
         for col in self._categorical_cols:
             name = unique_column_name(f"__{col}_index", taken)
             taken.append(name)
             index_cols[col] = name
 
+        encoded = {col.lower() for col in self._categorical_cols}
+        kept = {col.lower(): col for col in df.columns if col.lower() not in encoded}
+        clashes = [
+            (name, kept[name.lower()])
+            for columns in layout.values()
+            for name, _ in columns
+            if name.lower() in kept
+        ]
+        if clashes:
+            name, existing = clashes[0]
+            raise ValidationError(
+                f"One-hot output column '{name}' would overwrite the existing column "
+                f"'{existing}', which the Encoder does not encode. Rename or drop that "
+                "column before transform."
+            )
+
         result_df = df.withColumns(
             {index_cols[col]: self._index_expr(col) for col in self._categorical_cols}
         )
+        # Drop the inputs before adding the outputs, so an output named like an encoded
+        # input column (c's category 'a' gives 'c_a') is not dropped with it.
+        result_df = result_df.drop(*self._categorical_cols)
 
         onehot: Dict[str, Column] = {}
-        for col, columns in self._onehot_layout().items():
+        for col, columns in layout.items():
             index = column_ref(index_cols[col])
             for name, idx in columns:
                 onehot[name] = F.coalesce((index == F.lit(idx)).cast("double"), F.lit(0.0))
         result_df = result_df.withColumns(onehot)
 
-        return result_df.drop(*self._categorical_cols, *index_cols.values())
+        return result_df.drop(*index_cols.values())
 
     def fit_transform(
         self,
@@ -393,7 +440,7 @@ class Encoder:
             max_categories=metadata["max_categories"],
             handle_rare=metadata["handle_rare"],
         )
-        categorical_cols = list(metadata["categorical_cols"])
+        categorical_cols = column_list(metadata, "categorical_cols", ARTIFACT_KIND, path)
         raw_mappings = metadata["category_mappings"]
         mappings: Dict[str, Dict[str, int]] = {}
         try:

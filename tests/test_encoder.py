@@ -835,6 +835,35 @@ class TestColumnOrder:
         assert "__c_index" in result.columns
         assert [row["__c_index"] for row in result.orderBy("id").collect()] == [7.0, 8.0]
 
+    def test_output_named_like_another_encoded_input_survives(self, spark_session):
+        """c's category 'a' gives c_a, which is also an encoded input column's name."""
+        df = spark_session.createDataFrame(
+            [(1, "a", "x"), (2, "b", "y"), (3, None, "x")], "id int, c string, c_a string"
+        )
+        result = Encoder(method="onehot").fit_transform(df, categorical_cols=["c", "c_a"])
+
+        assert result.columns == [
+            "id",
+            "c_a",
+            "c_b",
+            "c_UNKNOWN",
+            "c_a_x",
+            "c_a_y",
+            "c_a_UNKNOWN",
+        ]
+        rows = result.orderBy("id").collect()
+        assert [row["c_a"] for row in rows] == [1.0, 0.0, 0.0]
+        assert [row["c_a_x"] for row in rows] == [1.0, 0.0, 1.0]
+
+    def test_output_named_like_a_pass_through_column_raises(self, spark_session):
+        fit = spark_session.createDataFrame([(1, "a"), (2, "b")], "id int, c string")
+        encoder = Encoder(method="onehot").fit(fit, categorical_cols=["c"])
+        df = spark_session.createDataFrame([(1, "a", 5.0)], "id int, c string, C_A double")
+
+        with pytest.raises(ValidationError, match="C_A") as info:
+            encoder.transform(df)
+        assert "c_a" in str(info.value)
+
 
 class TestEncoderHoldsPlainData:
     """A fitted Encoder holds no Spark objects, so it pickles."""

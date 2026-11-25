@@ -14,6 +14,7 @@ import pickle
 from pathlib import Path
 
 import pytest
+from pyspark.ml.feature import StandardScalerModel
 
 import smallaxe.preprocessing
 from smallaxe import _artifact
@@ -244,6 +245,23 @@ class TestEncoderRoundTrip:
         with pytest.raises(ValidationError, match="corrupted"):
             Encoder.load(str(tmp_path / "e"))
 
+    @pytest.mark.parametrize("categorical_cols", [None, "c", [], [1]])
+    def test_corrupted_categorical_cols_raises(self, tmp_path, categorical_cols):
+        _write_raw_metadata(
+            tmp_path / "e",
+            {
+                "format_version": 1,
+                "kind": "encoder",
+                "method": "label",
+                "max_categories": 100,
+                "handle_rare": "other",
+                "categorical_cols": categorical_cols,
+                "category_mappings": {"c": {"a": 0, "__UNKNOWN__": 1}},
+            },
+        )
+        with pytest.raises(ValidationError, match="categorical_cols"):
+            Encoder.load(str(tmp_path / "e"))
+
 
 def _fitted(cls, df):
     if cls is Imputer:
@@ -305,6 +323,55 @@ def test_scaler_without_spark_model_raises(tmp_path):
     )
     with pytest.raises(ValidationError, match="spark_model"):
         Scaler.load(str(tmp_path / "s"))
+
+
+@pytest.mark.parametrize("numerical_cols", [None, "a", [], [1]])
+def test_scaler_with_corrupted_numerical_cols_raises(mixed_fit, tmp_path, numerical_cols):
+    path = tmp_path / "s"
+    Scaler().fit(mixed_fit.dropna(subset=["age"]), numerical_cols=["age"]).save(str(path))
+    metadata = json.loads((path / "metadata.json").read_text())
+    metadata["numerical_cols"] = numerical_cols
+    (path / ".metadata.json.crc").unlink()
+    (path / "metadata.json").write_text(json.dumps(metadata))
+
+    with pytest.raises(ValidationError, match="numerical_cols"):
+        Scaler.load(str(path))
+
+
+def test_scaler_with_unreadable_spark_model_raises(tmp_path):
+    _write_raw_metadata(
+        tmp_path / "s",
+        {"format_version": 1, "kind": "scaler", "method": "standard", "numerical_cols": ["a"]},
+    )
+    (tmp_path / "s" / "spark_model").mkdir()
+    with pytest.raises(ValidationError, match="could not be read"):
+        Scaler.load(str(tmp_path / "s"))
+
+
+def test_scaler_load_does_not_hide_non_spark_errors(mixed_fit, tmp_path, monkeypatch):
+    """Only Spark's own load failures become ValidationError."""
+    path = str(tmp_path / "s")
+    Scaler().fit(mixed_fit.dropna(subset=["age"]), numerical_cols=["age"]).save(path)
+
+    def broken_load(cls, model_path):
+        raise RuntimeError("gateway down")
+
+    monkeypatch.setattr(StandardScalerModel, "load", classmethod(broken_load))
+    with pytest.raises(RuntimeError, match="gateway down"):
+        Scaler.load(path)
+
+
+@pytest.mark.parametrize("cls", [Imputer, Scaler, Encoder])
+def test_metadata_edited_after_save_with_stale_checksum_raises(cls, mixed_fit, tmp_path):
+    """Hadoop's LocalFileSystem keeps a .crc beside metadata.json; an edit breaks it."""
+    path = tmp_path / "x"
+    _fitted(cls, mixed_fit).save(str(path))
+    assert (path / ".metadata.json.crc").exists()
+    (path / "metadata.json").write_text((path / "metadata.json").read_text() + " \n\n")
+
+    with pytest.raises(ValidationError, match="could not be read") as info:
+        cls.load(str(path))
+    assert "metadata.json" in str(info.value)
 
 
 def test_preprocessing_does_no_local_file_io():
@@ -382,6 +449,46 @@ class TestLegacyArtifacts:
                     assert math.isclose(got, want, rel_tol=1e-12, abs_tol=1e-12)
                 else:
                     assert got == want
+
+    def _legacy_encoder_probe(self, spark_session):
+        spec = EXPECTED["encoder_label"]
+        return spark_session.createDataFrame(
+            [tuple(r) for r in spec["probe"]], "id int, c string, d string"
+        )
+
+    def test_encoder_pickled_by_0_10_transforms_under_the_new_rule(self, spark_session):
+        """0.10's Pipeline.save pickled the Encoder (it had no save()).
+
+        Its mapping has no __UNKNOWN__ entry; unpickling adds one, so seen values and nulls
+        encode as in 0.10 and an unseen value gets the bucket index instead of null.
+        """
+        spec = EXPECTED["encoder_label"]
+        encoder = pickle.loads((FIXTURES / "encoder_label.pkl").read_bytes())
+
+        assert not hasattr(encoder, "_onehot_models")
+        assert not hasattr(encoder, "_indexer_models")
+        assert encoder.category_mappings == {
+            "c": {"a": 0, "b": 1, "__OTHER__": 2},
+            "d": {"x": 0, "y": 1, "__UNKNOWN__": 2},
+        }
+        result = encoder.transform(self._legacy_encoder_probe(spark_session))
+
+        assert result.columns == spec["columns"]
+        want = [list(row) for row in spec["output"]]
+        want[6] = [7, 2, 2]  # c 'zzz' -> __OTHER__ as in 0.10; d 'never' -> __UNKNOWN__
+        assert spec["output"][6] == [7, 2, None]
+        assert [list(row) for row in _rows(result)] == want
+
+    def test_encoder_pickled_by_0_10_resaves_and_repickles(self, spark_session, tmp_path):
+        probe = self._legacy_encoder_probe(spark_session)
+        legacy = pickle.loads((FIXTURES / "encoder_label.pkl").read_bytes())
+
+        legacy.save(str(tmp_path / "e"))
+        resaved = Encoder.load(str(tmp_path / "e"))
+        repickled = pickle.loads(pickle.dumps(legacy))
+
+        _assert_same_output(resaved.transform(probe), legacy.transform(probe))
+        _assert_same_output(repickled.transform(probe), legacy.transform(probe))
 
     @pytest.mark.parametrize("method", ["standard", "minmax", "maxabs"])
     def test_scaler_in_the_0_10_layout_loads_and_transforms_identically(

@@ -7,19 +7,21 @@ the repository root::
 
 It fits an ``Imputer`` and a ``Scaler`` with the 0.10 code, saves them with the 0.10
 ``save`` (``imputer_metadata.json`` / ``scaler_metadata.json`` written with ``open``,
-plus the Scaler's ``spark_model``), and records the 0.10 ``transform`` output of the
-probe frame in ``expected.json``. Delete the ``.crc`` and ``_SUCCESS`` files Spark leaves
-before committing.
+plus the Scaler's ``spark_model``), pickles a label ``Encoder`` the way 0.10's
+``Pipeline.save`` did (``encoder_label.pkl``), and records the 0.10 ``transform`` output
+of each probe frame in ``expected.json``. It removes the ``.crc`` and ``_SUCCESS`` files
+Spark leaves.
 """
 
 import json
 import math
+import pickle
 import shutil
 from pathlib import Path
 
 from pyspark.sql import SparkSession
 
-from smallaxe.preprocessing import Imputer, Scaler
+from smallaxe.preprocessing import Encoder, Imputer, Scaler
 
 HERE = Path(__file__).parent
 
@@ -64,6 +66,31 @@ def main():
         "fit": fit,
         "probe": probe,
         "output": _rows(scaler.transform(spark.createDataFrame(probe, schema)), columns),
+    }
+
+    # 0.10's Encoder had no save(), so Pipeline.save pickled it (step_N_encoder.pkl).
+    # Only a label Encoder pickles: a one-hot one holds Spark OneHotEncoderModels.
+    schema = "id int, c string, d string"
+    # c: a > b > c, so max_categories=2 gives c an __OTHER__ bucket; d has no bucket.
+    fit = [
+        [1, "a", "x"],
+        [2, "a", "y"],
+        [3, "a", "x"],
+        [4, "b", "y"],
+        [5, "b", None],
+        [6, "c", "x"],
+    ]
+    probe = fit + [[7, "zzz", "never"], [8, None, "x"], [9, "b", None]]
+    encoder = Encoder(method="label", max_categories=2, handle_rare="other")
+    encoder.fit(spark.createDataFrame(fit, schema), ["c", "d"])
+    (HERE / "encoder_label.pkl").write_bytes(pickle.dumps(encoder, protocol=4))
+    columns = ["id", "c", "d"]
+    expected["encoder_label"] = {
+        "columns": columns,
+        "fit": fit,
+        "probe": probe,
+        "category_mappings": encoder.category_mappings,
+        "output": _rows(encoder.transform(spark.createDataFrame(probe, schema)), columns),
     }
 
     (HERE / "expected.json").write_text(json.dumps(expected, indent=2) + "\n")
