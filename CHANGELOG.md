@@ -37,6 +37,11 @@
   earlier releases keep their 100 trees when loaded; refit them to get the requested
   number. XGBoost's `seed` was not affected: it reaches the booster and controls
   training.
+- **Every `optimize.run` trial scores on the same split, even unseeded.** With no
+  `seed` argument, no `set_seed`, and no model `seed`, each trial's `fit` drew its own
+  random split seed, so trials were compared on different folds despite the docstring.
+  The search now draws one split seed up front and every trial splits with it (the
+  trials' `metadata["split_seed"]` is identical). Unseeded estimators stay unseeded.
 
 ## 0.10.1 (unreleased)
 

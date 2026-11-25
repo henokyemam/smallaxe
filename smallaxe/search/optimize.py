@@ -43,6 +43,7 @@ from smallaxe.exceptions import DependencyError, ValidationError
 from smallaxe.metrics import TASK_METRICS
 from smallaxe.metrics.classification import MULTICLASS_AVERAGED_METRICS
 from smallaxe.training.base import check_training_data, infer_feature_cols, warn_ignored_cols
+from smallaxe.training.mixins.validation_mixin import resolve_split_seed
 
 # hyperopt is an optional dependency. Guard the import so the module remains
 # importable (and the rest of smallaxe keeps working) when it is absent.
@@ -292,8 +293,9 @@ def run(
         fold_key: Column whose value alone decides a row's fold or split, as in
             ``fit``. Every trial scores on the same folds either way.
         seed: Seed for hyperopt's sampler and for the data splits. Defaults to
-            the global ``smallaxe.set_seed`` value; with neither, the search is
-            unseeded. Every trial scores on the same folds either way.
+            the global ``smallaxe.set_seed`` value; with neither, the sampler and
+            the estimators are unseeded and one random split seed is drawn for the
+            whole search. Every trial scores on the same folds either way.
         refit: If True (default), refit a final model on the full dataset with
             the best params and expose it as ``best_model``.
         verbose: If True, show hyperopt's progress bar. Defaults to the global
@@ -354,10 +356,15 @@ def run(
         seed = smallaxe.get_seed()
     if verbose is None:
         verbose = smallaxe.get_verbosity() != "quiet"
+    # Every trial must score on the same split. Unseeded, each fit would draw its own
+    # random split seed, so draw one here for all trials. It only decides the split:
+    # unseeded estimators stay unseeded.
+    split_seed = seed if seed is not None else resolve_split_seed()
 
     def _build_model(overrides: Dict[str, Any]) -> Any:
         """Create a fresh model with base params overridden by ``overrides``."""
         candidate = model.clone()
+        candidate._split_seed_fallback = split_seed
         candidate.set_param(overrides)
         if (
             seed is not None
@@ -417,6 +424,9 @@ def run(
         fmin_kwargs["early_stop_fn"] = no_progress_loss(early_stopping_rounds)
 
     # Persist once for the whole search; each trial runs with cache_strategy="none".
+    # "kfold" here is deliberate, not the search's validation: the two arguments say
+    # whether one fit reads the data more than once, and a search reads it once per
+    # trial whatever the validation, so it always qualifies (unless already cached).
     dataframe, persisted = model._apply_cache_strategy(dataframe, None, "kfold", True)
     try:
         fmin(**fmin_kwargs)

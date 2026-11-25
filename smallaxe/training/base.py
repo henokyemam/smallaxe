@@ -172,6 +172,11 @@ class BaseModel(
     # Valid cache strategies; None means "cache when fit reads the data more than once"
     VALID_CACHE_STRATEGIES = {None, "none", "memory", "disk"}
 
+    # Split seed used when neither the model's ``seed`` nor the global seed is set.
+    # ``optimize.run`` sets it on every trial so all trials score on one split; it
+    # never seeds the estimator. Private: not a fit argument.
+    _split_seed_fallback: Optional[int] = None
+
     def __init__(self, task: str) -> None:
         """Initialize the base model.
 
@@ -317,8 +322,9 @@ class BaseModel(
         if stratified is None:
             stratified = self.task_type == "classification"
 
-        # Seeds: the model's seed parameter, then the global seed, then random.
-        split_seed = resolve_split_seed(self._seed_param())
+        # Seeds: the model's seed parameter, then the global seed, then the search's
+        # shared split seed, then random.
+        split_seed = resolve_split_seed(self._seed_param(), self._split_seed_fallback)
 
         # Apply caching
         cached_df, persisted = self._apply_cache_strategy(df, cache_strategy, validation, refit)

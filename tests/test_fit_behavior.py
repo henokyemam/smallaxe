@@ -273,6 +273,71 @@ class TestSearchSettings:
         assert captured["show_progressbar"] is False
         assert captured["rstate"] is not None
 
+    @pytest.mark.parametrize("validation", ["train_test", "kfold"])
+    def test_unseeded_search_scores_every_trial_on_the_same_split(
+        self, frame, monkeypatch, validation
+    ):
+        """With no seed anywhere, the search draws one split seed for all its trials."""
+        pytest.importorskip("hyperopt")
+        from smallaxe.search import optimize
+        from smallaxe.training.base import BaseModel
+
+        assert smallaxe.get_seed() is None
+        trial_models = []
+        original = BaseModel.fit
+
+        def spy(self, df, *args, **kwargs):
+            result = original(self, df, *args, **kwargs)
+            if kwargs.get("validation") != "none":
+                trial_models.append(self)
+            return result
+
+        monkeypatch.setattr(BaseModel, "fit", spy)
+        optimize.run(
+            Regressors.random_forest(n_estimators=2),
+            frame,
+            label_col="target",
+            param_space={"max_depth": [2, 3, 4]},
+            feature_cols=["age"],
+            validation=validation,
+            n_folds=2,
+            max_evals=4,
+            verbose=False,
+        )
+
+        split_seeds = {model.metadata["split_seed"] for model in trial_models}
+        assert len(trial_models) == 4
+        assert len(split_seeds) == 1
+        assert isinstance(split_seeds.pop(), int)
+        # Estimator seeding is unchanged: an unseeded model stays unseeded.
+        assert all(model.metadata["seed"] is None for model in trial_models)
+
+    def test_train_test_search_persists_the_data_once(self, frame, monkeypatch):
+        """Every trial reads the data, so the search caches it whatever the validation."""
+        pytest.importorskip("hyperopt")
+        from smallaxe.search import optimize
+
+        persisted = []
+        original = type(frame).persist
+
+        def spy(self, *args, **kwargs):
+            persisted.append(1)
+            return original(self, *args, **kwargs)
+
+        monkeypatch.setattr(type(frame), "persist", spy)
+        optimize.run(
+            Regressors.random_forest(n_estimators=2, seed=1),
+            frame,
+            label_col="target",
+            param_space={"max_depth": [2, 3]},
+            feature_cols=["age"],
+            validation="train_test",
+            max_evals=2,
+            refit=False,
+            verbose=False,
+        )
+        assert persisted == [1]
+
     def test_trials_do_not_refit_and_best_model_sees_all_rows(self, frame, monkeypatch):
         pytest.importorskip("hyperopt")
         from smallaxe.search import optimize
