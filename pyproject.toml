@@ -146,10 +146,12 @@ testpaths = ["tests"]
 python_files = ["test_*.py"]
 python_functions = ["test_*"]
 addopts = "-v"
-# A DeprecationWarning raised from one of smallaxe's own modules (for example smallaxe
-# calling a deprecated PySpark API) fails the test that triggered it; third-party
-# packages' internal deprecations stay warnings. smallaxe attributes its own warnings to
-# the caller, so tests/test_removed.py checks separately that it emits none.
+# A DeprecationWarning attributed to one of smallaxe's own modules fails the test that
+# triggered it: one smallaxe raises about itself, or a third-party one raised with
+# stacklevel=2 at a line of smallaxe (numpy's and the standard library's usually are).
+# Third-party packages' internal deprecations stay warnings. Not covered: PySpark warns
+# with FutureWarning attributed to PySpark itself, and smallaxe attributes its own
+# warnings to the caller, so tests/test_removed.py checks separately that it emits none.
 filterwarnings = [
     'error::DeprecationWarning:smallaxe(\..*)?$',
 ]
