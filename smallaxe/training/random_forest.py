@@ -15,7 +15,12 @@ ALGORITHM = Algorithm(
     name="random_forest",
     params=(
         Param("n_estimators", "Number of trees in the forest", 20, spark="numTrees"),
-        Param("max_depth", "Maximum depth of each tree (0 = unlimited)", 5, spark="maxDepth"),
+        Param(
+            "max_depth",
+            "Maximum depth of each tree (0 = a single leaf node; at most 30)",
+            5,
+            spark="maxDepth",
+        ),
         Param(
             "max_bins",
             "Maximum number of bins for discretizing continuous features",

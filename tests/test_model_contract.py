@@ -134,3 +134,11 @@ class TestModelContract:
         assert clone.get_params() == model.get_params()
         with pytest.raises(ModelNotFittedError):
             _ = clone.validation_scores
+
+
+def test_random_forest_depth_zero_is_a_single_leaf(frame):
+    """PySpark's maxDepth 0 means one leaf node, not "unlimited"."""
+    assert "unlimited" not in Regressors.random_forest().params["max_depth"]
+    model = Regressors.random_forest(n_estimators=2, max_depth=0, seed=1)
+    model.fit(frame, label_col="target", feature_cols=FEATURES)
+    assert all(tree.numNodes == 1 for tree in model._spark_model.trees)

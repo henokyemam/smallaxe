@@ -33,7 +33,9 @@ def _generate_regression_data(
     - Urban > suburban > rural
     - Excellent > good > fair > poor condition
     """
-    random.seed(seed)
+    # A local generator: seeding the global ``random`` module would also fix the
+    # random split seed of every later unseeded fit.
+    rng = random.Random(seed)
 
     location_multipliers = {"urban": 1.3, "suburban": 1.0, "rural": 0.7}
     condition_multipliers = {"excellent": 1.2, "good": 1.0, "fair": 0.85, "poor": 0.7}
@@ -41,13 +43,13 @@ def _generate_regression_data(
     data = []
     for _ in range(n_rows):
         # Generate correlated features
-        bedrooms = random.choices([1, 2, 3, 4, 5], weights=[10, 25, 35, 20, 10])[0]
-        bathrooms = max(1, bedrooms - random.randint(0, 1))
-        sqft = int(500 + bedrooms * 400 + random.gauss(0, 200))
+        bedrooms = rng.choices([1, 2, 3, 4, 5], weights=[10, 25, 35, 20, 10])[0]
+        bathrooms = max(1, bedrooms - rng.randint(0, 1))
+        sqft = int(500 + bedrooms * 400 + rng.gauss(0, 200))
         sqft = max(400, sqft)  # minimum sqft
-        age = random.choices(list(range(0, 51)), weights=[max(1, 50 - i) for i in range(51)])[0]
-        location = random.choices(LOCATIONS, weights=[30, 50, 20])[0]
-        condition = random.choices(CONDITIONS, weights=[15, 45, 30, 10])[0]
+        age = rng.choices(list(range(0, 51)), weights=[max(1, 50 - i) for i in range(51)])[0]
+        location = rng.choices(LOCATIONS, weights=[30, 50, 20])[0]
+        condition = rng.choices(CONDITIONS, weights=[15, 45, 30, 10])[0]
 
         # Calculate price with realistic correlation
         base_price = 50000 + sqft * 150 + bedrooms * 10000 + bathrooms * 8000
@@ -56,7 +58,7 @@ def _generate_regression_data(
         condition_factor = condition_multipliers[condition]
 
         price = (base_price - age_discount) * location_factor * condition_factor
-        price = price + random.gauss(0, price * 0.1)  # Add noise
+        price = price + rng.gauss(0, price * 0.1)  # Add noise
         price = max(50000, round(price, 2))  # Minimum price
 
         data.append((bedrooms, bathrooms, sqft, age, location, condition, price))
@@ -75,7 +77,9 @@ def _generate_classification_data(
     - Month-to-month contract → higher churn
     - Electronic check payment → higher churn
     """
-    random.seed(seed)
+    # A local generator: seeding the global ``random`` module would also fix the
+    # random split seed of every later unseeded fit.
+    rng = random.Random(seed)
 
     contract_churn_base = {"month-to-month": 0.4, "one_year": 0.15, "two_year": 0.05}
     payment_churn_modifier = {
@@ -88,11 +92,11 @@ def _generate_classification_data(
     data = []
     for _ in range(n_rows):
         # Generate features
-        tenure = random.choices(list(range(1, 73)), weights=[max(1, 72 - i) for i in range(72)])[0]
-        monthly_charges = round(random.uniform(20, 120), 2)
-        total_charges = round(tenure * monthly_charges * random.uniform(0.9, 1.1), 2)
-        contract = random.choices(CONTRACTS, weights=[55, 25, 20])[0]
-        payment_method = random.choices(PAYMENT_METHODS, weights=[25, 25, 30, 20])[0]
+        tenure = rng.choices(list(range(1, 73)), weights=[max(1, 72 - i) for i in range(72)])[0]
+        monthly_charges = round(rng.uniform(20, 120), 2)
+        total_charges = round(tenure * monthly_charges * rng.uniform(0.9, 1.1), 2)
+        contract = rng.choices(CONTRACTS, weights=[55, 25, 20])[0]
+        payment_method = rng.choices(PAYMENT_METHODS, weights=[25, 25, 30, 20])[0]
 
         # Calculate churn probability
         base_churn = contract_churn_base[contract]
@@ -103,7 +107,7 @@ def _generate_classification_data(
         churn_prob = base_churn + tenure_modifier + charge_modifier + payment_modifier
         churn_prob = max(0.02, min(0.8, churn_prob))  # Clamp probability
 
-        churn = 1 if random.random() < churn_prob else 0
+        churn = 1 if rng.random() < churn_prob else 0
 
         data.append((tenure, monthly_charges, total_charges, contract, payment_method, churn))
 
