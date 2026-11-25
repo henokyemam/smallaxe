@@ -2,6 +2,7 @@
 smallaxe - A PySpark MLOps library for simplified model training and optimization.
 """
 
+import warnings  # noqa: F401 - smallaxe.warnings was importable in 0.10; kept until 1.0
 from contextlib import contextmanager
 from importlib.metadata import PackageNotFoundError, version
 from typing import TYPE_CHECKING, Any, Generator, Optional, Union, cast

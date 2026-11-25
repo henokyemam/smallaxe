@@ -6,8 +6,7 @@ from smallaxe.exceptions import DependencyError, ValidationError
 from smallaxe.metrics import TASK_METRICS
 from smallaxe.search import optimize
 from smallaxe.search.optimize import SearchResult
-from smallaxe.training import classifiers, regressors
-from smallaxe.training.xgboost import XGBOOST_AVAILABLE
+from smallaxe.training import algorithm, classifiers, regressors
 
 hp = pytest.importorskip("hyperopt").hp
 
@@ -441,7 +440,7 @@ class TestOptimizeEarlyStopping:
         assert result.best_model is not None
 
 
-@pytest.mark.skipif(not XGBOOST_AVAILABLE, reason="xgboost not installed")
+@pytest.mark.skipif(not algorithm.get("xgboost").available(), reason="xgboost not installed")
 class TestOptimizeXGBoost:
     """Cross-model coverage: optimizing an XGBoost regressor via the factory."""
 

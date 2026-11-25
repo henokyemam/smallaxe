@@ -518,6 +518,24 @@ _MOVED = {
     "MAXIMIZE_METRICS": (_METRICS_ADVICE, _deprecation.renamed(_MAXIMIZE_METRICS)),
     "MINIMIZE_METRICS": (_METRICS_ADVICE, _deprecation.renamed(_MINIMIZE_METRICS)),
     "VALID_METRICS": (_METRICS_ADVICE, _deprecation.renamed(_VALID_METRICS)),
+    # Helpers this module imported, and so exposed, in 0.10.
+    "infer_feature_cols": (
+        "Use Model.fit(), which infers feature_cols when none are given, instead.",
+        _deprecation.with_df_keyword(_infer_feature_cols),
+    ),
+    "warn_ignored_cols": (
+        "Use Model.fit(), which warns about the columns it leaves out, instead.",
+        lambda: _warn_ignored_cols,
+    ),
+    "check_training_data": (
+        "Use Model.fit(), which runs this check, instead.",
+        _deprecation.with_df_keyword(_check_training_data),
+    ),
+    "resolve_split_seed": (
+        "Use smallaxe.set_seed() or the model's seed parameter, which decide the split "
+        "seed, instead.",
+        lambda: _resolve_split_seed,
+    ),
 }
 __getattr__ = _deprecation.module_getattr(__name__, _MOVED)
 __dir__ = _deprecation.module_dir(globals(), _MOVED)

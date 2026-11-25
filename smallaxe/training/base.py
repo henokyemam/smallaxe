@@ -1500,6 +1500,12 @@ _MOVED = {
         _FIT_ADVICE.format("runs this check"),
         _deprecation.with_df_keyword(_check_training_data),
     ),
+    # Imported, and so exposed, here in 0.10.
+    "resolve_split_seed": (
+        "Use smallaxe.set_seed() or the model's seed parameter, which decide the split "
+        "seed, instead.",
+        lambda: _resolve_split_seed,
+    ),
 }
 __getattr__ = _deprecation.module_getattr(__name__, _MOVED)
 __dir__ = _deprecation.module_dir(globals(), _MOVED)

@@ -542,6 +542,12 @@ _PRIVATE = [
     ("smallaxe.search.optimize", "VALID_METRICS", "_VALID_METRICS", "TASK_METRICS"),
     ("smallaxe.search.optimize", "HYPEROPT_AVAILABLE", "_HYPEROPT_AVAILABLE", "hyperopt"),
     ("smallaxe.search", "HYPEROPT_AVAILABLE", None, "hyperopt"),
+    # Helpers 0.10 exposed by importing them.
+    ("smallaxe.search.optimize", "infer_feature_cols", "_infer_feature_cols", "fit()"),
+    ("smallaxe.search.optimize", "warn_ignored_cols", "_warn_ignored_cols", "fit()"),
+    ("smallaxe.search.optimize", "check_training_data", "_check_training_data", "fit()"),
+    ("smallaxe.search.optimize", "resolve_split_seed", "_resolve_split_seed", "set_seed"),
+    ("smallaxe.training.base", "resolve_split_seed", "_resolve_split_seed", "set_seed"),
     ("smallaxe.training.catboost", "is_catboost_available", "_is_catboost_available", "get("),
     ("smallaxe.training.catboost", "catboost_install_hint", "_catboost_install_hint", "get("),
     ("smallaxe.training.xgboost", "XGBOOST_AVAILABLE", None, "available_models()"),
