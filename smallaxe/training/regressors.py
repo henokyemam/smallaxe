@@ -1,9 +1,7 @@
 """Regressors factory for creating regression models."""
 
-import os
 from typing import Any, Dict, List
 
-from smallaxe import _fs
 from smallaxe.exceptions import ValidationError
 from smallaxe.training import algorithm
 from smallaxe.training.base import Model, Regressor
@@ -154,8 +152,9 @@ class Regressors:
             The loaded regressor.
 
         Raises:
-            FileNotFoundError: If the model directory or metadata file doesn't exist.
-            ValidationError: If the saved model is not a regressor.
+            ValidationError: If the path or its ``metadata.json`` does not exist, the
+                artifact is invalid (see :meth:`~smallaxe.training.base.Model.load`), or the
+                saved model is not a regressor.
             DependencyError: If the saved model's algorithm is not installed.
 
         Example:
@@ -166,12 +165,6 @@ class Regressors:
             >>> loaded_model = Regressors.load('/path/to/model')
             >>> predictions = loaded_model.predict(df)
         """
-        metadata_path = os.path.join(path, "metadata.json")
-        if not _fs.exists(metadata_path):
-            raise FileNotFoundError(
-                f"Model metadata not found at {metadata_path}. "
-                "Ensure the path points to a valid model directory."
-            )
         model = Model.load(path)
         if not isinstance(model, Regressor):
             saved = algorithm.legacy_class_name(model.algorithm.name, model.task_type)

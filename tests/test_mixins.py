@@ -1,5 +1,6 @@
 """Tests for training mixins."""
 
+import json
 import os
 import tempfile
 from typing import Any, Dict
@@ -220,7 +221,11 @@ class TestParamMixin:
 
 
 class TestPersistenceMixin:
-    """Tests for PersistenceMixin."""
+    """Tests for PersistenceMixin: the save rule and reading the saved state back.
+
+    Loading a model is :meth:`smallaxe.training.base.Model.load`; the mixin has no
+    ``load`` of its own, so there is one load rule.
+    """
 
     def test_save_before_fit_raises_error(self):
         """Test that save before fit raises ModelNotFittedError."""
@@ -230,8 +235,8 @@ class TestPersistenceMixin:
             with pytest.raises(ModelNotFittedError, match="not been fitted"):
                 mixin.save(path)
 
-    def test_save_and_load_roundtrip(self):
-        """Test save and load roundtrip."""
+    def test_save_and_read_state_roundtrip(self):
+        """The saved state reads back without the header keys."""
         mixin = ConcretePersistenceMixin()
         mixin.fit(42)
 
@@ -239,9 +244,30 @@ class TestPersistenceMixin:
             path = os.path.join(tmpdir, "model")
             mixin.save(path)
 
-            loaded = ConcretePersistenceMixin.load(path)
-            assert loaded._value == 42
-            assert loaded._is_fitted is True
+            state = ConcretePersistenceMixin._read_saved_state(path)
+            assert state == {
+                "value": 42,
+                "is_fitted": True,
+                "__class__": "ConcretePersistenceMixin",
+                "__module__": __name__,
+            }
+
+    def test_save_writes_the_versioned_header(self):
+        mixin = ConcretePersistenceMixin()
+        mixin.fit(42)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = os.path.join(tmpdir, "model")
+            mixin.save(path)
+
+            with open(os.path.join(path, "metadata.json")) as handle:
+                metadata = json.load(handle)
+            assert metadata["format_version"] == 1
+            assert metadata["kind"] == "model"
+            assert metadata["smallaxe_version"] == smallaxe.__version__
+
+    def test_mixin_has_no_load_of_its_own(self):
+        assert not hasattr(PersistenceMixin, "load")
 
     def test_save_creates_directory(self):
         """Test that save creates the directory if it doesn't exist."""
@@ -254,16 +280,16 @@ class TestPersistenceMixin:
             assert os.path.exists(path)
             assert os.path.exists(os.path.join(path, "metadata.json"))
 
-    def test_load_invalid_path_raises_error(self):
-        """Test that load with invalid path raises ValidationError."""
+    def test_read_state_invalid_path_raises_error(self):
+        """Test that reading a missing path raises ValidationError."""
         with pytest.raises(ValidationError, match="does not exist"):
-            ConcretePersistenceMixin.load("/nonexistent/path")
+            ConcretePersistenceMixin._read_saved_state("/nonexistent/path")
 
-    def test_load_missing_metadata_raises_error(self):
-        """Test that load without metadata.json raises ValidationError."""
+    def test_read_state_missing_metadata_raises_error(self):
+        """Test that a directory without metadata.json raises ValidationError."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            with pytest.raises(ValidationError, match="metadata.json not found"):
-                ConcretePersistenceMixin.load(tmpdir)
+            with pytest.raises(ValidationError, match="expected metadata.json"):
+                ConcretePersistenceMixin._read_saved_state(tmpdir)
 
     def test_save_empty_path_raises_error(self):
         """Test that save with empty path raises ValidationError."""

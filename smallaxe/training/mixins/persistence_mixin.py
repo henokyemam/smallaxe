@@ -1,21 +1,26 @@
-"""PersistenceMixin for saving and loading models."""
+"""PersistenceMixin: how a model is saved, and how its saved state is read back.
 
-import os
+A model artifact is a directory holding the model's own files (the Spark model, written
+by :meth:`PersistenceMixin._save_artifacts`) and a versioned ``metadata.json``
+(:mod:`smallaxe._artifact`, kind ``"model"``) written last, so a directory with a
+``metadata.json`` is a complete artifact.
+
+Turning saved state back into a model is :meth:`smallaxe.training.base.Model.load`, the
+one load rule for concrete models; this mixin only reads and checks the metadata
+(:meth:`PersistenceMixin._read_saved_state`).
+"""
+
 from abc import ABC, abstractmethod
-from typing import Any, Dict, Type, TypeVar
+from typing import Any, Dict
 
-from smallaxe import _fs
+from smallaxe import _artifact, _fs
 from smallaxe.exceptions import ModelNotFittedError, ValidationError
 
-T = TypeVar("T", bound="PersistenceMixin")
+ARTIFACT_KIND = "model"
 
 
 class PersistenceMixin(ABC):
-    """Mixin providing model persistence functionality.
-
-    This mixin provides a consistent interface for saving and loading
-    trained models to/from disk.
-    """
+    """Mixin providing the save rule for models and reading their saved state."""
 
     @abstractmethod
     def _get_persistence_state(self) -> Dict[str, Any]:
@@ -55,18 +60,22 @@ class PersistenceMixin(ABC):
         self._fitted = value
 
     def save(self, path: str) -> None:
-        """Save the model to disk.
+        """Save the model as a directory at ``path``.
 
-        Creates a directory at the specified path containing:
-        - metadata.json: Model parameters and configuration
-        - model artifacts (model-specific files)
+        The directory holds the model's files (``spark_model/``) and ``metadata.json``
+        with ``format_version``, ``kind`` (``"model"``), ``smallaxe_version`` and the
+        model's state. Saving over an existing artifact first removes its
+        ``metadata.json``, then writes the model files, then the new ``metadata.json``:
+        if saving fails part way, the directory is not mistaken for the old artifact.
+        All IO goes through the Hadoop FileSystem layer, so ``dbfs:/``, ``s3://`` and
+        ``hdfs://`` paths work.
 
         Args:
             path: Directory path to save the model to.
 
         Raises:
             ModelNotFittedError: If the model has not been fitted.
-            ValidationError: If the path is invalid.
+            ValidationError: If the path is empty.
 
         Example:
             >>> model.fit(df, label_col='target', feature_cols=['f1', 'f2'])
@@ -78,19 +87,13 @@ class PersistenceMixin(ABC):
         if not path:
             raise ValidationError("Path cannot be empty.")
 
-        # Get model state
         state = self._get_persistence_state()
-
-        # Add class information for loading
         state["__class__"] = self.__class__.__name__
         state["__module__"] = self.__class__.__module__
 
-        # Save metadata to the same filesystem Spark uses for the model artifacts
-        # (local, DBFS, S3, HDFS, ...), so save/load round-trips on any deployment.
-        _fs.write_json(os.path.join(path, "metadata.json"), state)
-
-        # Allow subclasses to save additional artifacts
+        _fs.delete(_fs.join(path, _artifact.METADATA_FILE))
         self._save_artifacts(path)
+        _artifact.write_metadata(path, ARTIFACT_KIND, state)
 
     def _save_artifacts(self, path: str) -> None:  # noqa: B027
         """Save additional model artifacts.
@@ -104,57 +107,22 @@ class PersistenceMixin(ABC):
         pass
 
     @classmethod
-    def load(cls: Type[T], path: str) -> T:
-        """Load a model from disk.
+    def _read_saved_state(cls, path: str) -> Dict[str, Any]:
+        """Read and check the ``metadata.json`` of the model artifact at ``path``.
+
+        Artifacts written by smallaxe 0.10 and earlier have no header and are returned
+        as they are; the caller validates their keys.
 
         Args:
-            path: Directory path to load the model from.
+            path: The artifact directory.
 
         Returns:
-            The loaded model instance.
+            The saved state, without the header keys.
 
         Raises:
-            ValidationError: If the path doesn't exist or is invalid.
-            ValidationError: If the saved model type doesn't match.
-
-        Example:
-            >>> model = RandomForestRegressor.load('/path/to/model')
-            >>> predictions = model.predict(df)
+            ValidationError: If the path or its ``metadata.json`` does not exist, the
+                file cannot be read, it holds another kind of artifact, or it was
+                written by a newer smallaxe.
         """
-        if not path or not _fs.exists(path):
-            raise ValidationError(f"Model path does not exist: {path}")
-
-        metadata_path = os.path.join(path, "metadata.json")
-        if not _fs.exists(metadata_path):
-            raise ValidationError(f"Invalid model directory: metadata.json not found at {path}")
-
-        # Load metadata
-        state = _fs.read_json(metadata_path)
-
-        # Verify class matches
-        saved_class = state.pop("__class__", None)
-        state.pop("__module__", None)  # Remove module info from state
-
-        if saved_class and saved_class != cls.__name__:
-            raise ValidationError(
-                f"Model type mismatch: expected {cls.__name__}, got {saved_class}."
-            )
-
-        # Create new instance and restore state
-        instance = cls.__new__(cls)
-        instance._set_persistence_state(state)
-
-        # Allow subclasses to load additional artifacts
-        instance._load_artifacts(path)
-
-        return instance
-
-    def _load_artifacts(self, path: str) -> None:  # noqa: B027
-        """Load additional model artifacts.
-
-        Override in subclasses to load model-specific files.
-
-        Args:
-            path: Directory path where artifacts are stored.
-        """
-        pass
+        metadata = _artifact.read_metadata(path, ARTIFACT_KIND, allow_unversioned=True)
+        return {key: value for key, value in metadata.items() if key not in _artifact.RESERVED_KEYS}

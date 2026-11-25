@@ -14,6 +14,7 @@ optional package, at import time.
 """
 
 import importlib
+import importlib.metadata
 import sys
 from dataclasses import dataclass, field
 from typing import (
@@ -178,6 +179,28 @@ class Algorithm:
     def _resolve(self, path: str) -> Any:
         module_name, _, attr = path.rpartition(".")
         return getattr(_import_estimator_module(self, module_name), attr)
+
+
+def package_version(record: Algorithm) -> Optional[str]:
+    """The installed version of ``record``'s optional package, for diagnosis.
+
+    Read from the package's distribution metadata, or else from the ``__version__`` of
+    its module when that is already imported (catboost_spark ships inside the Spark
+    package jar, so pip may not know it). Never imports anything.
+
+    Returns:
+        The version string, or None for an algorithm shipped with PySpark or when the
+        version cannot be read.
+    """
+    if record.dependency is None:
+        return None
+    try:
+        return importlib.metadata.version(record.dependency.package)
+    except importlib.metadata.PackageNotFoundError:
+        pass
+    module = sys.modules.get(record.module.partition(".")[0])
+    value = getattr(module, "__version__", None)
+    return None if value is None else str(value)
 
 
 def resolve(path: str) -> Any:

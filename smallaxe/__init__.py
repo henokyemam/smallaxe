@@ -5,7 +5,7 @@ smallaxe - A PySpark MLOps library for simplified model training and optimizatio
 import warnings
 from contextlib import contextmanager
 from importlib.metadata import PackageNotFoundError, version
-from typing import Any, Generator, Optional
+from typing import TYPE_CHECKING, Any, Generator, Optional, Union, cast
 
 from smallaxe._config import (
     VALID_CACHE_STRATEGIES,
@@ -13,6 +13,9 @@ from smallaxe._config import (
     _config,
 )
 from smallaxe.exceptions import ConfigurationError
+
+if TYPE_CHECKING:  # pragma: no cover - smallaxe.training is imported only when used
+    from smallaxe.training.base import Classifier, Regressor
 
 try:
     __version__ = version("smallaxe")
@@ -30,7 +33,38 @@ __all__ = [
     "get_seed",
     "set_cache_strategy",
     "get_cache_strategy",
+    "load_model",
 ]
+
+
+def load_model(path: str) -> Union["Regressor", "Classifier"]:
+    """Load the model saved at ``path``, whatever its algorithm and task.
+
+    Reads artifacts written by ``model.save`` in this and every earlier smallaxe
+    release (0.8.x artifacts record the old class name, 0.9 and 0.10 ones have no
+    ``format_version``). The training package is imported here, so ``import smallaxe``
+    stays light.
+
+    Args:
+        path: The artifact directory (local, ``dbfs:/``, ``s3://``, ``hdfs://``, ...).
+
+    Returns:
+        The fitted :class:`~smallaxe.training.Regressor` or
+        :class:`~smallaxe.training.Classifier`.
+
+    Raises:
+        ValidationError: If the path or its ``metadata.json`` does not exist, it holds
+            another kind of artifact or was written by a newer smallaxe, or its metadata
+            is invalid (see :meth:`smallaxe.training.base.Model.load`).
+        DependencyError: If the saved model's algorithm is not installed.
+
+    Example:
+        >>> model = smallaxe.load_model('/path/to/model')
+        >>> predictions = model.predict(df)
+    """
+    from smallaxe.training.base import Model
+
+    return cast("Union[Regressor, Classifier]", Model.load(path))
 
 
 def set_verbosity(level: str) -> None:

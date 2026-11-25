@@ -1,7 +1,6 @@
 """Base classes for training models."""
 
 import math
-import os
 import warnings
 from contextlib import nullcontext
 from typing import Any, Dict, List, Literal, Mapping, Optional, Tuple, Union
@@ -11,7 +10,6 @@ from pyspark.sql import functions as F
 from pyspark.sql.types import BooleanType, DoubleType, FloatType, NumericType
 
 import smallaxe
-from smallaxe import _fs
 from smallaxe.exceptions import (
     ColumnNotFoundError,
     ModelNotFittedError,
@@ -952,8 +950,8 @@ class BaseModel(
         Args:
             state: Dictionary containing saved model state.
         """
-        self._task = state.get("task", "simple_regression")
-        self._params = state.get("params", {})
+        self._task = state["task"]
+        self._params = dict(state.get("params") or {})
         self._feature_cols = state.get("feature_cols", [])
         # Artifacts saved before 0.10.0 read the vector from a column named "features".
         self._features_col = state.get("features_col") or "features"
@@ -1200,6 +1198,33 @@ class Model(BaseModel):
 
     # --- PersistenceMixin ---
 
+    def _capture_training_metadata(
+        self,
+        df: DataFrame,
+        label_col: str,
+        feature_cols: List[str],
+        data_stats: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        """Capture training metadata, adding the algorithm package and its version.
+
+        ``algorithm_package`` / ``algorithm_package_version`` sit next to
+        ``smallaxe_version`` and ``spark_version``; both are None for an algorithm
+        shipped with PySpark. Loading ignores them; they are there for diagnosis.
+        """
+        super()._capture_training_metadata(df, label_col, feature_cols, data_stats)
+        dependency = self._algorithm.dependency
+        package = {
+            "algorithm_package": dependency.package if dependency is not None else None,
+            "algorithm_package_version": _algorithm.package_version(self._algorithm),
+        }
+        metadata: Dict[str, Any] = {}
+        for key, value in self._metadata.items():
+            metadata[key] = value
+            if key == "smallaxe_version":
+                metadata.update(package)
+        metadata.update({key: value for key, value in package.items() if key not in metadata})
+        self._metadata = metadata
+
     def _get_persistence_state(self) -> Dict[str, Any]:
         state = super()._get_persistence_state()
         state["algorithm"] = self._algorithm.name
@@ -1222,22 +1247,30 @@ class Model(BaseModel):
     def load(cls, path: str) -> "Model":
         """Load a saved model, returning a :class:`Regressor` or :class:`Classifier`.
 
-        Reads ``algorithm`` from ``metadata.json``; artifacts written by smallaxe 0.8.x
-        record the old class name instead and are mapped through
-        :data:`~smallaxe.training.algorithm.LEGACY_CLASS_NAMES`.
+        This is the one load rule: :func:`smallaxe.load_model`, ``Regressors.load`` and
+        ``Classifiers.load`` all come here. ``metadata.json`` is checked before anything
+        is built: an artifact with the header must be a ``"model"`` one in a format this
+        smallaxe reads; an artifact without it (smallaxe 0.10 and earlier) is accepted.
+        ``algorithm`` names the algorithm; artifacts written by smallaxe 0.8.x record the
+        old class name instead, mapped through
+        :data:`~smallaxe.training.algorithm.LEGACY_CLASS_NAMES`. ``task`` is required and
+        every saved parameter must be in the algorithm's table for that task; parameters
+        the artifact leaves out take their defaults.
+
+        Args:
+            path: The artifact directory.
+
+        Returns:
+            The fitted model.
 
         Raises:
-            ValidationError: If the path or metadata is invalid, or the saved model is
-                not the kind (or algorithm) this class expects.
+            ValidationError: If the path or its ``metadata.json`` does not exist, it holds
+                another kind of artifact or was written by a newer smallaxe, its
+                ``algorithm``, ``task`` or ``params`` are missing or unknown, or the saved
+                model is not the kind (or algorithm) this class expects.
             DependencyError: If the saved model's algorithm is not installed.
         """
-        if not path or not _fs.exists(path):
-            raise ValidationError(f"Model path does not exist: {path}")
-        metadata_path = os.path.join(path, "metadata.json")
-        if not _fs.exists(metadata_path):
-            raise ValidationError(f"Invalid model directory: metadata.json not found at {path}")
-
-        state = _fs.read_json(metadata_path)
+        state = cls._read_saved_state(path)
         saved_class = state.pop("__class__", None)
         state.pop("__module__", None)
 
@@ -1250,9 +1283,9 @@ class Model(BaseModel):
                 )
             name = _algorithm.LEGACY_CLASS_NAMES[saved_class][0]
         algorithm = _algorithm.get(name)
-        algorithm.require()
+        task = _saved_task(path, state, algorithm)
+        state["params"] = _saved_params(path, state, algorithm, task)
 
-        task = state.get("task")
         if task in BaseModel.CLASSIFICATION_TASKS:
             kind, task_type = Classifier, "classification"
         else:
@@ -1272,6 +1305,7 @@ class Model(BaseModel):
             raise ValidationError(
                 f"Model type mismatch: expected {cls.__name__}, got {saved_name}."
             )
+        algorithm.require()
 
         instance = kind.__new__(kind)
         instance._algorithm = algorithm
@@ -1281,6 +1315,57 @@ class Model(BaseModel):
         if task == "multiclass" and instance._validation_scores:
             _warn_if_class1_scores(instance._validation_scores)
         return instance
+
+
+def _saved_task(path: str, state: Dict[str, Any], algorithm: Algorithm) -> str:
+    """The saved ``task``, checked against what ``algorithm`` trains.
+
+    Every smallaxe release has written ``task``, so a missing one means the artifact
+    is corrupted.
+
+    Raises:
+        ValidationError: If ``task`` is missing or not a task of ``algorithm``.
+    """
+    task = state.get("task")
+    if task is None:
+        raise ValidationError(
+            f"Cannot load model: {path!r} has no 'task' in its metadata.json; the artifact "
+            "is corrupted."
+        )
+    if not isinstance(task, str) or task not in algorithm.tasks:
+        raise ValidationError(
+            f"Cannot load model: {path!r} records task {task!r}, which {algorithm.name!r} "
+            f"does not train (its tasks are {sorted(algorithm.tasks)})."
+        )
+    return task
+
+
+def _saved_params(
+    path: str, state: Dict[str, Any], algorithm: Algorithm, task: str
+) -> Dict[str, Any]:
+    """The saved ``params``, checked against ``algorithm``'s table for ``task``.
+
+    Raises:
+        ValidationError: If ``params`` is not a mapping or names a parameter the table
+            does not have for ``task``.
+    """
+    params = state.get("params")
+    if params is None:
+        return {}
+    if not isinstance(params, dict):
+        raise ValidationError(
+            f"Cannot load model: 'params' in {path!r} must be a JSON object, got "
+            f"{type(params).__name__}; the artifact is corrupted."
+        )
+    known = {param.name for param in algorithm.visible_params(task)}
+    unknown = sorted(set(params) - known)
+    if unknown:
+        raise ValidationError(
+            f"Cannot load model: {path!r} sets parameter(s) {unknown}, which "
+            f"{algorithm.name!r} does not have for task {task!r} (it has {sorted(known)}). "
+            "The artifact was written by a newer smallaxe or is corrupted."
+        )
+    return dict(params)
 
 
 class Regressor(Model, BaseRegressor):

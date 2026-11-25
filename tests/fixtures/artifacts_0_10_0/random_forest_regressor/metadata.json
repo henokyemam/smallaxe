@@ -1,0 +1,49 @@
+{
+  "task": "simple_regression",
+  "params": {
+    "max_depth": 3,
+    "n_estimators": 5,
+    "seed": 42
+  },
+  "feature_cols": [
+    "age",
+    "income"
+  ],
+  "features_col": "__smallaxe_features__",
+  "label_col": "target",
+  "exclude_cols": [],
+  "is_fitted": true,
+  "metadata": {
+    "training_timestamp": "2026-11-25T00:34:11.809254",
+    "spark_version": "3.5.9",
+    "smallaxe_version": "0.10.0",
+    "label_col": "target",
+    "feature_cols": [
+      "age",
+      "income"
+    ],
+    "n_samples": 120,
+    "n_features": 2,
+    "seed": 42,
+    "missing_counts": {
+      "age": 0,
+      "income": 0
+    },
+    "feature_cols_inferred": false,
+    "ignored_cols": {},
+    "split_seed": null,
+    "refit": true,
+    "kept_model": "full",
+    "n_training_rows": 120,
+    "label_min": 56.0,
+    "label_max": 651.0,
+    "label_mean": 355.48333333333335,
+    "label_stddev": 173.93686594087328,
+    "task": "simple_regression",
+    "task_type": "regression"
+  },
+  "validation_scores": null,
+  "algorithm": "random_forest",
+  "__class__": "Regressor",
+  "__module__": "smallaxe.training.base"
+}
