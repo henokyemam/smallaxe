@@ -13,7 +13,7 @@
 # MAGIC | Multiclass (7) | Covertype, 60k sample, one-hot groups collapsed to categoricals | 60,000 | 10 | 2 (4 + 40 levels) | none |
 # MAGIC
 # MAGIC Checks per algorithm: full `Pipeline` (Imputer → Scaler → Encoder → model), row preservation,
-# MAGIC smallaxe metrics cross-checked against scikit-learn, `train_test` / stratified `kfold` validation,
+# MAGIC smallaxe metrics cross-checked against scikit-learn, `train_test` / `kfold` validation,
 # MAGIC `predict_proba`, `feature_importances`, save/load round-trip, `search.optimize`, label encoding,
 # MAGIC plus probes for known gaps (pipeline persistence, native categoricals, null-row dropping, unseen categories).
 # MAGIC
@@ -532,7 +532,7 @@ for algo in ALGOS:
 
 # COMMAND ----------
 
-# MAGIC %md ## B. Validation strategies on preprocessed data (train_test, stratified kfold, feature inference)
+# MAGIC %md ## B. Validation strategies on preprocessed data (train_test, kfold, feature inference)
 
 # COMMAND ----------
 
@@ -570,8 +570,6 @@ def train_test_check(algo, ds):
         _, holdout = m._train_test_split(
             ds.train_p,
             test_size=0.2,
-            stratified=True,
-            label_col=ds.label,
             seed=m.metadata["split_seed"],
         )
         pdf = m.predict(holdout).select(ds.label, "predict_label").toPandas()
@@ -634,14 +632,14 @@ for algo in ALGOS:
         "B_validation",
         algo,
         "binary",
-        "stratified kfold(3) + cache_strategy=disk",
+        "kfold(3) + cache_strategy=disk",
         lambda algo=algo: kfold_check(algo, BIN),
     )
     step(
         "B_validation",
         algo,
         "multiclass",
-        "train_test (stratified)",
+        "train_test",
         lambda algo=algo: train_test_check(algo, MULTI),
     )
 

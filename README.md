@@ -48,7 +48,7 @@ from smallaxe.datasets import load_sample_regression
 smallaxe.set_seed(42)  # reproducible splits
 
 # Load sample data
-dataframe = load_sample_regression(spark)
+dataframe = load_sample_regression()   # uses the active SparkSession
 
 # Train, evaluate, save, load, and predict in a handful of lines.
 # Feature columns are inferred from the numeric columns when not specified.
@@ -155,24 +155,63 @@ pipeline.fit(
 predictions = pipeline.predict(new_df)
 ```
 
-## Upgrading to 0.11
+### Validating a Pipeline
 
-smallaxe 0.11 renames the spellings that 1.0 removes. The old ones still work and emit
-one `DeprecationWarning` naming the replacement:
+`Pipeline.fit` takes the model's validation options and hands them to the model step:
 
-| Deprecated | Use instead |
-|------------|-------------|
-| `Regressors.xgboost()`, `Classifiers.random_forest(task=...)`, `Regressors.load(path)` | `regressors.xgboost()`, `classifiers.random_forest(task=...)`, `regressors.load(path)` (`from smallaxe.training import regressors, classifiers`) |
-| `Regressors.list_models()` | `regressors.algorithms()`, `regressors.available_models()` |
-| `model.set_param({"max_depth": 5})` | `model.set_params(max_depth=5)` |
-| `fit(df=...)`, `predict(df=...)`, `metrics.rmse(df=...)`, ... | `dataframe=`, or pass the DataFrame positionally |
-| `fit(..., stratified=True)`, `optimize.run(..., stratified=True)` | nothing: it had no effect |
-| `metrics.log_loss(dataframe, "label", "probability", 1e-6)` | `log_loss(..., eps=1e-6)` |
-| `dataset_info(name)` printing | `info = dataset_info(name, verbose=False)` (a dict) |
+```python
+pipeline.fit(
+    dataframe,
+    label_col="target",
+    numerical_cols=["age", "income"],
+    categorical_cols=["city", "category"],
+    validation="kfold",
+    n_folds=5,
+)
+print(pipeline.validation_scores)   # the model step's validation_scores
+```
 
-Helpers and constants that become private in 1.0 (for example
-`smallaxe.training.BaseModel`, `XGBOOST_AVAILABLE`, `optimize.VALID_METRICS`) warn
-when imported. [CHANGELOG.md](CHANGELOG.md) lists every item.
+The preprocessing steps are fitted on every row before the model is validated, so
+their statistics (imputed means, scaling ranges, encoder categories) include the rows
+validation holds out. The scores measure the model on that preprocessed data.
+
+## Upgrading to 1.0
+
+smallaxe 1.0 removes every spelling that 0.11 deprecated. Run your code on 0.11 first
+and fix each `DeprecationWarning`: it names the replacement, and then the code runs
+unchanged on 1.0. The "Upgrading from 0.x" list in [CHANGELOG.md](CHANGELOG.md) names
+every removed item and what to use instead. Models and pipelines saved by 0.8.1 and
+later still load.
+
+## Stability and versioning
+
+From 1.0, smallaxe follows [semantic versioning](https://semver.org): a patch release
+fixes bugs, a minor release adds to the API without breaking it, and only a major
+release removes or changes it incompatibly.
+
+The public API is:
+
+- every name listed in the `__all__` of a public module (one whose dotted path has no
+  part starting with `_`, such as `smallaxe.training.regressors`; `smallaxe._fs` is
+  private), and the public methods and attributes of the classes among them;
+- the arguments those functions and methods document, with their defaults and
+  behaviour;
+- the artifact formats: every artifact written by a 1.x release (models, pipelines,
+  `Imputer`, `Scaler`, `Encoder`) loads in every later 1.x release, and artifacts
+  written by 0.8.1 and later keep loading. A release that cannot read an artifact
+  written by a newer one says so instead of guessing.
+
+Names starting with `_`, the private modules, the exact text of messages and warnings,
+and `metadata` keys not listed in a docstring are not part of it.
+
+Before anything public is removed or changed incompatibly, it is deprecated: it keeps
+working and emits a `DeprecationWarning` naming its replacement for at least one minor
+release, and it is removed only in the next major release. `tests/test_public_api.py`
+pins the public surface, so an accidental change fails CI.
+
+The supported Python, PySpark and Java versions are exactly the ones CI tests, listed in
+the [compatibility matrix](#compatibility-matrix). Dropping one is announced in the
+CHANGELOG and happens only in a minor or major release.
 
 ## End-to-End Examples
 

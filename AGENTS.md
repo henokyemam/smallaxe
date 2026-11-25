@@ -9,10 +9,13 @@ smallaxe is a PySpark MLOps library that provides a scikit-learn-like interface 
 ```
 smallaxe/
 ├── smallaxe/                  # Main package
-│   ├── __init__.py            # Global config (verbosity, spark session, seed, cache)
+│   ├── __init__.py            # Global settings (verbosity, seed) and load / load_model / load_pipeline
+│   ├── _artifact.py           # Versioned metadata.json header of every saved artifact
+│   ├── _checks.py             # Shared argument checks (a DataFrame, a list of column names)
 │   ├── _config.py             # Internal config state
-│   ├── _deprecation.py        # DeprecationWarning helpers (df= keyword, private-name shims)
-│   ├── auto/                  # AutomatedTraining - train all algorithms and compare
+│   ├── _fs.py                 # Hadoop FileSystem IO (local, dbfs:/, s3://, hdfs://)
+│   ├── _warn.py               # caller_stacklevel(): warnings point at the user's line
+│   ├── auto/                  # AutomatedTraining (planned; empty)
 │   ├── datasets/              # Sample data loading utilities
 │   │   └── _data.py
 │   ├── exceptions/            # Custom exception hierarchy
@@ -27,21 +30,21 @@ smallaxe/
 │   │   └── scaler.py          # Feature scaling
 │   ├── search/                # Hyperparameter optimization via hyperopt
 │   ├── training/              # Model training classes
-│   │   ├── algorithm.py       # Algorithm/Param records, the translation rule, registry, 0.8.x name map
-│   │   ├── base.py            # BaseModel, Model, Regressor, Classifier
-│   │   ├── catboost.py        # CatBoost ALGORITHM record (+ deprecated class aliases)
-│   │   ├── classifiers.py     # classifiers.<algorithm>() / load() (+ deprecated Classifiers)
-│   │   ├── lightgbm.py        # LightGBM ALGORITHM record (+ deprecated class aliases)
+│   │   ├── algorithm.py       # Algorithm/Param records, task names, translation rule, registry
+│   │   ├── base.py            # Model, Regressor, Classifier (on BaseModel and the mixins)
+│   │   ├── catboost.py        # CatBoost ALGORITHM record
+│   │   ├── classifiers.py     # classifiers.<algorithm>() / load() / algorithms() / available_models()
+│   │   ├── lightgbm.py        # LightGBM ALGORITHM record
 │   │   ├── mixins/            # Composable model behaviors
 │   │   │   ├── metadata_mixin.py
 │   │   │   ├── param_mixin.py
 │   │   │   ├── persistence_mixin.py
 │   │   │   ├── spark_model_mixin.py
 │   │   │   └── validation_mixin.py
-│   │   ├── random_forest.py   # Random Forest ALGORITHM record (+ deprecated class aliases)
-│   │   ├── regressors.py      # regressors.<algorithm>() / load() (+ deprecated Regressors)
-│   │   └── xgboost.py         # XGBoost ALGORITHM record (+ deprecated class aliases)
-│   └── viz/                   # Plotly-based visualization
+│   │   ├── random_forest.py   # Random Forest ALGORITHM record
+│   │   ├── regressors.py      # regressors.<algorithm>() / load() / algorithms() / available_models()
+│   │   └── xgboost.py         # XGBoost ALGORITHM record
+│   └── viz/                   # Plotly-based visualization (planned; empty)
 ├── tests/                     # pytest test suite (session-scoped SparkSession)
 ├── .github/workflows/
 │   ├── ci.yml                 # CI pipeline
@@ -64,7 +67,10 @@ All models inherit from `BaseModel` which composes five mixins:
 - `SparkModelMixin` - PySpark MLlib model wrapping
 
 `BaseRegressor` and `BaseClassifier` extend `BaseModel` with task-type validation. All three
-stay in `smallaxe.training.base`; the public types are `Model`, `Regressor`, `Classifier`.
+are implementation classes in `smallaxe.training.base`, not exported by
+`smallaxe.training`; the public types are `Model`, `Regressor`, `Classifier`. `BaseModel`
+is abstract: `SparkModelMixin._fit_spark_model` and `_get_feature_importance` are
+implemented by `Model` from its algorithm record.
 
 ### The Algorithm Seam
 
@@ -75,23 +81,25 @@ lazily, so optional packages are never imported at load), column kwargs, task-fi
 params (LightGBM `objective`, CatBoost `lossFunction`), a feature-importances reader,
 the optional `Dependency`, and at most two code hooks (`prepare`, `fit_context`).
 `_estimator_kwargs()` is the single translation rule for all algorithms. Each algorithm
-file exports one `ALGORITHM` record; `algorithm.get(name)` is the registry. Vocabulary
-is in `GLOSSARY.md`.
+file exports one `ALGORITHM` record; `algorithm.get(name)` is the registry. The task
+names (`REGRESSION_TASKS`, `CLASSIFICATION_TASKS`, `ALL_TASKS`) are defined once, in
+`algorithm.py`. Vocabulary is in `GLOSSARY.md`.
 
-The eight 0.8.x classes (`XGBoostRegressor`, ...) remain as deprecated aliases until 1.0.
-Artifacts they saved load through `_LEGACY_CLASS_NAMES`; new artifacts record `algorithm`.
+New artifacts record `algorithm`. Artifacts saved by 0.8.x record their class name, which
+`Model.load` maps to the algorithm through the private `_LEGACY_CLASS_NAMES`, the only
+place those names appear.
 
 ### Factory Pattern
 
-The modules `smallaxe.training.regressors` and `smallaxe.training.classifiers` define one function per algorithm (`random_forest()`, `xgboost()`, `lightgbm()`, `catboost()`; the classifier ones take `task=`) that returns a `Regressor` / `Classifier` bound to that algorithm, plus `load(path)`, `algorithms()` and `available_models()`. The `Regressors` / `Classifiers` classes are their deprecated 0.x spelling and are removed in 1.0.
+The modules `smallaxe.training.regressors` and `smallaxe.training.classifiers` define one function per algorithm (`random_forest()`, `xgboost()`, `lightgbm()`, `catboost()`; the classifier ones take `task=`) that returns a `Regressor` / `Classifier` bound to that algorithm, plus `load(path)`, `algorithms()` and `available_models()`. They are the only factories. Each factory's docstring lists its algorithm's whole `Param` table; `tests/test_factories.py` keeps the two equal.
 
-### Deprecations
+### Public API
 
-Every deprecation goes through `smallaxe/_deprecation.py`: one `DeprecationWarning` naming the replacement and saying "removed in smallaxe 1.0", attributed to the first caller outside smallaxe. `df_keyword` keeps `df=` working where the parameter is now `dataframe`; `keyword_only` keeps positional values for keyword-only parameters; `module_getattr` keeps names that became private importable. smallaxe's own code never uses a deprecated spelling (`tests/test_deprecations.py` checks it).
+The public API is frozen at 1.0 and follows semantic versioning (README, "Stability and versioning"). Every module defines `__all__`; every module-level name outside it starts with `_`. `tests/test_public_api.py` pins each public module's `__all__` and the parameters of every public function, method and class: changing the snapshot is a deliberate API change and needs a CHANGELOG entry. A removal or incompatible change first deprecates the old spelling for at least one minor release (a `DeprecationWarning` naming the replacement, attributed to the caller with `smallaxe._warn.caller_stacklevel()`) and lands only in the next major release. Public methods raise smallaxe exceptions for user errors; check arguments with `smallaxe._checks` before any Spark job runs.
 
 ### Pipeline
 
-The `Pipeline` class chains preprocessing steps and a model into a single `fit()`/`predict()` flow, accepting `numerical_cols` and `categorical_cols` parameters. The model is fitted on exactly `numerical_cols` plus the Encoder's `output_cols` (the Pipeline owns its feature columns); whether a model needs an Encoder comes from its algorithm record's `accepts_raw_categoricals`. `Pipeline.save` writes each step's own artifact under `steps/` and a versioned `metadata.json` (kind `pipeline`) through `smallaxe._fs`; no pickle. `smallaxe.load(path)` loads any artifact by its kind.
+The `Pipeline` class chains preprocessing steps and a model into a single `fit()`/`predict()` flow, accepting `numerical_cols` and `categorical_cols` parameters. The model is fitted on exactly `numerical_cols` plus the Encoder's `output_cols` (the Pipeline owns its feature columns); whether a model needs an Encoder comes from its algorithm record's `accepts_raw_categoricals`. `Pipeline.fit` passes the model's validation options (`validation`, `test_size`, `n_folds`, `fold_key`, `refit`, `cache_strategy`, keyword-only) to the model step, and `Pipeline.validation_scores` reports them; preprocessing is fitted on every row first, so its statistics see the validation rows. `Pipeline.save` writes each step's own artifact under `steps/` and a versioned `metadata.json` (kind `pipeline`) through `smallaxe._fs`; no pickle. `smallaxe.load(path)` loads any artifact by its kind.
 
 ## Development
 
@@ -114,7 +122,7 @@ pip install -e ".[dev,all]"
 pytest
 ```
 
-Tests use a session-scoped `SparkSession` fixture (`local[2]` mode) defined in `tests/conftest.py`. `tests/test_algorithm.py` checks every algorithm's translation against fake estimators (no JVM packages needed); `tests/test_model_contract.py` runs the fit/predict/validate/save/load contract per (algorithm, task) wherever the package is installed; `tests/test_legacy_artifacts.py` loads models saved by 0.8.1. Per-algorithm files hold only behaviour unique to that algorithm.
+Tests use a session-scoped `SparkSession` fixture (`local[2]` mode) defined in `tests/conftest.py`. `tests/test_algorithm.py` checks every algorithm's translation against fake estimators (no JVM packages needed); `tests/test_model_contract.py` runs the fit/predict/validate/save/load contract per (algorithm, task) wherever the package is installed; `tests/test_legacy_artifacts.py` loads models saved by 0.8.1, 0.9.0 and 0.10.0; `tests/test_public_api.py` pins the public surface; `tests/test_removed.py` checks that every 0.x spelling is gone; `tests/test_user_errors.py` probes bad inputs for raw Python errors. Per-algorithm files hold only behaviour unique to that algorithm.
 
 ### Code Style
 
@@ -128,7 +136,7 @@ Tests use a session-scoped `SparkSession` fixture (`local[2]` mode) defined in `
 - Set parameters with `set_params(**params)`
 - Feature columns are auto-inferred from numeric and boolean columns if not specified; other columns are reported in one `UserWarning` and in `metadata["ignored_cols"]`
 - Validation strategies: `'none'`, `'train_test'`, `'kfold'`
-- Cache strategies (per `fit` call): `None` (default: cache only when fit reads the data more than once), `'none'`, `'memory'`, `'disk'`. The global `set_cache_strategy` is deprecated and has no effect.
+- Cache strategies (per `fit` call): `None` (default: cache only when fit reads the data more than once), `'none'`, `'memory'`, `'disk'`.
 - Task types: `'simple_regression'`, `'binary'`, `'multiclass'`
 - Optional algorithm deps are extras: `smallaxe[xgboost]`, `smallaxe[lightgbm]`, `smallaxe[catboost]`, `smallaxe[all]`
 
@@ -137,4 +145,5 @@ Tests use a session-scoped `SparkSession` fixture (`local[2]` mode) defined in `
 - Add tests for new features in `tests/test_<module>.py`
 - Maintain the mixin-based architecture for model behaviors
 - Keep the scikit-learn-like API consistent across all model types
-- Use `ValidationError` / `ColumnNotFoundError` / `ModelNotFittedError` from `smallaxe.exceptions`
+- Use `ValidationError` / `ColumnNotFoundError` / `ModelNotFittedError` from `smallaxe.exceptions`; a public method never raises a raw `ValueError` / `KeyError` / `TypeError` for a user error
+- A new public name goes in its module's `__all__` and in the `tests/test_public_api.py` snapshot, with a CHANGELOG entry
