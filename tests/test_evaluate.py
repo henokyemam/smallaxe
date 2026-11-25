@@ -120,6 +120,20 @@ class TestModelEvaluate:
 
         _assert_scores(model.evaluate(extra), model.evaluate(frame))
 
+    @pytest.mark.parametrize("task", ["regression", "binary"])
+    def test_columns_named_like_model_outputs_are_ignored(self, frame, task):
+        """A frame that already holds prediction-like columns can still be evaluated."""
+        if task == "regression":
+            model, label = Regressors.random_forest(n_estimators=5, seed=1), "target"
+        else:
+            model, label = Classifiers.random_forest(n_estimators=5, seed=1), "binary"
+        model.fit(frame, label_col=label, feature_cols=FEATURES)
+        clashing = frame
+        for name in ("prediction", "probability", "rawPrediction", "predict_label"):
+            clashing = clashing.withColumn(name, F.lit(0.0))
+
+        _assert_scores(model.evaluate(clashing), model.evaluate(frame))
+
     def test_before_fit_raises(self, frame):
         with pytest.raises(ModelNotFittedError):
             Regressors.random_forest().evaluate(frame)

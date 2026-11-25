@@ -215,7 +215,8 @@ class TestLoadRejects:
         missing = str(tmp_path / "nope")
         with pytest.raises(ValidationError) as info:
             LOADERS[loader](missing)
-        assert str(info.value) == f"Cannot load model: path {missing!r} does not exist."
+        assert str(info.value).startswith(f"Cannot load model: path {missing!r} does not exist.")
+        assert "file:/" in str(info.value)
 
     @pytest.mark.parametrize("loader", sorted(LOADERS))
     def test_directory_without_metadata(self, tmp_path, loader):

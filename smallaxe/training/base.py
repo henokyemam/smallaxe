@@ -947,7 +947,10 @@ class BaseModel(
         for col in [label] + list(self._feature_cols):
             if col not in available:
                 raise ColumnNotFoundError(column=col, available_columns=available)
-        return _undefined_to_none(self._evaluate(df, label))
+        # Score only the columns the model needs, so a column of df that shares a name
+        # with one the model writes (``prediction``, ``probability``) cannot collide.
+        needed = [label] + [col for col in self._feature_cols if col != label]
+        return _undefined_to_none(self._evaluate(df.select(*needed), label))
 
     def clone(self) -> "BaseModel":
         """Return an unfitted copy with the same task and parameter values."""

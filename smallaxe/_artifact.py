@@ -21,6 +21,13 @@ FORMAT_VERSION = 1
 METADATA_FILE = "metadata.json"
 RESERVED_KEYS = ("format_version", "kind", "smallaxe_version")
 
+# Appended to "path does not exist" errors. On Databricks a path such as /tmp/x or
+# /dbfs/tmp/x is looked up on dbfs:/, not on the driver's disk, which is easy to miss.
+_PATH_HINT = (
+    " A path without a scheme is resolved on Spark's default filesystem (dbfs:/ on "
+    "Databricks); use a file:/ URI for a path on the driver's local disk."
+)
+
 
 def _smallaxe_version() -> str:
     from smallaxe import __version__
@@ -104,7 +111,7 @@ def saved_kind(path: str) -> str:
             ``metadata.json`` cannot be read or names no kind.
     """
     if not path or not _fs.exists(path):
-        raise ValidationError(f"Cannot load artifact: path {path!r} does not exist.")
+        raise ValidationError(f"Cannot load artifact: path {path!r} does not exist.{_PATH_HINT}")
     metadata_path = _fs.join(path, METADATA_FILE)
     if _fs.exists(metadata_path):
         metadata = read_json(metadata_path, "artifact")
@@ -146,7 +153,7 @@ def read_metadata(path: str, kind: str, allow_unversioned: bool = False) -> Dict
             is missing or newer than :data:`FORMAT_VERSION`.
     """
     if not path or not _fs.exists(path):
-        raise ValidationError(f"Cannot load {kind}: path {path!r} does not exist.")
+        raise ValidationError(f"Cannot load {kind}: path {path!r} does not exist.{_PATH_HINT}")
     metadata_path = _fs.join(path, METADATA_FILE)
     if not _fs.exists(metadata_path):
         raise ValidationError(
