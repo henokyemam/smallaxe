@@ -1,0 +1,51 @@
+{
+  "task": "multiclass",
+  "params": {
+    "max_depth": 3,
+    "n_estimators": 5,
+    "seed": 42
+  },
+  "feature_cols": [
+    "age",
+    "income"
+  ],
+  "features_col": "__smallaxe_features__",
+  "label_col": "multiclass",
+  "exclude_cols": [],
+  "is_fitted": true,
+  "metadata": {
+    "training_timestamp": "2026-11-25T00:34:14.587709",
+    "spark_version": "3.5.9",
+    "smallaxe_version": "0.10.0",
+    "label_col": "multiclass",
+    "feature_cols": [
+      "age",
+      "income"
+    ],
+    "n_samples": 120,
+    "n_features": 2,
+    "seed": 42,
+    "missing_counts": {
+      "age": 0,
+      "income": 0
+    },
+    "feature_cols_inferred": false,
+    "ignored_cols": {},
+    "split_seed": null,
+    "refit": true,
+    "kept_model": "full",
+    "n_training_rows": 120,
+    "class_counts": {
+      "0": 40,
+      "1": 40,
+      "2": 40
+    },
+    "n_classes": 3,
+    "task": "multiclass",
+    "task_type": "classification"
+  },
+  "validation_scores": null,
+  "algorithm": "random_forest",
+  "__class__": "Classifier",
+  "__module__": "smallaxe.training.base"
+}
