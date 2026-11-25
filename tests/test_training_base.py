@@ -279,6 +279,37 @@ class TestBaseModelMetadata:
         assert metadata["n_classes"] == 2
 
 
+class TestSeedParam:
+    """The model's own seed is read without hiding errors."""
+
+    def test_model_without_a_seed_param_has_no_seed(self):
+        assert ConcreteRegressor()._seed_param() is None
+
+    def test_seed_param_is_read(self):
+        class Seeded(ConcreteRegressor):
+            @property
+            def params(self):
+                return {**super().params, "seed": "Random seed"}
+
+            @property
+            def default_params(self):
+                return {**super().default_params, "seed": None}
+
+        assert Seeded()._seed_param() is None
+        assert Seeded().set_param({"seed": 4})._seed_param() == 4
+
+    def test_errors_reading_params_propagate(self):
+        """A broken param table must not silently unseed the model."""
+
+        class Broken(ConcreteRegressor):
+            @property
+            def params(self):
+                raise RuntimeError("param table is broken")
+
+        with pytest.raises(RuntimeError, match="param table is broken"):
+            Broken()._seed_param()
+
+
 class TestBaseModelFit:
     """Tests for fit functionality."""
 

@@ -56,13 +56,19 @@ def split_hash(df: DataFrame, seed: int, fold_key: Optional[str] = None) -> Colu
     return F.hash(*[F.col(c) for c in columns], F.lit(seed)).bitwiseAND(F.lit(_HASH_RANGE - 1))
 
 
-def resolve_split_seed(seed: Optional[int] = None) -> int:
-    """The seed splits use: the argument, else the global seed, else a fresh random one."""
+def resolve_split_seed(seed: Optional[int] = None, fallback: Optional[int] = None) -> int:
+    """The seed splits use: ``seed``, else the global seed, else ``fallback``, else random.
+
+    ``fallback`` lets a caller that fits many models (``optimize.run``) give them all one
+    split when nothing else seeds it.
+    """
     if seed is not None:
         return seed
     global_seed = smallaxe.get_seed()
     if global_seed is not None:
         return global_seed
+    if fallback is not None:
+        return fallback
     return random.randrange(_HASH_RANGE)
 
 

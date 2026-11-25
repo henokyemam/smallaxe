@@ -210,7 +210,15 @@ ALGORITHM = Algorithm(
     fit_context=_training_dir,
 )
 
-CATBOOST_AVAILABLE = ALGORITHM.available()
+
+def __getattr__(name: str) -> Any:
+    """``CATBOOST_AVAILABLE``, probed on access so importing this module imports no catboost_spark.
+
+    Re-probed on every access, as :func:`is_catboost_available` is.
+    """
+    if name == "CATBOOST_AVAILABLE":
+        return ALGORITHM.available()
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 class CatBoostRegressor(Regressor):

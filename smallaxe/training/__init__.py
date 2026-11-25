@@ -1,4 +1,11 @@
-"""Training module - model classes, algorithm records, and factories."""
+"""Training module - model classes, algorithm records, and factories.
+
+Importing it imports no optional package. The algorithm modules below hold only
+declarative records; xgboost.spark, synapse.ml.lightgbm, and catboost_spark are
+imported when an algorithm is first checked or used, and the two JVM packages,
+which both patch pyspark.ml.wrapper process-wide, always in the order
+``algorithm._PATCHES_PYSPARK`` fixes.
+"""
 
 from smallaxe.training import algorithm
 from smallaxe.training.base import (
@@ -9,10 +16,6 @@ from smallaxe.training.base import (
     Model,
     Regressor,
 )
-
-# The CatBoost record is imported before LightGBM's on purpose: both JVM packages
-# patch pyspark.ml.wrapper.JavaParams process-wide, and the CatBoost compatibility
-# shim assumes SynapseML's patch was applied last.
 from smallaxe.training.catboost import CatBoostClassifier, CatBoostRegressor
 from smallaxe.training.classifiers import Classifiers
 from smallaxe.training.lightgbm import LightGBMClassifier, LightGBMRegressor

@@ -87,6 +87,20 @@ def test_global_seed_is_used_when_no_seed_is_given(rows):
     assert from_global == explicit
 
 
+def test_split_seed_precedence():
+    """The argument, then the global seed, then the caller's fallback, then random."""
+    from smallaxe.training.mixins.validation_mixin import resolve_split_seed
+
+    smallaxe.set_seed(5)
+    try:
+        assert resolve_split_seed(3, fallback=9) == 3
+        assert resolve_split_seed(None, fallback=9) == 5
+    finally:
+        smallaxe.set_seed(None)
+    assert resolve_split_seed(None, fallback=9) == 9
+    assert isinstance(resolve_split_seed(None), int)
+
+
 def test_unseeded_split_records_the_seed_it_drew(rows):
     smallaxe.set_seed(None)
     splitter = _Splitter()
