@@ -27,7 +27,7 @@ Rules for every item:
 
 ## 1. K-fold and train/test splits change when Spark reads the source again
 
-**Implemented.** `split_hash` in `validation_mixin.py`: `hash(<hashable columns>, seed) & 0x7FFFFFFF`, one rule for all four variants; `fold_key=` on `fit` and `optimize.run`; maps and ML vectors are excluded from the hash. Stratified and unstratified splits now share the rule (a content hash is label-independent), so `stratified` only validates its arguments.
+**Implemented.** `_split_hash` in `validation_mixin.py`: `hash(<hashable columns>, seed) & 0x7FFFFFFF`, one rule for all four variants; `fold_key=` on `fit` and `optimize.run`; maps and ML vectors are excluded from the hash. Stratified and unstratified splits now share the rule (a content hash is label-independent), so `stratified` only validates its arguments (0.11 deprecates it: passing it warns that it has no effect).
 
 **Today.** K-fold assigns folds with
 `hash(monotonically_increasing_id(), seed) % n_folds` (`validation_mixin.py:165`, and
@@ -85,7 +85,7 @@ column is still in the output of `predict`.
 
 ## 3. Training and prediction drop rows with null or NaN features
 
-**Implemented** except the Databricks rerun. `Algorithm.accepts_missing` (true for xgboost, lightgbm, catboost); `handleInvalid` is `keep` or `error`; `check_training_data` in `base.py` runs once in `fit` and once in `optimize.run` and replaces the metadata `count()`; `Imputer` ignores NaN. The former `test_fit_spark_model_skips_null_feature_rows` now asserts the error.
+**Implemented** except the Databricks rerun. `Algorithm.accepts_missing` (true for xgboost, lightgbm, catboost); `handleInvalid` is `keep` or `error`; `_check_training_data` in `base.py` runs once in `fit` and once in `optimize.run` and replaces the metadata `count()`; `Imputer` ignores NaN. The former `test_fit_spark_model_skips_null_feature_rows` now asserts the error.
 
 **Today.** `_assemble_features` uses `VectorAssembler(handleInvalid="skip")`
 (`spark_model_mixin.py:86`). This affects `fit`, validation scoring, `predict`, and
@@ -275,7 +275,7 @@ values is in the code, `README.md`, and `AGENTS.md`.
 
 ## 7. Feature inference ignores string and boolean columns without a message
 
-**Implemented.** `infer_feature_cols` / `warn_ignored_cols` in `base.py`; booleans are features; one `UserWarning` per `fit` or per search; `metadata["ignored_cols"]` and `metadata["feature_cols_inferred"]`. The "Open" decision on requiring explicit `feature_cols` is still open.
+**Implemented.** `_infer_feature_cols` / `_warn_ignored_cols` in `base.py`; booleans are features; one `UserWarning` per `fit` or per search; `metadata["ignored_cols"]` and `metadata["feature_cols_inferred"]`. The "Open" decision on requiring explicit `feature_cols` is still open.
 
 **Today.** If you do not give `feature_cols`, `_infer_feature_cols` keeps only
 `NumericType` columns (`base.py:270-277`). String columns are not used, and boolean

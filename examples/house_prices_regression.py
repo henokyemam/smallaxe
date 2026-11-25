@@ -23,7 +23,6 @@ from pyspark.sql import SparkSession  # noqa: E402
 import smallaxe  # noqa: E402
 from smallaxe.search import optimize  # noqa: E402
 from smallaxe.training import regressors  # noqa: E402
-from smallaxe.training.xgboost import XGBOOST_AVAILABLE  # noqa: E402
 
 HOUSE_URL = (
     "https://raw.githubusercontent.com/Shreyas3108/house-price-prediction/master/kc_house_data.csv"
@@ -53,12 +52,12 @@ def load_house(spark: SparkSession):
     cache = os.path.join(tempfile.gettempdir(), "smallaxe_kc_house.csv")
     if not os.path.exists(cache):
         urllib.request.urlretrieve(HOUSE_URL, cache)
-    df = spark.read.csv(cache, header=True, inferSchema=True)
+    dataframe = spark.read.csv(cache, header=True, inferSchema=True)
     # Cast features + target to double so feature inference and metrics are clean.
     from pyspark.sql import functions as F
 
     cols = [F.col(c).cast("double").alias(c) for c in FEATURE_COLS]
-    return df.select(F.col("price").cast("double").alias("price"), *cols)
+    return dataframe.select(F.col("price").cast("double").alias("price"), *cols)
 
 
 def report(scores: dict, title: str) -> None:
@@ -79,13 +78,19 @@ def main() -> None:
     spark.sparkContext.setLogLevel("ERROR")
     smallaxe.set_seed(42)
 
-    df = load_house(spark)
-    n = df.count()
+    dataframe = load_house(spark)
+    n = dataframe.count()
     print(f"Loaded King County house sales: {n} rows, {len(FEATURE_COLS)} features")
 
     # --- Train + evaluate a Random Forest regressor. ---
     rf = regressors.random_forest(n_estimators=100, max_depth=10, seed=42)
-    rf.fit(df, label_col="price", feature_cols=FEATURE_COLS, validation="train_test", test_size=0.2)
+    rf.fit(
+        dataframe,
+        label_col="price",
+        feature_cols=FEATURE_COLS,
+        validation="train_test",
+        test_size=0.2,
+    )
     report(rf.validation_scores, "Random Forest")
 
     # --- Save and reload; confirm identical predictions. ---
@@ -95,11 +100,11 @@ def main() -> None:
     rf.save(model_dir)
     loaded = regressors.load(model_dir)
     diff = (
-        rf.predict(df)
+        rf.predict(dataframe)
         .select("price", F.col("predict_label").alias("p1"))
         .withColumn("rn", F.monotonically_increasing_id())
         .join(
-            loaded.predict(df)
+            loaded.predict(dataframe)
             .select(F.col("predict_label").alias("p2"))
             .withColumn("rn", F.monotonically_increasing_id()),
             "rn",
@@ -114,7 +119,7 @@ def main() -> None:
 
     result = optimize.run(
         regressors.random_forest(seed=42),
-        df,
+        dataframe,
         label_col="price",
         feature_cols=FEATURE_COLS,
         param_space={
@@ -134,10 +139,14 @@ def main() -> None:
     print(f"[Optimization] best params: {result.best_params}")
 
     # --- Compare against XGBoost when available. ---
-    if XGBOOST_AVAILABLE:
+    if regressors.available_models()["xgboost"]["available"]:
         xgb = regressors.xgboost(n_estimators=150, max_depth=6, learning_rate=0.1, seed=42)
         xgb.fit(
-            df, label_col="price", feature_cols=FEATURE_COLS, validation="train_test", test_size=0.2
+            dataframe,
+            label_col="price",
+            feature_cols=FEATURE_COLS,
+            validation="train_test",
+            test_size=0.2,
         )
         report(xgb.validation_scores, "XGBoost")
     else:
