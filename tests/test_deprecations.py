@@ -234,3 +234,67 @@ def test_dataframe_rename_contract(frames):
             func(dataframe=dataframe, df=dataframe, **kwargs)
         with pytest.raises(TypeError, match="dataframe"):
             func(**kwargs)
+
+
+# --- 3. fit(stratified=...) and optimize.run(stratified=...) have no effect -----------
+
+
+class TestStratified:
+    @pytest.mark.parametrize("validation", ["train_test", "kfold"])
+    @pytest.mark.parametrize("kind", ["regression", "classification"])
+    def test_stratified_selects_nothing(self, frames, kind, validation):
+        """Splits and scores are the same for stratified None, True and False."""
+        from smallaxe.training import Classifier
+
+        dataframe = frames[kind]
+        label = "y" if kind == "regression" else "label"
+        make = Regressor if kind == "regression" else Classifier
+        results = []
+        for stratified in (None, True, False):
+            model = make("random_forest").set_params(n_estimators=3, seed=3)
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore", DeprecationWarning)
+                model.fit(
+                    dataframe,
+                    label,
+                    feature_cols=["x", "z"],
+                    validation=validation,
+                    n_folds=3,
+                    stratified=stratified,
+                )
+            results.append((model.validation_scores, model.metadata["split_seed"]))
+        assert results[1] == results[0]
+        assert results[2] == results[0]
+
+    def test_default_does_not_warn(self, frames):
+        with no_deprecation():
+            Regressor("random_forest").set_params(n_estimators=2).fit(
+                frames["regression"], "y", feature_cols=["x"], validation="train_test"
+            )
+            Regressor("random_forest").set_params(n_estimators=2).fit(
+                frames["regression"], "y", feature_cols=["x"], stratified=None
+            )
+
+    @pytest.mark.parametrize("value", [True, False])
+    def test_explicit_value_warns(self, frames, value):
+        with warns_once("stratified", "no effect"):
+            Regressor("random_forest").set_params(n_estimators=2).fit(
+                frames["regression"], "y", feature_cols=["x"], stratified=value
+            )
+
+    def test_optimize_run_warns_once(self, frames):
+        pytest.importorskip("hyperopt")
+        from smallaxe.search import optimize
+
+        with warns_once("stratified", "no effect"):
+            optimize.run(
+                Regressor("random_forest").set_params(n_estimators=2, seed=1),
+                frames["regression"],
+                label_col="y",
+                param_space={"max_depth": [2, 3]},
+                feature_cols=["x"],
+                max_evals=2,
+                stratified=True,
+                seed=1,
+                verbose=False,
+            )

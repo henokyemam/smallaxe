@@ -605,7 +605,6 @@ def kfold_check(algo, ds, n_folds=3):
         feature_cols=ds.feats,
         validation="kfold",
         n_folds=n_folds,
-        stratified=True,
         cache_strategy="disk",
     )
     s = m.validation_scores

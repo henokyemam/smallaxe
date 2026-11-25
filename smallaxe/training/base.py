@@ -275,8 +275,10 @@ class BaseModel(
             test_size: Proportion for test set when validation='train_test'.
                 Default is 0.2.
             n_folds: Number of folds when validation='kfold'. Default is 5.
-            stratified: Whether to use stratified splitting. If None, uses
-                stratified for classification tasks and non-stratified for regression.
+            stratified: Deprecated; has no effect and is removed in smallaxe 1.0.
+                Every split hashes the row content (or ``fold_key``), which is
+                independent of the label, so each class is split in the same proportion
+                in expectation whatever this says. Passing a value other than None warns.
             cache_strategy: DataFrame caching for the duration of fit. Options:
                 - None (default): persist with MEMORY_AND_DISK when fit reads the
                   data more than once (k-fold, or train_test with refit) and the
@@ -332,6 +334,8 @@ class BaseModel(
         # Determine stratification
         if stratified is None:
             stratified = self.task_type == "classification"
+        else:
+            _warn_stratified("fit()")
 
         # Seeds: the model's seed parameter, then the global seed, then the search's
         # shared split seed, then random.
@@ -1462,6 +1466,16 @@ def _warn_if_class1_scores(validation_scores: Dict[str, Any]) -> None:
         "averages. Refit it to get macro and weighted scores.",
         UserWarning,
         stacklevel=_deprecation.caller_stacklevel(),
+    )
+
+
+def _warn_stratified(where: str) -> None:
+    """Emit the deprecation warning for an explicit ``stratified`` argument."""
+    _deprecation.warn(
+        f"The stratified argument of {where} has no effect and will be removed in smallaxe "
+        "1.0. Splits hash each row's content (or fold_key), which is independent of the "
+        "label, so every class is split in the same proportion in expectation. Remove the "
+        "argument."
     )
 
 

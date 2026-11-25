@@ -42,7 +42,12 @@ import smallaxe
 from smallaxe.exceptions import DependencyError, ValidationError
 from smallaxe.metrics import TASK_METRICS
 from smallaxe.metrics.classification import MULTICLASS_AVERAGED_METRICS
-from smallaxe.training.base import check_training_data, infer_feature_cols, warn_ignored_cols
+from smallaxe.training.base import (
+    _warn_stratified,
+    check_training_data,
+    infer_feature_cols,
+    warn_ignored_cols,
+)
 from smallaxe.training.mixins.validation_mixin import resolve_split_seed
 
 # hyperopt is an optional dependency. Guard the import so the module remains
@@ -288,8 +293,8 @@ def run(
         test_size: Test proportion when ``validation='train_test'``. Default 0.2.
         feature_cols: Feature columns. If None, inferred from numeric columns.
         exclude_cols: Columns to exclude from inferred features.
-        stratified: Whether to stratify splits. If None, defaults to True for
-            classification and False for regression (matching ``fit``).
+        stratified: Deprecated; has no effect and is removed in smallaxe 1.0, as for
+            ``fit``. Passing a value other than None warns once.
         fold_key: Column whose value alone decides a row's fold or split, as in
             ``fit``. Every trial scores on the same folds either way.
         seed: Seed for hyperopt's sampler and for the data splits. Defaults to
@@ -313,6 +318,8 @@ def run(
             model's task does not produce, empty space, validation='none', etc.).
     """
     _check_hyperopt_available()
+    if stratified is not None:
+        _warn_stratified("optimize.run()")
 
     # --- Validate arguments up front for clear, early failures. ---
     if not label_col:
@@ -391,7 +398,6 @@ def run(
                 validation=validation,
                 n_folds=n_folds,
                 test_size=test_size,
-                stratified=stratified,
                 fold_key=fold_key,
                 cache_strategy="none",
                 refit=False,
