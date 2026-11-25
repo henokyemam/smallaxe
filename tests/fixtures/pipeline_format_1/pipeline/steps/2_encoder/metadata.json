@@ -1,0 +1,19 @@
+{
+  "format_version": 1,
+  "kind": "encoder",
+  "smallaxe_version": "0.10.1.dev0",
+  "method": "onehot",
+  "max_categories": 100,
+  "handle_rare": "other",
+  "categorical_cols": [
+    "city"
+  ],
+  "category_mappings": {
+    "city": {
+      "paris": 0,
+      "rome": 1,
+      "oslo": 2,
+      "__UNKNOWN__": 3
+    }
+  }
+}

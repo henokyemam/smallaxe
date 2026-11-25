@@ -273,9 +273,10 @@ class TestCatBoost:
         with _training_dir({"train_dir": "/configured"}) as extra:
             assert extra == {}
 
-    def test_accepts_raw_categoricals_and_prepares_session(self):
+    def test_needs_an_encoder_and_prepares_session(self):
         record = algorithm.get("catboost")
-        assert record.accepts_raw_categoricals
+        # Features reach CatBoost through VectorAssembler, which rejects string columns.
+        assert not record.accepts_raw_categoricals
         assert record.prepare.__name__ == "_ensure_synapseml_compat"
 
 

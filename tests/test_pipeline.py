@@ -1,8 +1,10 @@
 """Tests for the Pipeline class."""
 
+import math
 import os
 import shutil
 import tempfile
+import warnings
 
 import pytest
 from pyspark.sql import DataFrame
@@ -11,6 +13,14 @@ from pyspark.sql import functions as F
 from smallaxe.exceptions import ModelNotFittedError, PreprocessingError, ValidationError
 from smallaxe.pipeline import Pipeline
 from smallaxe.preprocessing import Encoder, Imputer, Scaler
+from smallaxe.training import Classifiers, Regressors, algorithm
+from tests.fakes import install_fake_modules
+
+
+def _require(name):
+    """Skip unless ``name``'s package is installed (probed lazily, not at collection)."""
+    if not algorithm.get(name).available():
+        pytest.skip(f"{name} is not installed")
 
 
 class MockModel:
@@ -31,66 +41,7 @@ class MockModel:
     def predict(self, df: DataFrame) -> DataFrame:
         """Make predictions (returns constant value)."""
         if not self._is_fitted:
-            raise ModelNotFittedError(
-                component="MockModel",
-                message="MockModel has not been fitted.",
-            )
-        return df.withColumn("prediction", F.lit(1.0))
-
-
-class RandomForestRegressor:
-    """Mock RandomForestRegressor for testing preprocessing requirements."""
-
-    def __init__(self):
-        self._is_fitted = False
-
-    def fit(self, df: DataFrame, label_col: str, feature_cols: list) -> "RandomForestRegressor":
-        self._is_fitted = True
-        return self
-
-    def predict(self, df: DataFrame) -> DataFrame:
-        return df.withColumn("prediction", F.lit(1.0))
-
-
-class RandomForestClassifier:
-    """Mock RandomForestClassifier for testing preprocessing requirements."""
-
-    def __init__(self):
-        self._is_fitted = False
-
-    def fit(self, df: DataFrame, label_col: str, feature_cols: list) -> "RandomForestClassifier":
-        self._is_fitted = True
-        return self
-
-    def predict(self, df: DataFrame) -> DataFrame:
-        return df.withColumn("prediction", F.lit(1.0))
-
-
-class XGBoostRegressor:
-    """Mock XGBoostRegressor for testing preprocessing requirements."""
-
-    def __init__(self):
-        self._is_fitted = False
-
-    def fit(self, df: DataFrame, label_col: str, feature_cols: list) -> "XGBoostRegressor":
-        self._is_fitted = True
-        return self
-
-    def predict(self, df: DataFrame) -> DataFrame:
-        return df.withColumn("prediction", F.lit(1.0))
-
-
-class CatBoostRegressor:
-    """Mock CatBoostRegressor for testing preprocessing requirements."""
-
-    def __init__(self):
-        self._is_fitted = False
-
-    def fit(self, df: DataFrame, label_col: str, feature_cols: list) -> "CatBoostRegressor":
-        self._is_fitted = True
-        return self
-
-    def predict(self, df: DataFrame) -> DataFrame:
+            raise ModelNotFittedError("MockModel has not been fitted.")
         return df.withColumn("prediction", F.lit(1.0))
 
 
@@ -582,18 +533,70 @@ class TestPipelineProperties:
         assert "not fitted" not in repr_str
 
 
-class TestPipelinePreprocessingValidation:
-    """Tests for pipeline preprocessing requirement validation."""
-
-    def test_random_forest_without_encoder_raises_error_with_categorical_cols(self, df_clean):
-        """Test that RandomForestRegressor without Encoder raises PreprocessingError when categorical_cols provided."""
-        pipeline = Pipeline(
-            [
-                ("imputer", Imputer()),
-                ("model", RandomForestRegressor()),
-            ]
+@pytest.fixture
+def df_mixed(spark_session):
+    """Numeric features, a categorical, an unlisted string ID and an unlisted number."""
+    rows = [
+        (
+            f"cust-{i:03d}",
+            float(20 + i % 30) if i % 9 else None,
+            float(40000 + i * 900),
+            ["a", "b", "c"][i % 3] if i % 11 else None,
+            float(i % 4),
+            50.0 + i * 3 + (i % 5),
+            i % 2,
         )
-        # Error should be raised at fit() time when categorical_cols is provided
+        for i in range(1, 61)
+    ]
+    return spark_session.createDataFrame(
+        rows, ["customer_id", "age", "income", "category", "unlisted", "target", "label"]
+    )
+
+
+def _full_pipeline(model, encoder_method="onehot"):
+    return Pipeline(
+        [
+            ("imputer", Imputer(numerical_strategy="mean", categorical_strategy="most_frequent")),
+            ("scaler", Scaler()),
+            ("encoder", Encoder(method=encoder_method)),
+            ("model", model),
+        ]
+    )
+
+
+def _assert_same_scores(got, want):
+    """Equal metrics. Spark sums in partition order, so the last bits of a mean may vary."""
+    assert set(got) == set(want)
+    for key, value in want.items():
+        if value is None:
+            assert got[key] is None, key
+        else:
+            assert math.isclose(got[key], value, rel_tol=1e-12, abs_tol=1e-12), key
+
+
+class DuckStep:
+    """A preprocessing step smallaxe does not know: fit + transform, no predict."""
+
+    def __init__(self):
+        self.fit_kwargs = None
+
+    def fit(self, df, numerical_cols=None, categorical_cols=None):
+        self.fit_kwargs = {"numerical_cols": numerical_cols, "categorical_cols": categorical_cols}
+        return self
+
+    def transform(self, df):
+        return df.withColumn("duck", F.lit(1.0))
+
+
+class TestEncoderRequirement:
+    """Whether a model needs an Encoder comes from its Algorithm record."""
+
+    @pytest.mark.parametrize(
+        "make", [Regressors.random_forest, Classifiers.random_forest], ids=["reg", "clf"]
+    )
+    def test_random_forest_with_categorical_cols_and_no_encoder_raises(self, df_clean, make):
+        pipeline = Pipeline([("imputer", Imputer()), ("model", make())])
+
         with pytest.raises(PreprocessingError) as exc_info:
             pipeline.fit(
                 df_clean,
@@ -601,20 +604,31 @@ class TestPipelinePreprocessingValidation:
                 numerical_cols=["age", "income"],
                 categorical_cols=["category"],
             )
-        assert "RandomForestRegressor" in str(exc_info.value)
+        assert exc_info.value.algorithm == "random_forest"
+        assert exc_info.value.missing_step == "Encoder"
         assert "Encoder" in str(exc_info.value)
 
-    def test_random_forest_classifier_without_encoder_raises_error_with_categorical_cols(
-        self, df_clean
+    def test_xgboost_with_categorical_cols_and_no_encoder_raises(self, df_clean):
+        _require("xgboost")
+        pipeline = Pipeline([("scaler", Scaler()), ("model", Regressors.xgboost())])
+
+        with pytest.raises(PreprocessingError, match="xgboost requires Encoder"):
+            pipeline.fit(
+                df_clean,
+                label_col="target",
+                numerical_cols=["age", "income"],
+                categorical_cols=["category"],
+            )
+
+    @pytest.mark.parametrize("name", ["lightgbm", "catboost"])
+    def test_fake_algorithm_with_categorical_cols_and_no_encoder_raises(
+        self, df_clean, monkeypatch, name
     ):
-        """Test that RandomForestClassifier without Encoder raises PreprocessingError when categorical_cols provided."""
-        pipeline = Pipeline(
-            [
-                ("imputer", Imputer()),
-                ("model", RandomForestClassifier()),
-            ]
-        )
-        # Error should be raised at fit() time when categorical_cols is provided
+        record = algorithm.get(name)
+        install_fake_modules(monkeypatch, record)
+        assert record.accepts_raw_categoricals is False
+        pipeline = Pipeline([("imputer", Imputer()), ("model", getattr(Regressors, name)())])
+
         with pytest.raises(PreprocessingError) as exc_info:
             pipeline.fit(
                 df_clean,
@@ -622,150 +636,273 @@ class TestPipelinePreprocessingValidation:
                 numerical_cols=["age", "income"],
                 categorical_cols=["category"],
             )
-        assert "RandomForestClassifier" in str(exc_info.value)
-        assert "Encoder" in str(exc_info.value)
+        assert exc_info.value.algorithm == name
 
-    def test_xgboost_without_encoder_raises_error_with_categorical_cols(self, df_clean):
-        """Test that XGBoostRegressor without Encoder raises PreprocessingError when categorical_cols provided."""
+    @pytest.mark.parametrize("name", ["lightgbm", "catboost"])
+    def test_fake_algorithm_with_an_encoder_fits_on_the_encoded_columns(
+        self, df_clean, monkeypatch, name
+    ):
+        install_fake_modules(monkeypatch, algorithm.get(name))
+        pipeline = Pipeline([("encoder", Encoder()), ("model", getattr(Regressors, name)())])
+
+        pipeline.fit(
+            df_clean,
+            label_col="target",
+            numerical_cols=["age", "income"],
+            categorical_cols=["category"],
+        )
+
+        assert pipeline.feature_cols == ["age", "income"] + pipeline["encoder"].output_cols
+        assert pipeline["model"]._feature_cols == pipeline.feature_cols
+
+    def test_no_encoder_needed_without_categorical_cols(self, df_clean):
+        for categorical_cols in (None, []):
+            pipeline = Pipeline(
+                [
+                    ("imputer", Imputer(numerical_strategy="mean")),
+                    ("model", Regressors.random_forest()),
+                ]
+            )
+            pipeline.fit(
+                df_clean,
+                label_col="target",
+                numerical_cols=["age", "income"],
+                categorical_cols=categorical_cols,
+            )
+            assert pipeline.feature_cols == ["age", "income"]
+
+    def test_duck_typed_model_without_encoder_gets_the_raw_columns(self, df_clean):
+        pipeline = Pipeline([("model", MockModel())])
+
+        pipeline.fit(
+            df_clean,
+            label_col="target",
+            numerical_cols=["age", "income"],
+            categorical_cols=["category"],
+        )
+
+        assert pipeline["model"]._feature_cols == ["age", "income", "category"]
+        assert pipeline.feature_cols == ["age", "income", "category"]
+
+
+class TestFeatureColumns:
+    """The Pipeline, not the frame, decides which columns reach the model."""
+
+    @pytest.mark.parametrize("method", ["onehot", "label"])
+    def test_model_gets_numerical_cols_and_encoder_outputs_only(self, df_mixed, method):
+        pipeline = _full_pipeline(Regressors.random_forest(n_estimators=5, seed=1), method)
+
+        pipeline.fit(
+            df_mixed,
+            label_col="target",
+            numerical_cols=["age", "income"],
+            categorical_cols=["category"],
+        )
+
+        expected = ["age", "income"] + pipeline["encoder"].output_cols
+        assert pipeline.feature_cols == expected
+        assert pipeline["model"]._feature_cols == expected
+        for unlisted in ("customer_id", "unlisted", "label", "target"):
+            assert unlisted not in pipeline.feature_cols
+        if method == "label":
+            assert pipeline.feature_cols == ["age", "income", "category"]
+
+    def test_predict_ignores_extra_columns_and_unseen_categories(self, df_mixed):
+        pipeline = _full_pipeline(Classifiers.random_forest(n_estimators=5, seed=1))
+        pipeline.fit(
+            df_mixed,
+            label_col="label",
+            numerical_cols=["age", "income"],
+            categorical_cols=["category"],
+        )
+        shifted = df_mixed.withColumn(
+            "category", F.when(F.col("age") > 40, F.lit("never-seen")).otherwise(F.col("category"))
+        ).withColumn("extra", F.lit("x"))
+
+        result = pipeline.predict(shifted)
+
+        assert result.count() == shifted.count()
+        assert result.filter(F.col("predict_label").isNull()).count() == 0
+        assert "extra" in result.columns and "customer_id" in result.columns
+
+    def test_without_column_lists_the_model_infers_its_features_and_warns_once(self, df_mixed):
+        numeric = df_mixed.drop("category").fillna({"age": 30.0})
+        pipeline = Pipeline([("model", Regressors.random_forest(n_estimators=5, seed=1))])
+
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            pipeline.fit(numeric, label_col="target")
+
+        inference = [w for w in caught if "Feature inference" in str(w.message)]
+        assert len(inference) == 1
+        assert "customer_id" in str(inference[0].message)
+        assert pipeline.feature_cols == ["age", "income", "unlisted", "label"]
+        assert pipeline["model"]._feature_cols == pipeline.feature_cols
+        assert pipeline["model"].metadata["feature_cols_inferred"] is True
+
+    def test_duck_typed_model_without_column_lists_gets_the_inferred_features(self, df_mixed):
+        pipeline = Pipeline([("model", MockModel())])
+
+        with pytest.warns(UserWarning, match="Feature inference"):
+            pipeline.fit(df_mixed, label_col="target")
+
+        assert pipeline["model"]._feature_cols == ["age", "income", "unlisted", "label"]
+
+    def test_label_listed_as_a_feature_raises(self, df_clean):
+        pipeline = Pipeline([("model", Regressors.random_forest())])
+
+        with pytest.raises(ValidationError, match="target"):
+            pipeline.fit(df_clean, label_col="target", numerical_cols=["age", "target"])
+
+    def test_preprocessing_only_pipeline_has_no_feature_cols(self, df_clean):
+        pipeline = Pipeline([("imputer", Imputer(numerical_strategy="mean"))])
+        pipeline.fit(df_clean, numerical_cols=["age"])
+
+        assert pipeline.feature_cols is None
+
+
+class TestSkippedSteps:
+    """A step the pipeline has no columns for is skipped, recorded, and passed through."""
+
+    def test_steps_without_columns_are_skipped_and_pass_data_through(self, df_clean):
         pipeline = Pipeline(
             [
-                ("imputer", Imputer()),
+                ("imputer", Imputer(numerical_strategy="mean")),
                 ("scaler", Scaler()),
-                ("model", XGBoostRegressor()),
-            ]
-        )
-        # Error should be raised at fit() time when categorical_cols is provided
-        with pytest.raises(PreprocessingError) as exc_info:
-            pipeline.fit(
-                df_clean,
-                label_col="target",
-                numerical_cols=["age", "income"],
-                categorical_cols=["category"],
-            )
-        assert "XGBoostRegressor" in str(exc_info.value)
-        assert "Encoder" in str(exc_info.value)
-
-    def test_random_forest_with_encoder_succeeds(self):
-        """Test that RandomForestRegressor with Encoder succeeds."""
-        pipeline = Pipeline(
-            [
-                ("imputer", Imputer()),
                 ("encoder", Encoder()),
-                ("model", RandomForestRegressor()),
             ]
         )
-        assert len(pipeline) == 3
 
-    def test_random_forest_with_encoder_and_scaler_succeeds(self):
-        """Test that RandomForestRegressor with Encoder and Scaler succeeds."""
+        pipeline.fit(df_clean, categorical_cols=None, numerical_cols=None)
+
+        assert pipeline.skipped_steps == ["imputer", "scaler", "encoder"]
+        assert pipeline.transform(df_clean).collect() == df_clean.collect()
+
+    def test_only_the_steps_without_columns_are_skipped(self, df_clean):
         pipeline = Pipeline(
             [
-                ("imputer", Imputer()),
+                ("imputer", Imputer(numerical_strategy="mean")),
                 ("scaler", Scaler()),
                 ("encoder", Encoder()),
-                ("model", RandomForestRegressor()),
+                ("model", Regressors.random_forest(n_estimators=5, seed=1)),
             ]
         )
-        assert len(pipeline) == 4
 
-    def test_catboost_without_encoder_succeeds(self):
-        """Test that CatBoostRegressor works without Encoder (handles categoricals natively)."""
-        pipeline = Pipeline(
-            [
-                ("imputer", Imputer()),
-                ("scaler", Scaler()),
-                ("model", CatBoostRegressor()),
-            ]
-        )
-        assert len(pipeline) == 3
+        pipeline.fit(df_clean, label_col="target", numerical_cols=["age", "income"])
 
-    def test_unknown_model_type_succeeds(self):
-        """Test that unknown model types have no preprocessing requirements."""
-        # MockModel is not in MODEL_PREPROCESSING_REQUIREMENTS, so it should succeed
-        pipeline = Pipeline(
-            [
-                ("imputer", Imputer()),
-                ("model", MockModel()),
-            ]
-        )
-        assert len(pipeline) == 2
+        assert pipeline.skipped_steps == ["encoder"]
+        assert pipeline.feature_cols == ["age", "income"]
+        assert "category" in pipeline.transform(df_clean).columns
 
-    def test_preprocessing_only_pipeline_succeeds(self):
-        """Test that preprocessing-only pipelines have no validation issues."""
-        pipeline = Pipeline(
-            [
-                ("imputer", Imputer()),
-                ("scaler", Scaler()),
-            ]
-        )
-        assert len(pipeline) == 2
+    def test_refit_with_columns_unskips(self, df_clean):
+        pipeline = Pipeline([("scaler", Scaler())])
+        pipeline.fit(df_clean)
+        assert pipeline.skipped_steps == ["scaler"]
 
-    def test_preprocessing_error_contains_algorithm_and_step(self, df_clean):
-        """Test that PreprocessingError contains algorithm and missing step info."""
-        pipeline = Pipeline(
-            [
-                ("model", RandomForestRegressor()),
-            ]
-        )
-        with pytest.raises(PreprocessingError) as exc_info:
-            pipeline.fit(
-                df_clean,
-                label_col="target",
-                numerical_cols=["age", "income"],
-                categorical_cols=["category"],
-            )
-        error = exc_info.value
-        assert error.algorithm == "RandomForestRegressor"
-        assert error.missing_step == "Encoder"
+        pipeline.fit(df_clean, numerical_cols=["age"])
 
-    def test_random_forest_without_encoder_succeeds_with_numerical_only(self, df_clean):
-        """Test that RandomForestRegressor without Encoder succeeds when categorical_cols is None."""
-        pipeline = Pipeline(
-            [
-                ("imputer", Imputer(numerical_strategy="mean")),
-                ("model", RandomForestRegressor()),
-            ]
+        assert pipeline.skipped_steps == []
+
+
+class TestDuckTypedSteps:
+    def test_duck_step_is_fitted_with_the_column_lists_and_applied(self, df_clean):
+        duck = DuckStep()
+        pipeline = Pipeline([("duck", duck), ("model", MockModel())])
+
+        pipeline.fit(df_clean, label_col="target", numerical_cols=["age"], categorical_cols=None)
+
+        assert duck.fit_kwargs == {"numerical_cols": ["age"], "categorical_cols": None}
+        assert "duck" in pipeline.transform(df_clean).columns
+        assert pipeline.skipped_steps == []
+
+    def test_duck_step_whose_fit_raises_type_error_propagates(self, df_clean):
+        class NoColumnsStep(DuckStep):
+            def fit(self, df):  # takes no column lists
+                return self
+
+        pipeline = Pipeline([("odd", NoColumnsStep())])
+
+        with pytest.raises(TypeError):
+            pipeline.fit(df_clean, numerical_cols=["age"])
+        assert not pipeline._is_fitted
+
+    def test_step_that_is_neither_preprocessing_nor_model_is_rejected(self):
+        with pytest.raises(ValidationError, match="'thing'"):
+            Pipeline([("thing", object())])
+
+    def test_more_than_one_model_is_rejected(self):
+        with pytest.raises(ValidationError, match="one model"):
+            Pipeline([("a", MockModel()), ("b", MockModel())])
+
+
+class TestPredictionApi:
+    @pytest.fixture
+    def fitted_classifier(self, df_mixed):
+        pipeline = _full_pipeline(Classifiers.random_forest(n_estimators=5, seed=1))
+        return pipeline.fit(
+            df_mixed,
+            label_col="label",
+            numerical_cols=["age", "income"],
+            categorical_cols=["category"],
         )
-        # Should not raise error when categorical_cols is None (numerical data only)
-        pipeline.fit(
-            df_clean,
+
+    @pytest.fixture
+    def fitted_regressor(self, df_mixed):
+        pipeline = _full_pipeline(Regressors.random_forest(n_estimators=5, seed=1))
+        return pipeline.fit(
+            df_mixed,
             label_col="target",
             numerical_cols=["age", "income"],
-            categorical_cols=None,
+            categorical_cols=["category"],
         )
-        assert pipeline._is_fitted
 
-    def test_xgboost_without_encoder_succeeds_with_numerical_only(self, df_clean):
-        """Test that XGBoostRegressor without Encoder succeeds when categorical_cols is None."""
-        pipeline = Pipeline(
-            [
-                ("imputer", Imputer(numerical_strategy="mean")),
-                ("scaler", Scaler()),
-                ("model", XGBoostRegressor()),
-            ]
-        )
-        # Should not raise error when categorical_cols is None (numerical data only)
-        pipeline.fit(
-            df_clean,
-            label_col="target",
-            numerical_cols=["age", "income"],
-            categorical_cols=None,
-        )
-        assert pipeline._is_fitted
+    def test_predict_output_col_defaults_like_model_predict_and_passes_through(
+        self, fitted_regressor, df_mixed
+    ):
+        assert "predict_label" in fitted_regressor.predict(df_mixed).columns
+        result = fitted_regressor.predict(df_mixed, output_col="yhat")
+        assert "yhat" in result.columns and "predict_label" not in result.columns
 
-    def test_random_forest_without_encoder_succeeds_with_empty_categorical_cols(self, df_clean):
-        """Test that RandomForestRegressor without Encoder succeeds when categorical_cols is empty list."""
-        pipeline = Pipeline(
-            [
-                ("imputer", Imputer(numerical_strategy="mean")),
-                ("model", RandomForestRegressor()),
-            ]
+    def test_predict_proba_delegates_to_the_model(self, fitted_classifier, df_mixed):
+        model = fitted_classifier["model"]
+        transformed = fitted_classifier.transform(df_mixed)
+
+        got = fitted_classifier.predict_proba(df_mixed).select("probability").collect()
+        want = model.predict_proba(transformed).select("probability").collect()
+
+        assert got == want
+        assert "p" in fitted_classifier.predict_proba(df_mixed, output_col="p").columns
+
+    def test_evaluate_delegates_to_the_model(self, fitted_classifier, df_mixed):
+        model = fitted_classifier["model"]
+
+        scores = fitted_classifier.evaluate(df_mixed)
+
+        _assert_same_scores(scores, model.evaluate(fitted_classifier.transform(df_mixed)))
+        assert set(scores) >= {"accuracy", "auc_roc", "log_loss"}
+
+    def test_evaluate_with_an_explicit_label(self, fitted_regressor, df_mixed):
+        renamed = df_mixed.withColumnRenamed("target", "y")
+
+        _assert_same_scores(
+            fitted_regressor.evaluate(renamed, label_col="y"), fitted_regressor.evaluate(df_mixed)
         )
-        # Should not raise error when categorical_cols is empty list
-        pipeline.fit(
-            df_clean,
-            label_col="target",
-            numerical_cols=["age", "income"],
-            categorical_cols=[],
-        )
-        assert pipeline._is_fitted
+
+    def test_predict_proba_on_a_regressor_raises(self, fitted_regressor, df_mixed):
+        with pytest.raises(ValidationError, match="predict_proba"):
+            fitted_regressor.predict_proba(df_mixed)
+
+    @pytest.mark.parametrize("method", ["predict", "predict_proba", "evaluate"])
+    def test_without_a_model_raises(self, df_clean, method):
+        pipeline = Pipeline([("imputer", Imputer(numerical_strategy="mean"))])
+        pipeline.fit(df_clean, numerical_cols=["age"])
+
+        with pytest.raises(ValidationError, match="does not contain a model"):
+            getattr(pipeline, method)(df_clean)
+
+    @pytest.mark.parametrize("method", ["predict", "predict_proba", "evaluate"])
+    def test_before_fit_raises(self, df_clean, method):
+        pipeline = Pipeline([("model", Classifiers.random_forest())])
+
+        with pytest.raises(ModelNotFittedError):
+            getattr(pipeline, method)(df_clean)

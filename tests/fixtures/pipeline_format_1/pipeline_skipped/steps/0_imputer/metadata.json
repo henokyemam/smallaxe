@@ -1,0 +1,17 @@
+{
+  "format_version": 1,
+  "kind": "imputer",
+  "smallaxe_version": "0.10.1.dev0",
+  "numerical_strategy": "median",
+  "categorical_strategy": "most_frequent",
+  "numerical_cols": [
+    "age",
+    "income"
+  ],
+  "categorical_cols": [],
+  "numerical_fill_values": {
+    "age": 34.0,
+    "income": 65500.0
+  },
+  "categorical_fill_values": {}
+}

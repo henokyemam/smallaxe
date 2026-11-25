@@ -1,0 +1,66 @@
+{
+  "format_version": 1,
+  "kind": "model",
+  "smallaxe_version": "0.10.1.dev0",
+  "task": "simple_regression",
+  "params": {
+    "n_estimators": 5,
+    "max_depth": 3,
+    "seed": 11
+  },
+  "feature_cols": [
+    "age",
+    "income",
+    "city_paris",
+    "city_rome",
+    "city_oslo",
+    "city_UNKNOWN"
+  ],
+  "features_col": "__smallaxe_features__",
+  "label_col": "target",
+  "exclude_cols": [],
+  "is_fitted": true,
+  "metadata": {
+    "training_timestamp": "2026-11-25T01:28:20.742071",
+    "spark_version": "3.5.9",
+    "smallaxe_version": "0.10.1.dev0",
+    "algorithm_package": null,
+    "algorithm_package_version": null,
+    "label_col": "target",
+    "feature_cols": [
+      "age",
+      "income",
+      "city_paris",
+      "city_rome",
+      "city_oslo",
+      "city_UNKNOWN"
+    ],
+    "n_samples": 60,
+    "n_features": 6,
+    "seed": 11,
+    "missing_counts": {
+      "age": 0,
+      "income": 0,
+      "city_paris": 0,
+      "city_rome": 0,
+      "city_oslo": 0,
+      "city_UNKNOWN": 0
+    },
+    "feature_cols_inferred": false,
+    "ignored_cols": {},
+    "split_seed": null,
+    "refit": true,
+    "kept_model": "full",
+    "n_training_rows": 60,
+    "label_min": 59.0,
+    "label_max": 267.0,
+    "label_mean": 161.5,
+    "label_stddev": 54.54822155282673,
+    "task": "simple_regression",
+    "task_type": "regression"
+  },
+  "validation_scores": null,
+  "algorithm": "random_forest",
+  "__class__": "Regressor",
+  "__module__": "smallaxe.training.base"
+}

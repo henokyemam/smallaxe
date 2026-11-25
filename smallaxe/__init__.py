@@ -12,9 +12,11 @@ from smallaxe._config import (
     VALID_VERBOSITY_LEVELS,
     _config,
 )
-from smallaxe.exceptions import ConfigurationError
+from smallaxe.exceptions import ConfigurationError, ValidationError
 
-if TYPE_CHECKING:  # pragma: no cover - smallaxe.training is imported only when used
+if TYPE_CHECKING:  # pragma: no cover - these are imported only when used
+    from smallaxe.pipeline import Pipeline
+    from smallaxe.preprocessing import Encoder, Imputer, Scaler
     from smallaxe.training.base import Classifier, Regressor
 
 try:
@@ -34,6 +36,8 @@ __all__ = [
     "set_cache_strategy",
     "get_cache_strategy",
     "load_model",
+    "load_pipeline",
+    "load",
 ]
 
 
@@ -65,6 +69,79 @@ def load_model(path: str) -> Union["Regressor", "Classifier"]:
     from smallaxe.training.base import Model
 
     return cast("Union[Regressor, Classifier]", Model.load(path))
+
+
+def load_pipeline(path: str) -> "Pipeline":
+    """Load the pipeline saved at ``path``.
+
+    Reads pipelines written by ``Pipeline.save`` in this release and preprocessing-only
+    pipelines written by smallaxe 0.10 (see :meth:`smallaxe.pipeline.Pipeline.load`).
+
+    Args:
+        path: The artifact directory (local, ``dbfs:/``, ``s3://``, ``hdfs://``, ...).
+
+    Returns:
+        The fitted :class:`~smallaxe.pipeline.Pipeline`.
+
+    Raises:
+        ValidationError: If the path or its ``metadata.json`` does not exist, it holds
+            another kind of artifact or was written by a newer smallaxe, a step is
+            missing, or its metadata is invalid.
+        DependencyError: If the model step's algorithm is not installed.
+
+    Example:
+        >>> pipeline = smallaxe.load_pipeline('/path/to/pipeline')
+        >>> predictions = pipeline.predict(df)
+    """
+    from smallaxe.pipeline import Pipeline
+
+    return Pipeline.load(path)
+
+
+def load(
+    path: str,
+) -> Union["Regressor", "Classifier", "Pipeline", "Imputer", "Scaler", "Encoder"]:
+    """Load any smallaxe artifact, returning the kind of object that saved it.
+
+    The kind is read from the artifact (``kind`` in its ``metadata.json``); unversioned
+    model and pipeline artifacts of smallaxe 0.10 and earlier, and 0.10 Imputer and
+    Scaler artifacts, are recognised by their layout. Use :func:`load_model` or
+    :func:`load_pipeline` to also check that the artifact is the kind you expect.
+
+    Args:
+        path: The artifact directory (local, ``dbfs:/``, ``s3://``, ``hdfs://``, ...).
+
+    Returns:
+        A fitted ``Regressor`` / ``Classifier``, ``Pipeline``, ``Imputer``, ``Scaler`` or
+        ``Encoder``.
+
+    Raises:
+        ValidationError: If the path does not exist, holds no smallaxe artifact or one of
+            a kind this smallaxe does not know, or the artifact itself is invalid.
+        DependencyError: If a saved model's algorithm is not installed.
+
+    Example:
+        >>> obj = smallaxe.load('/path/to/artifact')
+    """
+    from smallaxe import _artifact
+
+    kind = _artifact.saved_kind(path)
+    if kind == "model":
+        return load_model(path)
+    if kind == "pipeline":
+        return load_pipeline(path)
+    if kind in ("imputer", "scaler", "encoder"):
+        from smallaxe.preprocessing import Encoder, Imputer, Scaler
+
+        if kind == "imputer":
+            return Imputer.load(path)
+        if kind == "scaler":
+            return Scaler.load(path)
+        return Encoder.load(path)
+    raise ValidationError(
+        f"Cannot load artifact: {path!r} holds a {kind!r} artifact, which this smallaxe "
+        f"({__version__}) does not know. It may have been written by a newer smallaxe."
+    )
 
 
 def set_verbosity(level: str) -> None:
