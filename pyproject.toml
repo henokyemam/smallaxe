@@ -73,6 +73,9 @@ Issues = "https://github.com/henokyemam/smallaxe/issues"
 where = ["."]
 include = ["smallaxe*"]
 
+[tool.setuptools.package-data]
+smallaxe = ["py.typed"]
+
 [tool.black]
 line-length = 100
 target-version = ["py38", "py39", "py310", "py311", "py312"]
