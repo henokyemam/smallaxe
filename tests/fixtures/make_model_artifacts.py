@@ -7,8 +7,8 @@ predicted for :func:`frame`. The directory name says which release wrote it:
 ``artifacts_0_9_0`` must be written by smallaxe 0.9.0, ``artifacts_format_1`` by a
 smallaxe that writes ``format_version`` 1.
 
-Run it with the release installed from PyPI, never with a checkout of a later commit,
-in a fresh virtualenv (Python 3.11, PySpark 3.5.9, xgboost 3.2.0, scikit-learn and
+For a release, run it with that release installed from PyPI, never with a checkout of
+a later commit, in a fresh virtualenv (Python 3.11, PySpark 3.5.9, xgboost 3.2.0, scikit-learn and
 pyarrow). ``-I`` keeps the repository off ``sys.path``, so the installed wheel is the
 smallaxe that is imported::
 
@@ -17,6 +17,10 @@ smallaxe that is imported::
     export JAVA_HOME=... PYSPARK_PYTHON=.scratch/venv_0.9.0/bin/python
     .scratch/venv_0.9.0/bin/python -I tests/fixtures/make_model_artifacts.py \\
         tests/fixtures/artifacts_0_9_0
+
+For ``artifacts_format_<n>``, run it from the repository root with the checkout on the
+path (``PYTHONPATH=. python tests/fixtures/make_model_artifacts.py
+tests/fixtures/artifacts_format_1``); it checks the saved ``format_version``.
 
 The 0.8.1 fixtures (``artifacts_0_8_1``) predate this script and are left as they are.
 It removes the ``.crc`` and ``_SUCCESS`` files Spark leaves.
@@ -65,6 +69,16 @@ def _check_writer(out):
         )
 
 
+def _check_format(out, metadata_path):
+    """An ``artifacts_format_<n>`` directory must hold ``format_version`` n artifacts."""
+    if not out.name.startswith("artifacts_format_"):
+        return
+    expected = int(out.name[len("artifacts_format_") :])
+    written = json.loads(metadata_path.read_text()).get("format_version")
+    if written != expected:
+        raise SystemExit(f"{metadata_path} has format_version {written!r}, not {expected}")
+
+
 def main(out):
     _check_writer(out)
     spark = SparkSession.builder.master("local[1]").getOrCreate()
@@ -82,6 +96,7 @@ def main(out):
             model = getattr(Classifiers, algorithm_name)(task=task, **params)
         model.fit(df, label_col=label_col, feature_cols=["age", "income"], validation="none")
         model.save(str(out / name))
+        _check_format(out, out / name / "metadata.json")
         rows = model.predict(df).select("id", "predict_label").orderBy("id").collect()
         expected[name] = {
             "label_col": label_col,
