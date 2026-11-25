@@ -4,9 +4,16 @@ from typing import Dict, List, Optional, Union
 
 from pyspark.sql import Column, DataFrame
 from pyspark.sql import functions as F
-from pyspark.sql.types import DataType, StringType
+from pyspark.sql.types import (
+    DataType,
+    DecimalType,
+    DoubleType,
+    FloatType,
+    IntegralType,
+    StringType,
+)
 
-from smallaxe import _artifact
+from smallaxe import _artifact, _fs
 from smallaxe.exceptions import (
     ColumnNotFoundError,
     ModelNotFittedError,
@@ -41,6 +48,18 @@ def _fill_literal(fill: str, data_type: DataType) -> Column:
     return F.lit(fill).cast(data_type)
 
 
+def _categorical_value(col: str, data_type: DataType) -> Column:
+    """``col``, with NaN made null for a floating column (NaN counts as missing)."""
+    if isinstance(data_type, (FloatType, DoubleType)):
+        return F.when(F.isnan(column_ref(col)), None).otherwise(column_ref(col))
+    return column_ref(col)
+
+
+# A fill for an exact numeric column must keep its value when cast to the column's type;
+# comparing both as this decimal catches truncation ("1.5" -> 1) and rounding.
+_EXACT = DecimalType(38, 18)
+
+
 class Imputer:
     """Impute missing values in numerical and categorical columns.
 
@@ -50,8 +69,10 @@ class Imputer:
     Categorical columns are filled in their own type: the most frequent value (or the
     custom ``categorical_strategy``) is kept as Spark's string form of the value and cast
     back to the column's type, so an integer or boolean categorical column is imputed
-    too. ``fit`` raises ``ValidationError`` when the fill cannot be represented in the
-    column's type (for example ``categorical_strategy='UNKNOWN'`` on an integer column).
+    too. ``fit`` raises ``ValidationError`` when the fill cannot be represented exactly in
+    the column's type (for example ``categorical_strategy='UNKNOWN'`` or ``'1.5'`` on an
+    integer column). In a float or double column NaN counts as missing, both for
+    ``most_frequent`` and at transform.
 
     Args:
         numerical_strategy: Strategy for imputing numerical columns.
@@ -232,7 +253,7 @@ class Imputer:
                 # Most frequent value; ties go to the smallest value, so the result does
                 # not depend on partitioning.
                 mode_row = (
-                    df.select(column_ref(col).cast("string").alias("value"))
+                    df.select(_categorical_value(col, types[col]).cast("string").alias("value"))
                     .filter(F.col("value").isNotNull())
                     .groupBy("value")
                     .count()
@@ -248,23 +269,37 @@ class Imputer:
 
     @staticmethod
     def _check_categorical_fill(df: DataFrame, col: str, data_type: DataType, fill: str) -> None:
-        """Raise ValidationError if ``fill`` cannot be stored in a ``data_type`` column."""
+        """Raise ValidationError if ``fill`` cannot be stored exactly in a ``data_type`` column.
+
+        The cast must succeed (not null) and, for an integer or decimal column, keep the
+        value: ``"1.5"`` on an integer column would silently fill 1.
+        """
         if isinstance(data_type, StringType):
             return
+        typed = _fill_literal(fill, data_type)
+        exact = isinstance(data_type, (IntegralType, DecimalType))
         try:
-            value = (
+            row = (
                 df.sparkSession.range(1)
-                .select(_fill_literal(fill, data_type).alias("fill"))
-                .first()["fill"]
+                .select(
+                    typed.isNotNull().alias("cast_ok"),
+                    (
+                        (typed.cast(_EXACT) == F.lit(fill).cast(_EXACT)).alias("exact")
+                        if exact
+                        else F.lit(True).alias("exact")
+                    ),
+                )
+                .first()
             )
-        except Exception:  # an invalid cast fails under ANSI mode, or for complex types
-            value = None
-        if value is None:
+            valid = bool(row["cast_ok"]) and bool(row["exact"])
+        except _fs.jvm_error_types():  # an invalid cast fails under ANSI mode, or for
+            valid = False  # complex types at analysis
+        if not valid:
             raise ValidationError(
                 f"Cannot impute categorical column '{col}' of type "
-                f"{data_type.simpleString()} with {fill!r}: the value is not a valid "
-                f"{data_type.simpleString()}. Use a categorical_strategy of that type, or "
-                "cast the column to string before imputing."
+                f"{data_type.simpleString()} with {fill!r}: the value is not exactly "
+                f"representable as {data_type.simpleString()}. Use a categorical_strategy "
+                "of that type, or cast the column to string before imputing."
             )
 
     def transform(self, df: DataFrame) -> DataFrame:
@@ -296,13 +331,15 @@ class Imputer:
         if self._numerical_fill_values:
             result_df = result_df.fillna(self._numerical_fill_values)
 
-        # Fill categorical columns in their own type. DataFrame.fillna with a string value
-        # silently skips non-string columns, so it is not used here.
+        # Fill categorical columns in their own type (fit checked the fill fits it). For a
+        # floating column NaN counts as missing, as DataFrame.fillna treats it.
         if self._categorical_fill_values:
             types = {field.name: field.dataType for field in result_df.schema.fields}
             result_df = result_df.withColumns(
                 {
-                    col: F.coalesce(column_ref(col), _fill_literal(fill, types[col]))
+                    col: F.coalesce(
+                        _categorical_value(col, types[col]), _fill_literal(fill, types[col])
+                    )
                     for col, fill in self._categorical_fill_values.items()
                 }
             )
