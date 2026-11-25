@@ -46,7 +46,8 @@
   `seed` argument, no `set_seed`, and no model `seed`, each trial's `fit` drew its own
   random split seed, so trials were compared on different folds despite the docstring.
   The search now draws one split seed up front and every trial splits with it (the
-  trials' `metadata["split_seed"]` is identical). Unseeded estimators stay unseeded.
+  trials' `metadata["split_seed"]` is identical). Unseeded estimators stay unseeded, and
+  `best_model` does not keep the search's split seed for later fits.
 - **`import smallaxe.training` no longer imports the optional algorithm packages.**
   Computing `XGBOOST_AVAILABLE`, `LIGHTGBM_AVAILABLE`, and `CATBOOST_AVAILABLE` at import
   imported `xgboost.spark` (and with it scikit-learn), `synapse.ml.lightgbm`, and

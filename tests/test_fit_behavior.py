@@ -312,6 +312,31 @@ class TestSearchSettings:
         # Estimator seeding is unchanged: an unseeded model stays unseeded.
         assert all(model.metadata["seed"] is None for model in trial_models)
 
+    def test_best_model_does_not_keep_the_search_split_seed(self, frame, monkeypatch):
+        """The search's split seed is for its trials; a later fit of best_model draws anew."""
+        pytest.importorskip("hyperopt")
+        from smallaxe.search import optimize
+        from smallaxe.training.mixins import validation_mixin
+
+        assert smallaxe.get_seed() is None
+        result = optimize.run(
+            Regressors.random_forest(n_estimators=2),
+            frame,
+            label_col="target",
+            param_space={"max_depth": [2, 3]},
+            feature_cols=["age"],
+            validation="kfold",
+            n_folds=2,
+            max_evals=2,
+            verbose=False,
+        )
+        best = result.best_model
+        assert best._split_seed_fallback is None
+
+        monkeypatch.setattr(validation_mixin.random, "randrange", lambda _: 12345)
+        best.fit(frame, "target", feature_cols=["age"], validation="kfold", n_folds=2)
+        assert best.metadata["split_seed"] == 12345
+
     def test_train_test_search_persists_the_data_once(self, frame, monkeypatch):
         """Every trial reads the data, so the search caches it whatever the validation."""
         pytest.importorskip("hyperopt")

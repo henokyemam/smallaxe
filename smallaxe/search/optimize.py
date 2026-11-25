@@ -361,10 +361,15 @@ def run(
     # unseeded estimators stay unseeded.
     split_seed = seed if seed is not None else resolve_split_seed()
 
-    def _build_model(overrides: Dict[str, Any]) -> Any:
-        """Create a fresh model with base params overridden by ``overrides``."""
+    def _build_model(overrides: Dict[str, Any], trial: bool = True) -> Any:
+        """Create a fresh model with base params overridden by ``overrides``.
+
+        Only trial models get the search's split seed; ``best_model`` is handed to the
+        caller and must not carry it into later fits.
+        """
         candidate = model.clone()
-        candidate._split_seed_fallback = split_seed
+        if trial:
+            candidate._split_seed_fallback = split_seed
         candidate.set_param(overrides)
         if (
             seed is not None
@@ -468,7 +473,7 @@ def run(
 
     best_model = None
     if refit:
-        best_model = _build_model(best_params)
+        best_model = _build_model(best_params, trial=False)
         best_model.fit(
             dataframe,
             label_col=label_col,

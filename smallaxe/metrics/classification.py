@@ -31,6 +31,10 @@ def accuracy(
 
     Accuracy = (TP + TN) / (TP + TN + FP + FN) = correct / total
 
+    Every row counts in the total; a row with a null label or prediction is never
+    correct, so a frame where every row has one scores 0.0. (``multiclass_scores``
+    instead ignores such rows.)
+
     Args:
         df: PySpark DataFrame containing true and predicted labels.
         label_col: Name of the column containing true labels. Default is 'label'.
