@@ -18,7 +18,7 @@ class Regressors:
         >>>
         >>> # Create a Random Forest regressor
         >>> model = Regressors.random_forest(n_estimators=100, max_depth=10)
-        >>> model.fit(df, label_col='target', feature_cols=['f1', 'f2'])
+        >>> model.fit(dataframe, label_col='target', feature_cols=['f1', 'f2'])
         >>>
         >>> # Save and load the model
         >>> model.save('/path/to/model')
@@ -52,7 +52,7 @@ class Regressors:
 
         Example:
             >>> model = Regressors.random_forest(n_estimators=100, max_depth=10)
-            >>> model.fit(df, label_col='target', feature_cols=['f1', 'f2'])
+            >>> model.fit(dataframe, label_col='target', feature_cols=['f1', 'f2'])
         """
         return Regressors._create("random_forest", kwargs)
 
@@ -85,7 +85,7 @@ class Regressors:
 
         Example:
             >>> model = Regressors.xgboost(n_estimators=100, max_depth=6)
-            >>> model.fit(df, label_col='target', feature_cols=['f1', 'f2'])
+            >>> model.fit(dataframe, label_col='target', feature_cols=['f1', 'f2'])
         """
         return Regressors._create("xgboost", kwargs)
 
@@ -159,11 +159,11 @@ class Regressors:
 
         Example:
             >>> model = Regressors.random_forest(n_estimators=100)
-            >>> model.fit(df, label_col='target', feature_cols=['f1', 'f2'])
+            >>> model.fit(dataframe, label_col='target', feature_cols=['f1', 'f2'])
             >>> model.save('/path/to/model')
             >>>
             >>> loaded_model = Regressors.load('/path/to/model')
-            >>> predictions = loaded_model.predict(df)
+            >>> predictions = loaded_model.predict(dataframe)
         """
         model = Model.load(path)
         if not isinstance(model, Regressor):

@@ -68,3 +68,169 @@ class TestSetParams:
             warnings.simplefilter("ignore", DeprecationWarning)
             with pytest.raises(ValidationError, match="Invalid parameter '1'"):
                 model.set_param({1: 1})
+
+
+# --- 2. The DataFrame argument is called ``dataframe`` ---------------------------------
+
+
+def _public_callables():
+    """(qualified name, callable) for every public function and public method in smallaxe."""
+    import importlib
+    import inspect
+    import pkgutil
+
+    import smallaxe
+
+    found = []
+    modules = [smallaxe] + [
+        importlib.import_module(info.name)
+        for info in pkgutil.walk_packages(smallaxe.__path__, "smallaxe.")
+        if not any(part.startswith("_") for part in info.name.split("."))
+    ]
+    for module in modules:
+        for name, obj in vars(module).items():
+            if name.startswith("_") or getattr(obj, "__module__", None) != module.__name__:
+                continue
+            if inspect.isfunction(obj):
+                found.append((f"{module.__name__}.{name}", obj))
+            elif inspect.isclass(obj):
+                for attr, member in vars(obj).items():
+                    if attr.startswith("_") and attr != "__init__":
+                        continue
+                    if isinstance(member, (classmethod, staticmethod)):
+                        member = member.__func__
+                    if inspect.isfunction(member):
+                        found.append((f"{module.__name__}.{name}.{attr}", member))
+    return found
+
+
+def test_no_public_callable_has_a_df_parameter():
+    import inspect
+
+    callables = _public_callables()
+    offenders = [name for name, func in callables if "df" in inspect.signature(func).parameters]
+    assert offenders == []
+    renamed = {
+        name for name, func in callables if "dataframe" in inspect.signature(func).parameters
+    }
+    for expected in (
+        "smallaxe.training.base.BaseModel.fit",
+        "smallaxe.training.base.BaseModel.predict",
+        "smallaxe.training.base.BaseModel.evaluate",
+        "smallaxe.training.base.BaseClassifier.predict_proba",
+        "smallaxe.pipeline.pipeline.Pipeline.fit",
+        "smallaxe.pipeline.pipeline.Pipeline.transform",
+        "smallaxe.pipeline.pipeline.Pipeline.fit_transform",
+        "smallaxe.pipeline.pipeline.Pipeline.predict",
+        "smallaxe.pipeline.pipeline.Pipeline.predict_proba",
+        "smallaxe.pipeline.pipeline.Pipeline.evaluate",
+        "smallaxe.preprocessing.imputer.Imputer.fit",
+        "smallaxe.preprocessing.scaler.Scaler.transform",
+        "smallaxe.preprocessing.encoder.Encoder.fit_transform",
+        "smallaxe.metrics.regression.mse",
+        "smallaxe.metrics.classification.log_loss",
+        "smallaxe.search.optimize.run",
+    ):
+        assert expected in renamed
+
+
+@pytest.fixture
+def frames(spark_session):
+    regression = spark_session.createDataFrame(
+        [(float(i), float(i % 5), "a" if i % 3 else "b", 2.0 * i) for i in range(40)],
+        ["x", "z", "c", "y"],
+    )
+    classification = spark_session.createDataFrame(
+        [(float(i), float(i % 5), i % 2) for i in range(40)], ["x", "z", "label"]
+    )
+    scored = spark_session.createDataFrame(
+        [(1, 1.0, 0.9), (0, 0.0, 0.2), (1, 0.0, 0.4), (0, 1.0, 0.7)],
+        ["label", "predict_label", "probability"],
+    )
+    return {"regression": regression, "classification": classification, "scored": scored}
+
+
+def _calls(frames):
+    """name -> (callable taking the DataFrame first, the DataFrame, other kwargs)."""
+    from smallaxe import metrics
+    from smallaxe.pipeline import Pipeline
+    from smallaxe.preprocessing import Encoder, Imputer, Scaler
+    from smallaxe.training import Classifier
+
+    reg, cls, scored = frames["regression"], frames["classification"], frames["scored"]
+    model = (
+        Regressor("random_forest")
+        .set_params(n_estimators=3, seed=1)
+        .fit(reg, "y", feature_cols=["x"])
+    )
+    clf = Classifier("random_forest").set_params(n_estimators=3, seed=1).fit(cls, "label")
+    pipeline = Pipeline(
+        [("scaler", Scaler()), ("model", Classifier("random_forest").set_params(seed=1))]
+    )
+    pipeline.fit(cls, label_col="label", numerical_cols=["x", "z"])
+    fitted_scaler = Scaler().fit(reg, numerical_cols=["x"])
+    return {
+        "Model.fit": (
+            Regressor("random_forest").set_params(seed=1).fit,
+            reg,
+            {"label_col": "y", "feature_cols": ["x"]},
+        ),
+        "Model.predict": (model.predict, reg, {}),
+        "Model.evaluate": (model.evaluate, reg, {}),
+        "Classifier.predict_proba": (clf.predict_proba, cls, {}),
+        "Pipeline.fit": (
+            Pipeline([("scaler", Scaler())]).fit,
+            reg,
+            {"numerical_cols": ["x"]},
+        ),
+        "Pipeline.fit_transform": (
+            Pipeline([("scaler", Scaler())]).fit_transform,
+            reg,
+            {"numerical_cols": ["x"]},
+        ),
+        "Pipeline.transform": (pipeline.transform, cls, {}),
+        "Pipeline.predict": (pipeline.predict, cls, {}),
+        "Pipeline.predict_proba": (pipeline.predict_proba, cls, {}),
+        "Pipeline.evaluate": (pipeline.evaluate, cls, {}),
+        "Imputer.fit": (Imputer(numerical_strategy="mean").fit, reg, {"numerical_cols": ["x"]}),
+        "Imputer.fit_transform": (
+            Imputer(numerical_strategy="mean").fit_transform,
+            reg,
+            {"numerical_cols": ["x"]},
+        ),
+        "Scaler.fit": (Scaler().fit, reg, {"numerical_cols": ["x"]}),
+        "Scaler.transform": (fitted_scaler.transform, reg, {}),
+        "Encoder.fit": (Encoder().fit, reg, {"categorical_cols": ["c"]}),
+        "Encoder.fit_transform": (Encoder().fit_transform, reg, {"categorical_cols": ["c"]}),
+        "metrics.mse": (metrics.mse, scored, {}),
+        "metrics.accuracy": (metrics.accuracy, scored, {}),
+        "metrics.multiclass_scores": (metrics.multiclass_scores, scored, {}),
+        "metrics.auc_roc": (metrics.auc_roc, scored, {}),
+        "metrics.log_loss": (metrics.log_loss, scored, {}),
+    }
+
+
+def _result(value):
+    """Something comparable for a call's result."""
+    from pyspark.sql import DataFrame
+
+    if isinstance(value, DataFrame):
+        return value.columns, value.count()
+    if hasattr(value, "_is_fitted"):
+        return type(value).__name__, value._is_fitted
+    return value
+
+
+def test_dataframe_rename_contract(frames):
+    for name, (func, dataframe, kwargs) in _calls(frames).items():
+        with no_deprecation():
+            positional = _result(func(dataframe, **kwargs))
+            assert _result(func(dataframe=dataframe, **kwargs)) == positional, name
+        with warns_once("df=", "dataframe="):
+            assert _result(func(df=dataframe, **kwargs)) == positional, name
+        with pytest.raises(ValidationError, match="both df= and dataframe"):
+            func(dataframe, df=dataframe, **kwargs)
+        with pytest.raises(ValidationError, match="both df= and dataframe"):
+            func(dataframe=dataframe, df=dataframe, **kwargs)
+        with pytest.raises(TypeError, match="dataframe"):
+            func(**kwargs)

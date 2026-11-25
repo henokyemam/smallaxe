@@ -7,7 +7,7 @@ it and raises a clear :class:`~smallaxe.exceptions.DependencyError` only when
 
 Example:
     >>> from smallaxe.search import optimize
-    >>> result = optimize.run(model, df, label_col="target", param_space=space)
+    >>> result = optimize.run(model, dataframe, label_col="target", param_space=space)
 """
 
 from smallaxe.search import optimize

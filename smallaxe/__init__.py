@@ -64,7 +64,7 @@ def load_model(path: str) -> Union["Regressor", "Classifier"]:
 
     Example:
         >>> model = smallaxe.load_model('/path/to/model')
-        >>> predictions = model.predict(df)
+        >>> predictions = model.predict(dataframe)
     """
     from smallaxe.training.base import Model
 
@@ -91,7 +91,7 @@ def load_pipeline(path: str) -> "Pipeline":
 
     Example:
         >>> pipeline = smallaxe.load_pipeline('/path/to/pipeline')
-        >>> predictions = pipeline.predict(df)
+        >>> predictions = pipeline.predict(dataframe)
     """
     from smallaxe.pipeline import Pipeline
 
@@ -186,7 +186,7 @@ def verbosity(level: str) -> Generator[None, None, None]:
 
     Example:
         >>> with smallaxe.verbosity('quiet'):
-        ...     model.fit(df, label_col='target')  # runs silently
+        ...     model.fit(dataframe, label_col='target')  # runs silently
     """
     previous_level = get_verbosity()
     set_verbosity(level)
@@ -214,7 +214,7 @@ def set_spark_session(spark: Any) -> None:
 def get_spark_session() -> Optional[Any]:
     """Deprecated: returns whatever :func:`set_spark_session` stored. Removed in 1.0."""
     warnings.warn(
-        "smallaxe.get_spark_session will be removed in 1.0; use df.sparkSession or "
+        "smallaxe.get_spark_session will be removed in 1.0; use dataframe.sparkSession or "
         "SparkSession.getActiveSession().",
         DeprecationWarning,
         stacklevel=2,

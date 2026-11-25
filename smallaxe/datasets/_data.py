@@ -211,7 +211,7 @@ Label: price
 
 Usage:
   from smallaxe.datasets import load_sample_regression
-  df = load_sample_regression(spark)
+  dataframe = load_sample_regression(spark)
 """
     elif dataset_name == "classification":
         info = """
@@ -234,7 +234,7 @@ Class distribution: ~30% churn (1), ~70% no churn (0)
 
 Usage:
   from smallaxe.datasets import load_sample_classification
-  df = load_sample_classification(spark)
+  dataframe = load_sample_classification(spark)
 """
     else:
         raise ValueError(

@@ -18,7 +18,7 @@ class Classifiers:
         >>>
         >>> # Create a Random Forest classifier
         >>> model = Classifiers.random_forest(task='binary', n_estimators=100)
-        >>> model.fit(df, label_col='label', feature_cols=['f1', 'f2'])
+        >>> model.fit(dataframe, label_col='label', feature_cols=['f1', 'f2'])
         >>>
         >>> # Save and load the model
         >>> model.save('/path/to/model')
@@ -54,7 +54,7 @@ class Classifiers:
 
         Example:
             >>> model = Classifiers.random_forest(task='binary', n_estimators=100)
-            >>> model.fit(df, label_col='label', feature_cols=['f1', 'f2'])
+            >>> model.fit(dataframe, label_col='label', feature_cols=['f1', 'f2'])
         """
         return Classifiers._create("random_forest", task, kwargs)
 
@@ -89,7 +89,7 @@ class Classifiers:
 
         Example:
             >>> model = Classifiers.xgboost(task='binary', n_estimators=100)
-            >>> model.fit(df, label_col='label', feature_cols=['f1', 'f2'])
+            >>> model.fit(dataframe, label_col='label', feature_cols=['f1', 'f2'])
         """
         return Classifiers._create("xgboost", task, kwargs)
 
@@ -167,11 +167,11 @@ class Classifiers:
 
         Example:
             >>> model = Classifiers.random_forest(task='binary', n_estimators=100)
-            >>> model.fit(df, label_col='label', feature_cols=['f1', 'f2'])
+            >>> model.fit(dataframe, label_col='label', feature_cols=['f1', 'f2'])
             >>> model.save('/path/to/model')
             >>>
             >>> loaded_model = Classifiers.load('/path/to/model')
-            >>> predictions = loaded_model.predict(df)
+            >>> predictions = loaded_model.predict(dataframe)
         """
         model = Model.load(path)
         if not isinstance(model, Classifier):

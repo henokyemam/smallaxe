@@ -21,7 +21,7 @@ from pyspark.ml.functions import vector_to_array
 from pyspark.sql import DataFrame
 from pyspark.sql.types import BooleanType, NumericType
 
-from smallaxe import _artifact, _fs
+from smallaxe import _artifact, _deprecation, _fs
 from smallaxe.exceptions import (
     ColumnNotFoundError,
     ModelNotFittedError,
@@ -64,8 +64,8 @@ class Scaler:
 
     Example:
         >>> scaler = Scaler(method='standard')
-        >>> scaler.fit(df, numerical_cols=['age', 'income'])
-        >>> scaled_df = scaler.transform(df)
+        >>> scaler.fit(dataframe, numerical_cols=['age', 'income'])
+        >>> scaled_df = scaler.transform(dataframe)
     """
 
     def __init__(self, method: str = "standard"):
@@ -84,18 +84,18 @@ class Scaler:
 
     def _validate_columns(
         self,
-        df: DataFrame,
+        dataframe: DataFrame,
         numerical_cols: List[str],
     ) -> None:
         """Validate that all specified columns exist in the DataFrame."""
-        available_columns = df.columns
+        available_columns = dataframe.columns
         for col in numerical_cols:
             if col not in available_columns:
                 raise ColumnNotFoundError(column=col, available_columns=available_columns)
 
-    def _validate_numeric(self, df: DataFrame, numerical_cols: List[str]) -> None:
+    def _validate_numeric(self, dataframe: DataFrame, numerical_cols: List[str]) -> None:
         """Raise ValidationError naming the first input column that is not numeric or boolean."""
-        types = {field.name: field.dataType for field in df.schema.fields}
+        types = {field.name: field.dataType for field in dataframe.schema.fields}
         for col in numerical_cols:
             data_type = types[col]
             # Booleans scale as 0/1, as VectorAssembler and feature inference treat them.
@@ -134,7 +134,7 @@ class Scaler:
 
     @staticmethod
     def _working_names(columns: List[str]) -> Dict[str, str]:
-        """Names for the assembled, scaled and array columns that no column in df uses."""
+        """Names for the assembled, scaled and array columns that no column in dataframe uses."""
         taken = list(columns)
         names = {}
         for role, base in (
@@ -147,22 +147,23 @@ class Scaler:
         return names
 
     @staticmethod
-    def _assemble(df: DataFrame, input_cols: List[str], output_col: str) -> DataFrame:
+    def _assemble(dataframe: DataFrame, input_cols: List[str], output_col: str) -> DataFrame:
         return VectorAssembler(
             inputCols=input_cols,
             outputCol=output_col,
             handleInvalid="keep",
-        ).transform(df)
+        ).transform(dataframe)
 
+    @_deprecation.df_keyword
     def fit(
         self,
-        df: DataFrame,
+        dataframe: DataFrame,
         numerical_cols: List[str],
     ) -> "Scaler":
         """Fit the scaler by computing scaling parameters from the DataFrame.
 
         Args:
-            df: PySpark DataFrame to fit on.
+            dataframe: PySpark DataFrame to fit on.
             numerical_cols: List of numerical column names to scale.
 
         Returns:
@@ -175,12 +176,12 @@ class Scaler:
         if not numerical_cols:
             raise ValidationError("numerical_cols cannot be empty for Scaler.")
 
-        self._validate_columns(df, numerical_cols)
-        self._validate_numeric(df, numerical_cols)
+        self._validate_columns(dataframe, numerical_cols)
+        self._validate_numeric(dataframe, numerical_cols)
         cols = list(numerical_cols)
 
-        names = self._working_names(df.columns)
-        assembled_df = self._assemble(df, cols, names["assembled"])
+        names = self._working_names(dataframe.columns)
+        assembled_df = self._assemble(dataframe, cols, names["assembled"])
         scaler = self._create_scaler(names["assembled"], names["scaled"])
         self._scaler_model = scaler.fit(assembled_df)
         self._numerical_cols = cols
@@ -188,11 +189,12 @@ class Scaler:
 
         return self
 
-    def transform(self, df: DataFrame) -> DataFrame:
+    @_deprecation.df_keyword
+    def transform(self, dataframe: DataFrame) -> DataFrame:
         """Transform the DataFrame by scaling numerical columns.
 
         Args:
-            df: PySpark DataFrame to transform.
+            dataframe: PySpark DataFrame to transform.
 
         Returns:
             DataFrame with scaled numerical columns, in the input's column order.
@@ -205,10 +207,10 @@ class Scaler:
             raise ModelNotFittedError("Scaler has not been fitted. Call fit() before transform().")
 
         # Validate that all fitted columns exist
-        self._validate_columns(df, self._numerical_cols)
+        self._validate_columns(dataframe, self._numerical_cols)
 
-        names = self._working_names(df.columns)
-        assembled_df = self._assemble(df, self._numerical_cols, names["assembled"])
+        names = self._working_names(dataframe.columns)
+        assembled_df = self._assemble(dataframe, self._numerical_cols, names["assembled"])
 
         # The saved model carries the working names of its fit (artifacts from 0.10 and
         # earlier: "_assembled_features"); point it at this call's collision-free names.
@@ -230,26 +232,27 @@ class Scaler:
                     if col in positions
                     else column_ref(col)
                 )
-                for col in df.columns
+                for col in dataframe.columns
             ]
         )
 
+    @_deprecation.df_keyword
     def fit_transform(
         self,
-        df: DataFrame,
+        dataframe: DataFrame,
         numerical_cols: List[str],
     ) -> DataFrame:
         """Fit and transform in a single step.
 
         Args:
-            df: PySpark DataFrame to fit and transform.
+            dataframe: PySpark DataFrame to fit and transform.
             numerical_cols: List of numerical column names to scale.
 
         Returns:
             DataFrame with scaled numerical columns.
         """
-        self.fit(df, numerical_cols)
-        return self.transform(df)
+        self.fit(dataframe, numerical_cols)
+        return self.transform(dataframe)
 
     @property
     def method(self) -> str:

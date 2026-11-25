@@ -23,7 +23,7 @@ from typing import Any, Callable, Dict, List, Optional, Set, Tuple, cast
 
 from pyspark.sql import DataFrame
 
-from smallaxe import _artifact, _fs
+from smallaxe import _artifact, _deprecation, _fs
 from smallaxe.exceptions import ModelNotFittedError, PreprocessingError, ValidationError
 
 ARTIFACT_KIND = "pipeline"
@@ -139,7 +139,7 @@ class Pipeline:
     ``fit`` hands each step the column lists it is given: an ``Imputer`` gets
     ``numerical_cols`` and ``categorical_cols``, a ``Scaler`` ``numerical_cols``, an
     ``Encoder`` ``categorical_cols``, and a duck-typed preprocessing step both, as
-    ``fit(df, numerical_cols=..., categorical_cols=...)``. A smallaxe step left with no
+    ``fit(dataframe, numerical_cols=..., categorical_cols=...)``. A smallaxe step left with no
     columns is skipped: it stays unfitted, ``transform`` passes the data through it, and
     it is saved and restored as skipped (see :attr:`skipped_steps`).
 
@@ -174,7 +174,7 @@ class Pipeline:
         ...     ("encoder", Encoder()),
         ...     ("model", Classifiers.random_forest()),
         ... ])
-        >>> pipeline.fit(df, label_col="label", numerical_cols=["age"],
+        >>> pipeline.fit(dataframe, label_col="label", numerical_cols=["age"],
         ...              categorical_cols=["city"])
         >>> pipeline.save("/path/to/pipeline")
         >>> predictions = Pipeline.load("/path/to/pipeline").predict(new_df)
@@ -291,9 +291,10 @@ class Pipeline:
 
     # --- Fit and apply --------------------------------------------------------------
 
+    @_deprecation.df_keyword
     def fit(
         self,
-        df: DataFrame,
+        dataframe: DataFrame,
         label_col: Optional[str] = None,
         numerical_cols: Optional[List[str]] = None,
         categorical_cols: Optional[List[str]] = None,
@@ -301,7 +302,7 @@ class Pipeline:
         """Fit every step in order, each on the output of the steps before it.
 
         Args:
-            df: The PySpark DataFrame to fit on.
+            dataframe: The PySpark DataFrame to fit on.
             label_col: The label column; required when the pipeline has a model.
             numerical_cols: Numerical columns: imputed, scaled, and model features.
             categorical_cols: Categorical columns: imputed, encoded, and (encoded)
@@ -336,7 +337,7 @@ class Pipeline:
         skipped: List[str] = []
         encoder_outputs: Optional[List[str]] = None
         model: Any = None
-        current = df
+        current = dataframe
         for name, step in self._steps:
             if _is_model_step(step):
                 model = step
@@ -383,7 +384,7 @@ class Pipeline:
 
     @staticmethod
     def _fit_model(
-        model: Any, df: DataFrame, label_col: str, feature_cols: Optional[List[str]]
+        model: Any, dataframe: DataFrame, label_col: str, feature_cols: Optional[List[str]]
     ) -> List[str]:
         """Fit the model step and return the feature columns it was fitted on.
 
@@ -393,19 +394,20 @@ class Pipeline:
         from smallaxe.training.base import BaseModel, infer_feature_cols, warn_ignored_cols
 
         if isinstance(model, BaseModel):
-            model.fit(df, label_col=label_col, feature_cols=feature_cols)
+            model.fit(dataframe, label_col=label_col, feature_cols=feature_cols)
             return list(model._feature_cols)
         if feature_cols is None:
-            feature_cols, ignored = infer_feature_cols(df, label_col, [])
-            warn_ignored_cols(feature_cols, ignored, stacklevel=4)
-        model.fit(df, label_col=label_col, feature_cols=feature_cols)
+            feature_cols, ignored = infer_feature_cols(dataframe, label_col, [])
+            warn_ignored_cols(feature_cols, ignored)
+        model.fit(dataframe, label_col=label_col, feature_cols=feature_cols)
         return list(feature_cols)
 
-    def transform(self, df: DataFrame) -> DataFrame:
+    @_deprecation.df_keyword
+    def transform(self, dataframe: DataFrame) -> DataFrame:
         """Apply every fitted preprocessing step in order; skipped steps pass data through.
 
         Args:
-            df: The PySpark DataFrame to transform.
+            dataframe: The PySpark DataFrame to transform.
 
         Returns:
             The transformed DataFrame. Columns no step was fitted on are unchanged.
@@ -416,7 +418,7 @@ class Pipeline:
         if not self._is_fitted:
             raise ModelNotFittedError("Pipeline has not been fitted. Call fit() first.")
 
-        current = df
+        current = dataframe
         for name, step in self._steps:
             if _is_model_step(step):
                 break
@@ -425,17 +427,18 @@ class Pipeline:
             current = step.transform(current)
         return current
 
+    @_deprecation.df_keyword
     def fit_transform(
         self,
-        df: DataFrame,
+        dataframe: DataFrame,
         label_col: Optional[str] = None,
         numerical_cols: Optional[List[str]] = None,
         categorical_cols: Optional[List[str]] = None,
     ) -> DataFrame:
-        """Fit the pipeline, then transform ``df`` with it.
+        """Fit the pipeline, then transform ``dataframe`` with it.
 
         Args:
-            df: The PySpark DataFrame to fit on and transform.
+            dataframe: The PySpark DataFrame to fit on and transform.
             label_col: The label column; required when the pipeline has a model.
             numerical_cols: Numerical columns (see :meth:`fit`).
             categorical_cols: Categorical columns (see :meth:`fit`).
@@ -444,12 +447,12 @@ class Pipeline:
             The transformed DataFrame.
         """
         self.fit(
-            df,
+            dataframe,
             label_col=label_col,
             numerical_cols=numerical_cols,
             categorical_cols=categorical_cols,
         )
-        return self.transform(df)
+        return self.transform(dataframe)
 
     def _fitted_model(self, method: str) -> Any:
         """The model step, for ``method``.
@@ -470,11 +473,12 @@ class Pipeline:
             )
         )
 
-    def predict(self, df: DataFrame, output_col: str = DEFAULT_PREDICTION_COL) -> DataFrame:
+    @_deprecation.df_keyword
+    def predict(self, dataframe: DataFrame, output_col: str = DEFAULT_PREDICTION_COL) -> DataFrame:
         """Apply the preprocessing steps, then predict with the model.
 
         Args:
-            df: The PySpark DataFrame to predict on. Columns the pipeline was not fitted
+            dataframe: The PySpark DataFrame to predict on. Columns the pipeline was not fitted
                 on are passed through.
             output_col: Name of the prediction column, passed to the model's
                 ``predict``. Default is 'predict_label', as for ``Model.predict``. A
@@ -490,16 +494,19 @@ class Pipeline:
         from smallaxe.training.base import BaseModel
 
         model = self._fitted_model("predict")
-        current = self.transform(df)
+        current = self.transform(dataframe)
         if isinstance(model, BaseModel) or output_col != DEFAULT_PREDICTION_COL:
             return cast(DataFrame, model.predict(current, output_col=output_col))
         return cast(DataFrame, model.predict(current))
 
-    def predict_proba(self, df: DataFrame, output_col: str = DEFAULT_PROBABILITY_COL) -> DataFrame:
+    @_deprecation.df_keyword
+    def predict_proba(
+        self, dataframe: DataFrame, output_col: str = DEFAULT_PROBABILITY_COL
+    ) -> DataFrame:
         """Apply the preprocessing steps, then predict class probabilities with the model.
 
         Args:
-            df: The PySpark DataFrame to predict on.
+            dataframe: The PySpark DataFrame to predict on.
             output_col: Name of the probability column, passed to the model's
                 ``predict_proba``. Default is 'probability', as for
                 ``Classifier.predict_proba``.
@@ -525,16 +532,17 @@ class Pipeline:
                 )
         elif not hasattr(model, "predict_proba"):
             raise ValidationError(message="predict_proba() needs a model with predict_proba.")
-        current = self.transform(df)
+        current = self.transform(dataframe)
         if isinstance(model, BaseModel) or output_col != DEFAULT_PROBABILITY_COL:
             return cast(DataFrame, model.predict_proba(current, output_col=output_col))
         return cast(DataFrame, model.predict_proba(current))
 
-    def evaluate(self, df: DataFrame, label_col: Optional[str] = None) -> Dict[str, Any]:
+    @_deprecation.df_keyword
+    def evaluate(self, dataframe: DataFrame, label_col: Optional[str] = None) -> Dict[str, Any]:
         """Apply the preprocessing steps, then score the model as ``Model.evaluate`` does.
 
         Args:
-            df: The PySpark DataFrame to score, holding the label.
+            dataframe: The PySpark DataFrame to score, holding the label.
             label_col: The label column. Defaults to the label the pipeline was fitted
                 with.
 
@@ -550,7 +558,9 @@ class Pipeline:
         model = self._fitted_model("evaluate")
         if not hasattr(model, "evaluate"):
             raise ValidationError(message="evaluate() needs a model with evaluate.")
-        return dict(model.evaluate(self.transform(df), label_col=label_col or self._label_col))
+        return dict(
+            model.evaluate(self.transform(dataframe), label_col=label_col or self._label_col)
+        )
 
     # --- Persistence ----------------------------------------------------------------
 

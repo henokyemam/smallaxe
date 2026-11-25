@@ -18,7 +18,7 @@ Example:
     >>> model = Regressors.random_forest(seed=42)
     >>> result = optimize.run(
     ...     model,
-    ...     df,
+    ...     dataframe,
     ...     label_col="price",
     ...     param_space={
     ...         "n_estimators": hp.quniform("n_estimators", 20, 200, 20),
@@ -30,7 +30,7 @@ Example:
     ... )
     >>> result.best_params
     {'n_estimators': 120, 'max_depth': 8, ...}
-    >>> predictions = result.best_model.predict(df)
+    >>> predictions = result.best_model.predict(dataframe)
 """
 
 import math
@@ -348,7 +348,7 @@ def run(
     # than in every trial, and the inference warning is given at most once.
     if feature_cols is None:
         feature_cols, ignored = infer_feature_cols(dataframe, label_col, exclude_cols or [])
-        warn_ignored_cols(feature_cols, ignored, stacklevel=2)
+        warn_ignored_cols(feature_cols, ignored)
     model._validate_columns(dataframe, label_col, feature_cols)
     check_training_data(dataframe, label_col, feature_cols, model._accepts_missing())
 

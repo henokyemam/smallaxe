@@ -78,7 +78,7 @@ class PersistenceMixin(ABC):
             ValidationError: If the path is empty.
 
         Example:
-            >>> model.fit(df, label_col='target', feature_cols=['f1', 'f2'])
+            >>> model.fit(dataframe, label_col='target', feature_cols=['f1', 'f2'])
             >>> model.save('/path/to/model')
         """
         if not self._is_fitted:

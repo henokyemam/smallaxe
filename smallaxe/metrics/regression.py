@@ -11,12 +11,13 @@ from pyspark.ml.evaluation import RegressionEvaluator
 from pyspark.sql import DataFrame
 from pyspark.sql import functions as F
 
+from smallaxe import _deprecation
 from smallaxe.metrics._checks import require_numeric, require_rows
 from smallaxe.metrics._checks import validate_columns as _validate_columns
 
 
 def _evaluate(
-    df: DataFrame,
+    dataframe: DataFrame,
     label_col: str,
     prediction_col: str,
     metric: Literal["mse", "rmse", "mae", "r2"],
@@ -24,16 +25,19 @@ def _evaluate(
     evaluator = RegressionEvaluator(
         labelCol=label_col, predictionCol=prediction_col, metricName=metric
     )
-    return float(evaluator.evaluate(df))
+    return float(evaluator.evaluate(dataframe))
 
 
-def mse(df: DataFrame, label_col: str = "label", prediction_col: str = "predict_label") -> float:
+@_deprecation.df_keyword
+def mse(
+    dataframe: DataFrame, label_col: str = "label", prediction_col: str = "predict_label"
+) -> float:
     """Compute Mean Squared Error.
 
     MSE = (1/n) * sum((y_true - y_pred)^2), computed by Spark's ``RegressionEvaluator``.
 
     Args:
-        df: PySpark DataFrame containing true and predicted values.
+        dataframe: PySpark DataFrame containing true and predicted values.
         label_col: Name of the column containing true labels. Default is 'label'.
         prediction_col: Name of the column containing predictions. Default is 'predict_label'.
 
@@ -44,19 +48,22 @@ def mse(df: DataFrame, label_col: str = "label", prediction_col: str = "predict_
         ColumnNotFoundError: If label_col or prediction_col is not in the DataFrame.
         ValidationError: If the DataFrame has no rows.
     """
-    _validate_columns(df, label_col, prediction_col)
-    require_rows(df, "mse")
-    return _evaluate(df, label_col, prediction_col, "mse")
+    _validate_columns(dataframe, label_col, prediction_col)
+    require_rows(dataframe, "mse")
+    return _evaluate(dataframe, label_col, prediction_col, "mse")
 
 
-def rmse(df: DataFrame, label_col: str = "label", prediction_col: str = "predict_label") -> float:
+@_deprecation.df_keyword
+def rmse(
+    dataframe: DataFrame, label_col: str = "label", prediction_col: str = "predict_label"
+) -> float:
     """Compute Root Mean Squared Error.
 
     RMSE = sqrt((1/n) * sum((y_true - y_pred)^2)), computed by Spark's
     ``RegressionEvaluator``.
 
     Args:
-        df: PySpark DataFrame containing true and predicted values.
+        dataframe: PySpark DataFrame containing true and predicted values.
         label_col: Name of the column containing true labels. Default is 'label'.
         prediction_col: Name of the column containing predictions. Default is 'predict_label'.
 
@@ -67,18 +74,21 @@ def rmse(df: DataFrame, label_col: str = "label", prediction_col: str = "predict
         ColumnNotFoundError: If label_col or prediction_col is not in the DataFrame.
         ValidationError: If the DataFrame has no rows.
     """
-    _validate_columns(df, label_col, prediction_col)
-    require_rows(df, "rmse")
-    return _evaluate(df, label_col, prediction_col, "rmse")
+    _validate_columns(dataframe, label_col, prediction_col)
+    require_rows(dataframe, "rmse")
+    return _evaluate(dataframe, label_col, prediction_col, "rmse")
 
 
-def mae(df: DataFrame, label_col: str = "label", prediction_col: str = "predict_label") -> float:
+@_deprecation.df_keyword
+def mae(
+    dataframe: DataFrame, label_col: str = "label", prediction_col: str = "predict_label"
+) -> float:
     """Compute Mean Absolute Error.
 
     MAE = (1/n) * sum(|y_true - y_pred|), computed by Spark's ``RegressionEvaluator``.
 
     Args:
-        df: PySpark DataFrame containing true and predicted values.
+        dataframe: PySpark DataFrame containing true and predicted values.
         label_col: Name of the column containing true labels. Default is 'label'.
         prediction_col: Name of the column containing predictions. Default is 'predict_label'.
 
@@ -89,12 +99,15 @@ def mae(df: DataFrame, label_col: str = "label", prediction_col: str = "predict_
         ColumnNotFoundError: If label_col or prediction_col is not in the DataFrame.
         ValidationError: If the DataFrame has no rows.
     """
-    _validate_columns(df, label_col, prediction_col)
-    require_rows(df, "mae")
-    return _evaluate(df, label_col, prediction_col, "mae")
+    _validate_columns(dataframe, label_col, prediction_col)
+    require_rows(dataframe, "mae")
+    return _evaluate(dataframe, label_col, prediction_col, "mae")
 
 
-def r2(df: DataFrame, label_col: str = "label", prediction_col: str = "predict_label") -> float:
+@_deprecation.df_keyword
+def r2(
+    dataframe: DataFrame, label_col: str = "label", prediction_col: str = "predict_label"
+) -> float:
     """Compute R-squared (Coefficient of Determination).
 
     R2 = 1 - SS_res / SS_tot, where SS_res = sum((y_true - y_pred)^2) and
@@ -105,7 +118,7 @@ def r2(df: DataFrame, label_col: str = "label", prediction_col: str = "predict_l
     otherwise.
 
     Args:
-        df: PySpark DataFrame containing true and predicted values.
+        dataframe: PySpark DataFrame containing true and predicted values.
         label_col: Name of the column containing true labels. Default is 'label'.
         prediction_col: Name of the column containing predictions. Default is 'predict_label'.
 
@@ -117,11 +130,11 @@ def r2(df: DataFrame, label_col: str = "label", prediction_col: str = "predict_l
         ColumnNotFoundError: If label_col or prediction_col is not in the DataFrame.
         ValidationError: If the DataFrame has no rows.
     """
-    _validate_columns(df, label_col, prediction_col)
-    require_rows(df, "r2")
+    _validate_columns(dataframe, label_col, prediction_col)
+    require_rows(dataframe, "r2")
 
     label = F.col(label_col)
-    stats = df.select(
+    stats = dataframe.select(
         F.min(label).alias("min_label"),
         F.max(label).alias("max_label"),
         F.sum((label != F.col(prediction_col)).cast("long")).alias("mismatches"),
@@ -133,10 +146,13 @@ def r2(df: DataFrame, label_col: str = "label", prediction_col: str = "predict_l
     if stats["min_label"] == stats["max_label"]:
         return 1.0 if not stats["mismatches"] else 0.0
 
-    return _evaluate(df, label_col, prediction_col, "r2")
+    return _evaluate(dataframe, label_col, prediction_col, "r2")
 
 
-def mape(df: DataFrame, label_col: str = "label", prediction_col: str = "predict_label") -> float:
+@_deprecation.df_keyword
+def mape(
+    dataframe: DataFrame, label_col: str = "label", prediction_col: str = "predict_label"
+) -> float:
     """Compute Mean Absolute Percentage Error.
 
     MAPE = (100/n) * sum(|y_true - y_pred| / |y_true|)
@@ -145,7 +161,7 @@ def mape(df: DataFrame, label_col: str = "label", prediction_col: str = "predict
     to avoid division by zero.
 
     Args:
-        df: PySpark DataFrame containing true and predicted values.
+        dataframe: PySpark DataFrame containing true and predicted values.
         label_col: Name of the column containing true labels. Default is 'label'.
         prediction_col: Name of the column containing predictions. Default is 'predict_label'.
 
@@ -158,13 +174,13 @@ def mape(df: DataFrame, label_col: str = "label", prediction_col: str = "predict
         ValidationError: If label_col or prediction_col is not numeric, or the
             DataFrame has no rows.
     """
-    _validate_columns(df, label_col, prediction_col)
-    require_numeric(df, "mape", label_col, prediction_col)
-    require_rows(df, "mape")
+    _validate_columns(dataframe, label_col, prediction_col)
+    require_numeric(dataframe, "mape", label_col, prediction_col)
+    require_rows(dataframe, "mape")
 
     label = F.col(label_col)
     result = (
-        df.filter(label != 0)
+        dataframe.filter(label != 0)
         .select(F.avg(F.abs(label - F.col(prediction_col)) / F.abs(label)).alias("mape"))
         .first()
     )
