@@ -122,6 +122,10 @@
 
 ### Phase 13: Visualization Module (v0.12.0)
 
+Superseded: shipped in 1.0 as the seven functions of `smallaxe.viz` (no `Visualizer` or
+`PlotResult` class; each chart returns a plotly `Figure`), tested in `tests/test_viz.py`.
+`threshold_curve()` was not built. See CHANGELOG.md.
+
 #### Step 13.1: Visualizer Core
 - [ ] Create `smallaxe/viz/visualizer.py`
 - [ ] Implement `Visualizer` class with theme support

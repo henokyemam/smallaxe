@@ -68,6 +68,8 @@ The current implementation already has useful foundations:
 
 **Status (2026-09-30):** mostly done. `search.optimize` and CatBoost are implemented, and the README lists `AutomatedTraining` and visualization only under "Roadmap". Still open: the regression naming decision.
 
+**Status (2026-11-25):** `AutomatedTraining` (`smallaxe.auto`) and visualization (`smallaxe.viz`) are implemented for 1.0 and documented in the README; its Roadmap no longer lists them. Still open: the regression naming decision.
+
 ### 2. Finish The Four-Algorithm Training Surface
 
 - Add CatBoost regressor and binary classifier support, or remove CatBoost from public docs until implemented.
@@ -317,7 +319,7 @@ Items 1 to 4, 6, and 7 change trained models or scores; item 5 only changes spee
 7. **CatBoost categoricals.** The `Algorithm` record already carries `accepts_raw_categoricals` (false for every algorithm today). Either implement native categorical handling for CatBoost and set it true, or keep it false and remove the Pipeline's CatBoost exemption from the Encoder requirement. Removing the exemption is the smaller change and is enough for v1.
 8. **Databricks ergonomics.** An option to suppress MLflow autologging during internal fits, a warning when CatBoost trains on an autoscaling cluster, hardening of the SynapseML/CatBoost shim for the reverse import order, and model IO that works on Spark Connect and serverless sessions (`_fs._spark()` calls `spark._jvm`, which they do not have).
 9. **Validation module and artifact layout (items 6 and 7).** Public split utilities, a versioned artifact layout, and `load_model` / `load_pipeline`.
-10. **AutomatedTraining (item 8), then visualization.** AutomatedTraining done for 1.0 (see item 8); visualization is open.
+10. **AutomatedTraining (item 8), then visualization.** Both done for 1.0 (unreleased). AutomatedTraining: see item 8. Visualization, on branch `v1/viz`: `smallaxe.viz` exports `confusion_matrix`, `roc_curve`, `precision_recall_curve`, `residuals`, `actual_vs_predicted`, `feature_importances` and `model_comparison`, plotly figures that aggregate in Spark (one `groupBy` over classes or bins) and collect only the bins. plotly stays the optional `viz` extra and is imported lazily. Not done: a threshold curve (precision, recall and F1 against the threshold) and multiclass ROC curves.
 11. **Spark 4 support.** Relax `pyspark<4.0` once RF, XGBoost, and CatBoost (`catboost-spark_4.0_2.13`) pass the validation notebook on DBR 17.x. LightGBM stays Spark 3.5-only until SynapseML ships a Spark 4 build.
 
 Cross-cutting: make the Databricks validation notebook a release gate. It is currently the only run that exercises LightGBM and CatBoost against their JVM packages; CI skips those tests.
@@ -378,6 +380,6 @@ Status (2026-10-30): multiclass metrics are now met (validation run 5). Still no
 - Multilabel classification.
 - Quantile regression and other specialized regression objectives.
 - Calibration and threshold tuning for binary classifiers.
-- Feature importance and model comparison visualizations.
+- A threshold curve and multiclass (one-vs-rest) ROC curves in `smallaxe.viz`.
 - MLflow integration for experiment tracking and model registry workflows.
 - Distributed hyperparameter tuning with Spark-aware execution.

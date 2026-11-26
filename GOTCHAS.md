@@ -319,5 +319,5 @@ gotchas is complete.
 |---|---|
 | `Pipeline.save` / `load` use local `os` paths, and pipelines with an `Encoder` or a model step cannot be saved and loaded again | Step 2 (pipeline persistence) |
 | LightGBM and CatBoost need JVM packages, and CatBoost fails on autoscaling clusters | Step 8: warn when CatBoost trains on an autoscaling cluster |
-| `smallaxe/viz/` is empty (`smallaxe/auto/` holds `AutomatedTraining` from 1.0) | Step 10. Keep `viz` out of the README and `__all__` until it is implemented. |
+| `smallaxe/viz/` was empty before 1.0 | Step 10: done; `smallaxe.viz` holds the seven charts from 1.0 (`smallaxe/auto/` holds `AutomatedTraining`). |
 | `_fs._spark()` calls `spark._jvm`, which Spark Connect and serverless sessions do not have | Step 8 (Databricks ergonomics) |

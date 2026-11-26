@@ -24,6 +24,10 @@ smallaxe is a PySpark MLOps library. All model training flows through `Model.fit
 
 `smallaxe/auto/_automated.py` must stay built on the public training API and on the private helpers it shares with `optimize.run` (metric check and orientation, score lookup, split-seed fallback); change those helpers in `smallaxe/search/optimize.py`, not a copy. A new algorithm needs nothing here: it is picked up from `regressors.algorithms()` / `classifiers.algorithms()`. Training failures are caught as `SmallaxeError` or `smallaxe._fs.jvm_error_types()` only. `tests/test_auto.py` uses a fake `Model.fit` (`fake_fits`) for ranking, failure and skip rules, and real Random Forest / XGBoost runs for the rest.
 
+### Adding or Changing a Chart
+
+Charts live in `smallaxe/viz/` and are exported from `smallaxe/viz/__init__.py`. A DataFrame chart checks its arguments first (`smallaxe/metrics/_checks.py`, `smallaxe/viz/_style.py`), then builds one aggregated Spark DataFrame in a private helper (`_confusion_table`, `_score_bins`, `_residual_table`, `_density_table`) and collects it through `smallaxe/viz/_frames.py`; nothing calls `collect()` or `toPandas()` on row-level data. Get plotly only from `_style.plotly()` (never import it at module level: `import smallaxe.viz` must not load it), build the figure with `_style.figure(...)`, and use only `plotly.graph_objects` features that plotly 5.0 has. Test the figure's data and the helper's row count in `tests/test_viz.py`, and pin a new function in `tests/test_public_api.py`.
+
 ### Adding a Metric
 
 1. Add the function to `smallaxe/metrics/regression.py` or `smallaxe/metrics/classification.py`
@@ -57,7 +61,8 @@ mypy smallaxe
 - **A frozen public API** — semantic versioning from 1.0. Changing a public name or signature changes the `tests/test_public_api.py` snapshot and needs a CHANGELOG entry; a removal is deprecated for at least one minor release first (one `DeprecationWarning` naming the replacement, attributed with `smallaxe._warn.caller_stacklevel()`) and happens only in a major release
 - **smallaxe exceptions for user errors** — public methods check arguments up front (`smallaxe/_checks.py`) and raise `ValidationError`, `ColumnNotFoundError`, `ModelNotFittedError` or `ConfigurationError`, never a raw `ValueError` / `KeyError` / `TypeError`
 - **PySpark MLlib under the hood** — models wrap Spark's native ML pipeline internally
-- **Optional algorithm dependencies** — XGBoost, LightGBM, CatBoost (and plotly, `viz`) are extras, not core deps; the hard dependencies are exactly what smallaxe imports at runtime
+- **Optional algorithm dependencies** — XGBoost, LightGBM, CatBoost (and plotly, `viz`) are extras, not core deps; the hard dependencies are exactly what smallaxe imports at runtime. plotly is imported lazily by `smallaxe.viz`, and the dev extra installs it so the tests draw every chart
+- **Charts aggregate in Spark** — `smallaxe.viz` collects only grouped or globally aggregated rows, bounded by bins or classes
 - **Typed package** — smallaxe ships `py.typed`; `mypy smallaxe` passes under the strict settings in `pyproject.toml`. Fix a type error by correcting the type; a `# type: ignore` needs an error code and a reason
 - **Session-scoped SparkSession in tests** — expensive to create, shared across all tests in a run
 
