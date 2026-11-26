@@ -74,6 +74,13 @@ _MINIMIZE_METRICS = {
 }
 _VALID_METRICS = _MAXIMIZE_METRICS | _MINIMIZE_METRICS
 
+# The metric optimised when none is given, per task. AutomatedTraining uses the same.
+_DEFAULT_METRICS: Dict[str, str] = {
+    "simple_regression": "rmse",
+    "binary": "auc_roc",
+    "multiclass": "accuracy",
+}
+
 
 class SearchResult:
     """Container for the outcome of a hyperparameter search.
@@ -151,11 +158,43 @@ class SearchResult:
 
 def _default_metric(model: Any) -> str:
     """Pick RMSE for regression, ROC AUC for binary, and accuracy for multiclass."""
-    if model.task_type == "regression":
-        return "rmse"
-    if getattr(model, "task", None) == "binary":
-        return "auc_roc"
-    return "accuracy"
+    return _DEFAULT_METRICS[model.task]
+
+
+def _resolve_metric(metric: Optional[str], task: str) -> str:
+    """``metric``, or the task's default when it is None, checked against the task.
+
+    Shared by :func:`run` and ``AutomatedTraining``, so both accept the same metrics.
+
+    Args:
+        metric: The metric asked for, or None.
+        task: The task being trained.
+
+    Returns:
+        The metric name.
+
+    Raises:
+        ValidationError: If ``metric`` is not a metric a search can optimise, or not one
+            the task's validation produces.
+    """
+    metric = metric or _DEFAULT_METRICS[task]
+    if not isinstance(metric, str) or metric not in _VALID_METRICS:
+        raise ValidationError(
+            f"Invalid metric '{metric}'. Supported metrics are: {sorted(_VALID_METRICS)}."
+        )
+    # A metric the task's validation never produces would fail every trial only after fitting it.
+    task_metrics = TASK_METRICS[task]
+    if metric not in task_metrics:
+        raise ValidationError(
+            f"Metric '{metric}' is not available for task '{task}'. "
+            f"Supported metrics for this task are: {sorted(task_metrics)}."
+        )
+    return metric
+
+
+def _higher_is_better(metric: str) -> bool:
+    """Whether a larger value of ``metric`` is better (``r2``, ``auc_roc``) or worse (``rmse``)."""
+    return metric in _MAXIMIZE_METRICS
 
 
 def _normalize_space(param_space: Dict[str, Any], type_reference: Dict[str, Any]) -> Dict[str, Any]:
@@ -223,6 +262,44 @@ def _cast_params(sampled: Dict[str, Any], type_reference: Dict[str, Any]) -> Dic
     return cast
 
 
+def _score_key(metric: str, validation: str) -> str:
+    """The ``validation_scores`` key of ``metric``: k-fold stores it as ``mean_<metric>``."""
+    return f"mean_{metric}" if validation == "kfold" else metric
+
+
+def _lookup_metric(
+    validation_scores: Optional[Dict[str, Any]],
+    metric: str,
+    validation: str,
+) -> Optional[float]:
+    """A single scalar metric of a model's ``validation_scores``, or None when undefined.
+
+    Undefined means present but None or NaN: the metric could not be computed on the
+    validation rows, for example AUC on a split with a single class.
+
+    Raises:
+        ValidationError: If there are no scores, or the metric is missing from them.
+    """
+    if not validation_scores:
+        raise ValidationError(
+            "No validation scores were produced. Use validation='train_test' or "
+            "'kfold' so the search has a score to optimize."
+        )
+
+    key = _score_key(metric, validation)
+    if key not in validation_scores:
+        available = sorted(k for k, v in validation_scores.items() if isinstance(v, (int, float)))
+        raise ValidationError(
+            f"Metric '{metric}' (looked up as '{key}') is not available in "
+            f"validation scores. Available numeric scores: {available}. "
+            "Note: auc_roc/auc_pr/log_loss are only produced for binary classification."
+        )
+    value = validation_scores[key]
+    if value is None or math.isnan(float(value)):
+        return None
+    return float(value)
+
+
 def _extract_metric(
     validation_scores: Optional[Dict[str, Any]],
     metric: str,
@@ -235,30 +312,15 @@ def _extract_metric(
             NaN) on this trial's validation data, so the trial fails rather than
             scoring.
     """
-    if not validation_scores:
-        raise ValidationError(
-            "No validation scores were produced. Use validation='train_test' or "
-            "'kfold' so the search has a score to optimize."
-        )
-
-    # k-fold aggregates each metric under a 'mean_<metric>' key.
-    key = f"mean_{metric}" if validation == "kfold" else metric
-    value = validation_scores.get(key)
-    if key in validation_scores and (value is None or math.isnan(float(value))):
+    score = _lookup_metric(validation_scores, metric, validation)
+    if score is None:
         where = "every fold" if validation == "kfold" else "the test split"
         raise ValidationError(
             f"Metric '{metric}' is undefined on {where} of this trial (looked up as "
-            f"'{key}'), for example AUC on validation data with a single class. "
-            "The trial is not scored."
+            f"'{_score_key(metric, validation)}'), for example AUC on validation data with "
+            "a single class. The trial is not scored."
         )
-    if value is None:
-        available = sorted(k for k, v in validation_scores.items() if isinstance(v, (int, float)))
-        raise ValidationError(
-            f"Metric '{metric}' (looked up as '{key}') is not available in "
-            f"validation scores. Available numeric scores: {available}. "
-            "Note: auc_roc/auc_pr/log_loss are only produced for binary classification."
-        )
-    return float(value)
+    return score
 
 
 def run(
@@ -389,18 +451,7 @@ def run(
     if seed is not None and (isinstance(seed, bool) or not isinstance(seed, int)):
         raise ValidationError(f"seed must be an integer or None, got {type(seed).__name__}.")
 
-    metric = metric or _default_metric(model)
-    if not isinstance(metric, str) or metric not in _VALID_METRICS:
-        raise ValidationError(
-            f"Invalid metric '{metric}'. Supported metrics are: {sorted(_VALID_METRICS)}."
-        )
-    # A metric the task's validation never produces would fail every trial only after fitting it.
-    task_metrics = TASK_METRICS[model.task]
-    if metric not in task_metrics:
-        raise ValidationError(
-            f"Metric '{metric}' is not available for task '{model.task}'. "
-            f"Supported metrics for this task are: {sorted(task_metrics)}."
-        )
+    metric = _resolve_metric(metric, model.task)
 
     type_reference = model.default_params
     space = _normalize_space(param_space, type_reference)
@@ -410,7 +461,7 @@ def run(
             f"param_space names {unknown}, which {model.algorithm.name!r} does not have for "
             f"task {model.task!r}. Its parameters are: {sorted(model.params)}."
         )
-    maximize = metric in _MAXIMIZE_METRICS
+    maximize = _higher_is_better(metric)
 
     # Infer features once and check the data once, so bad data fails here rather
     # than in every trial, and the inference warning is given at most once.
@@ -425,9 +476,10 @@ def run(
     if verbose is None:
         verbose = smallaxe.get_verbosity() != "quiet"
     # Every trial must score on the same split. Unseeded, each fit would draw its own
-    # random split seed, so draw one here for all trials. It only decides the split:
-    # unseeded estimators stay unseeded.
-    split_seed = seed if seed is not None else _resolve_split_seed()
+    # random split seed, so draw one here for all trials (or take the template's private
+    # fallback: AutomatedTraining sets it so every algorithm of a run shares one split).
+    # It only decides the split: unseeded estimators stay unseeded.
+    split_seed = _resolve_split_seed(seed, model._split_seed_fallback)
 
     def _build_model(overrides: Dict[str, Any], trial: bool = True) -> Any:
         """Create a fresh model with base params overridden by ``overrides``.
