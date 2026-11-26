@@ -17,11 +17,13 @@
 1. Create a feature branch from `main`
 2. Make your changes
 3. Add or update tests in `tests/`
-4. Ensure all tests pass: `pytest`
-5. Format code: `black .`
-6. Lint: `ruff check .`
+4. Ensure all tests pass: `pytest`. This includes `tests/test_readme_examples.py`, which
+   runs every Python example in `README.md`
+5. Format code: `black smallaxe tests` (CI runs `black --check smallaxe tests`)
+6. Lint: `ruff check smallaxe tests examples` (CI lints `smallaxe` and `tests`)
 7. Type check: `mypy smallaxe` (strict; CI fails on any error)
-8. Open a pull request
+8. Add a `CHANGELOG.md` entry for a user-visible change
+9. Open a pull request
 
 ## Code Style
 
