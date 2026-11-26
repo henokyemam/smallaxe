@@ -6,6 +6,7 @@ See ``GOTCHAS.md`` items 4 (refit), 5 (caching), 6 (global settings), and 7
 
 import warnings
 
+import pyspark
 import pytest
 from pyspark import StorageLevel
 
@@ -146,11 +147,13 @@ class TestCaching:
                     n_folds=2,
                     cache_strategy=strategy,
                 )
-                # ``same_data`` is a new plan over the cached one; Spark reports its own
-                # level as NONE, so smallaxe may cache it too, but must leave the
-                # caller's cache in place.
+                # ``same_data`` is a new plan over the cached one. Spark 3 reports its
+                # own level as NONE, so smallaxe may cache it too, but must leave the
+                # caller's cache in place and its own removed. Spark 4 reports the
+                # caller's level for it, so smallaxe does not cache it at all.
                 assert _is_cached(cached)
-                assert not _is_cached(same_data)
+                if int(pyspark.__version__.split(".")[0]) < 4:
+                    assert not _is_cached(same_data)
         finally:
             cached.unpersist()
 
