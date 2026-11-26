@@ -74,7 +74,8 @@ def random_forest(task: str = "binary", **params: Any) -> Classifier:
 def xgboost(task: str = "binary", **params: Any) -> Classifier:
     """Create an unfitted XGBoost classifier.
 
-    Needs the xgboost package: ``pip install smallaxe[xgboost]``.
+    Needs the xgboost package: ``pip install smallaxe[xgboost]``. On Spark 4 use xgboost
+    3.3 or later, the first release that declares PySpark 4 support.
 
     Args:
         task: The classification task: ``'binary'`` (default) or ``'multiclass'``.
@@ -113,7 +114,8 @@ def lightgbm(task: str = "binary", **params: Any) -> Classifier:
     """Create an unfitted LightGBM classifier.
 
     Needs SynapseML's LightGBM: ``pip install smallaxe[lightgbm]`` and the SynapseML Spark
-    package on the session's classpath.
+    package on the session's classpath. Supported on Spark 3.x only: SynapseML's Spark 4
+    builds are not validated with smallaxe (nothing stops you from trying one).
 
     Args:
         task: The classification task: ``'binary'`` (default) or ``'multiclass'``.

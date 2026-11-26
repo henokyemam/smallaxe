@@ -1,4 +1,8 @@
-"""XGBoost via ``xgboost.spark`` (``pip install smallaxe[xgboost]``)."""
+"""XGBoost via ``xgboost.spark`` (``pip install smallaxe[xgboost]``).
+
+On Spark 4 use xgboost 3.3 or later, the first release that declares PySpark 4 support
+(it needs Python 3.12); the extra's floor, 1.7.0, serves Spark 3.3.
+"""
 
 from typing import Any, List, Optional
 

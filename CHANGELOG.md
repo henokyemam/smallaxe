@@ -271,6 +271,31 @@ deprecated in 0.11"), naming its replacement. In 1.0 a removed name raises
 
 ### Added
 
+- **Spark 4.x support: PySpark 4.0, 4.1, 4.2 and 4.3.** smallaxe now requires
+  `pyspark>=3.3,<4.4` (was `<4.0`); the bound is one past the newest minor CI tests.
+  CI adds legs on Java 17 for PySpark 4.0 on Python 3.9, 3.10, 3.11 and 3.12, 4.1 and
+  4.2 on Python 3.12, and 4.3 on Python 3.11 and 3.12, plus 4.3 / Python 3.12 on Java
+  25, and runs XGBoost on 4.3 / Python 3.12; the Spark 4 legs install pandas below 3,
+  as Spark 4 documents. Spark 4 needs Java 17 or later and Python 3.9 or later (4.1 and
+  4.2: 3.10; 4.3: 3.11). Limits:
+  - **Classic sessions only.** Spark Connect is not supported; a Connect session raises
+    `ConfigurationError` (see "Changed").
+  - **XGBoost** needs xgboost 3.3 or later on Spark 4, the first release that declares
+    PySpark 4 support (Python 3.12+). The `smallaxe[xgboost]` floor stays 1.7.0, for
+    Spark 3.3: an extra cannot depend on the installed PySpark.
+  - **LightGBM is supported on Spark 3.x only.** SynapseML publishes Spark 4.0 and 4.1
+    builds (`synapseml_2.13:1.1.3-spark4.0` / `-spark4.1`) that smallaxe has not
+    validated; nothing in smallaxe blocks them.
+  - **CatBoost** is validated on Spark 3.5 only; catboost-spark publishes
+    `catboost-spark_4.0_2.13` and `catboost-spark_4.1_2.13` (1.2.10), not validated.
+  - Python 3.13 and 3.14, which PySpark 4 supports, are not declared (smallaxe stays
+    `<3.13`).
+
+  The PySpark APIs smallaxe imports exist unchanged in PySpark 4.3, PySpark 4 no longer
+  imports `distutils` (the `setuptools` requirement on Python 3.12 is for PySpark 3.5),
+  and results no longer depend on ANSI SQL mode, which Spark 4 turns on (see
+  "Changed"). The ANSI part is tested locally on Spark 3.5; the Spark 4 legs are new in
+  CI.
 - **`smallaxe.auto.AutomatedTraining`**: one call that trains every installed algorithm
   on the same data and the same validation rows, compares them on one metric and keeps
   the best fitted model. `AutomatedTraining(task, algorithms=None, metric=None,
