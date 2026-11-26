@@ -16,6 +16,7 @@ PySpark MLlib has a steep learning curve and verbose API. **smallaxe** provides 
 - **Cross-Validation** - Train/test split and k-fold, reproducible from a seed; each class is split in the same proportion
 - **Metrics** - Classification (accuracy, precision, recall, F1, AUC-ROC, AUC-PR, log loss) and regression (MSE, RMSE, MAE, R², MAPE)
 - **Hyperparameter Optimization** - hyperopt-backed search over any model's parameters
+- **Automated Training** - train every installed algorithm on the same validation rows and keep the best
 
 ## Installation
 
@@ -130,6 +131,75 @@ result = optimize.run(
 
 print(result.best_params, result.best_score)
 predictions = result.best_model.predict(dataframe)   # best_model is already fitted
+```
+
+### Automated training
+
+`smallaxe.auto.AutomatedTraining` trains every installed algorithm on the same data,
+scores them all on exactly the same validation rows (one split seed for the whole run),
+compares them on one metric, and keeps the best model, refitted on every row. It
+supports `"simple_regression"` and `"binary"`; the default metric is `rmse` (minimised)
+for regression and `auc_roc` (maximised) for binary, as in `optimize.run`. An algorithm
+whose optional package is missing is skipped with one warning naming its install hint,
+and one that fails while training is reported in the table while the others go on.
+
+```python
+from smallaxe.auto import AutomatedTraining
+from smallaxe.datasets import load_sample_regression
+
+houses = load_sample_regression(n_rows=2000)
+auto = AutomatedTraining(task="simple_regression")
+auto.fit(houses, label_col="price", exclude_cols=["location", "condition"])
+
+print(auto.comparison)              # one row per algorithm, best first
+print(auto.best_algorithm, auto.best_score)
+predictions = auto.predict(houses)  # uses auto.best_model
+```
+
+Give an algorithm fixed `params`, or a hyperopt `param_spaces` entry to tune it with
+`optimize.run` (`max_evals` trials, on the same split); the others are fitted once.
+`seed` makes the whole comparison reproducible:
+
+```python
+from hyperopt import hp
+from smallaxe.auto import AutomatedTraining
+from smallaxe.datasets import load_sample_classification
+
+churn = load_sample_classification(n_rows=2000)
+auto = AutomatedTraining(
+    task="binary",
+    algorithms=["random_forest", "xgboost"],
+    metric="auc_roc",
+    params={"random_forest": {"n_estimators": 50}},
+    param_spaces={"xgboost": {"max_depth": hp.quniform("max_depth", 3, 8, 1)}},
+    max_evals=10,
+    seed=42,
+)
+auto.fit(churn, label_col="churn", exclude_cols=["contract", "payment_method"],
+         validation="kfold", n_folds=3)
+
+print(auto.comparison[["algorithm", "status", "auc_roc", "params"]])  # params: what was used
+probabilities = auto.predict_proba(churn)
+```
+
+`comparison` is a pandas DataFrame with the columns `algorithm`, `status` (`ok`,
+`failed` or `skipped`), the compared metric, the task's other validation metrics,
+`fit_seconds`, `params` and `error`. A searched algorithm reports the compared metric
+only; an undefined score (AUC on a one-class split) is NaN and never wins.
+AutomatedTraining has no `save`: keep the winner with `auto.best_model.save(path)` and
+the table with `auto.comparison.to_csv(path)`. Like `fit`, it trains on numeric and
+boolean features, so impute and encode the other columns first:
+
+```python
+from smallaxe.preprocessing import Encoder, Imputer
+
+filled = Imputer(numerical_strategy="median").fit_transform(
+    churn, numerical_cols=["tenure", "monthly_charges", "total_charges"]
+)
+encoded = Encoder(method="onehot").fit_transform(
+    filled, categorical_cols=["contract", "payment_method"]
+)
+auto = AutomatedTraining(task="binary", seed=42).fit(encoded, label_col="churn")
 ```
 
 ### Preprocessing Pipeline
@@ -323,7 +393,6 @@ dependencies or network are unavailable, so the core suite always runs offline.
 
 Planned for future releases (not yet available):
 
-- `AutomatedTraining` — train all available algorithms and compare them.
 - Plotly-based evaluation visualizations.
 - Multiclass/multilabel metrics, quantile regression, MLflow integration.
 

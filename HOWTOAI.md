@@ -20,6 +20,10 @@ smallaxe is a PySpark MLOps library. All model training flows through `Model.fit
 2. List it in the module's `__all__` and export it from `smallaxe/preprocessing/__init__.py`
 3. The `Pipeline` class in `smallaxe/pipeline/pipeline.py` will accept it as a step
 
+### Changing AutomatedTraining
+
+`smallaxe/auto/_automated.py` must stay built on the public training API and on the private helpers it shares with `optimize.run` (metric check and orientation, score lookup, split-seed fallback); change those helpers in `smallaxe/search/optimize.py`, not a copy. A new algorithm needs nothing here: it is picked up from `regressors.algorithms()` / `classifiers.algorithms()`. Training failures are caught as `SmallaxeError` or `smallaxe._fs.jvm_error_types()` only. `tests/test_auto.py` uses a fake `Model.fit` (`fake_fits`) for ranking, failure and skip rules, and real Random Forest / XGBoost runs for the rest.
+
 ### Adding a Metric
 
 1. Add the function to `smallaxe/metrics/regression.py` or `smallaxe/metrics/classification.py`

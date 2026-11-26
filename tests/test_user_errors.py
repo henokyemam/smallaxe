@@ -13,6 +13,7 @@ from pyspark.sql import functions as F
 
 import smallaxe
 from smallaxe import metrics
+from smallaxe.auto import AutomatedTraining
 from smallaxe.datasets import dataset_info, load_sample_regression
 from smallaxe.exceptions import (
     ColumnNotFoundError,
@@ -415,6 +416,98 @@ def _cases(frame, fitted, fitted_classifier, tmp_path):
         ),
         "optimize.run(string label)": (
             lambda: optimize.run(rf(), frame, "c", {"max_depth": [2]}, feature_cols=["x"]),
+            ValidationError,
+        ),
+        # AutomatedTraining
+        "AutomatedTraining('multiclass')": (
+            lambda: AutomatedTraining("multiclass"),
+            ValidationError,
+        ),
+        "AutomatedTraining(task=None)": (lambda: AutomatedTraining(None), ValidationError),
+        "AutomatedTraining(algorithms=['nope'])": (
+            lambda: AutomatedTraining("binary", algorithms=["nope"]),
+            ValidationError,
+        ),
+        "AutomatedTraining(algorithms={1: 2})": (
+            lambda: AutomatedTraining("binary", algorithms={1: 2}),
+            ValidationError,
+        ),
+        "AutomatedTraining(metric='auc_roc') for regression": (
+            lambda: AutomatedTraining("simple_regression", metric="auc_roc"),
+            ValidationError,
+        ),
+        "AutomatedTraining(metric=['rmse'])": (
+            lambda: AutomatedTraining("simple_regression", metric=["rmse"]),
+            ValidationError,
+        ),
+        "AutomatedTraining(params for unrequested)": (
+            lambda: AutomatedTraining(
+                "binary", algorithms=["random_forest"], params={"xgboost": {"max_depth": 2}}
+            ),
+            ValidationError,
+        ),
+        "AutomatedTraining(params={'xgboost': None})": (
+            lambda: AutomatedTraining("binary", params={"xgboost": None}),
+            ValidationError,
+        ),
+        "AutomatedTraining(param_spaces=[])": (
+            lambda: AutomatedTraining("binary", param_spaces=[]),
+            ValidationError,
+        ),
+        "AutomatedTraining(max_evals='5')": (
+            lambda: AutomatedTraining("binary", max_evals="5"),
+            ValidationError,
+        ),
+        "AutomatedTraining(seed=1.5)": (
+            lambda: AutomatedTraining("binary", seed=1.5),
+            ValidationError,
+        ),
+        "AutomatedTraining.fit(list)": (
+            lambda: AutomatedTraining("simple_regression").fit([1], "y"),
+            ValidationError,
+        ),
+        "AutomatedTraining.fit(validation='none')": (
+            lambda: AutomatedTraining("simple_regression").fit(frame, "y", validation="none"),
+            ValidationError,
+        ),
+        "AutomatedTraining.fit(missing label)": (
+            lambda: AutomatedTraining("simple_regression").fit(frame, "nope"),
+            ColumnNotFoundError,
+        ),
+        "AutomatedTraining.fit(label_col=3)": (
+            lambda: AutomatedTraining("simple_regression").fit(frame, 3),
+            ValidationError,
+        ),
+        "AutomatedTraining.fit(string label)": (
+            lambda: AutomatedTraining("simple_regression").fit(frame, "c", feature_cols=["x"]),
+            ValidationError,
+        ),
+        "AutomatedTraining.fit(feature_cols='x')": (
+            lambda: AutomatedTraining("simple_regression").fit(frame, "y", feature_cols="x"),
+            ValidationError,
+        ),
+        "AutomatedTraining.fit(test_size='a')": (
+            lambda: AutomatedTraining("simple_regression").fit(frame, "y", test_size="a"),
+            ValidationError,
+        ),
+        "AutomatedTraining.fit(fold_key=[])": (
+            lambda: AutomatedTraining("simple_regression").fit(frame, "y", fold_key=[]),
+            ValidationError,
+        ),
+        "AutomatedTraining.fit(cache_strategy=[])": (
+            lambda: AutomatedTraining("simple_regression").fit(frame, "y", cache_strategy=[]),
+            ValidationError,
+        ),
+        "AutomatedTraining.best_model unfitted": (
+            lambda: AutomatedTraining("binary").best_model,
+            ModelNotFittedError,
+        ),
+        "AutomatedTraining.predict unfitted": (
+            lambda: AutomatedTraining("binary").predict(frame),
+            ModelNotFittedError,
+        ),
+        "AutomatedTraining.predict_proba for regression": (
+            lambda: AutomatedTraining("simple_regression").predict_proba(frame),
             ValidationError,
         ),
         # Pipeline validation options of the wrong type on a pipeline without a model

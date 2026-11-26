@@ -31,7 +31,7 @@ def test_importing_smallaxe_imports_no_optional_package():
     code = (
         "import json, sys\n"
         "import smallaxe, smallaxe.training, smallaxe.search, smallaxe.pipeline, "
-        "smallaxe.preprocessing, smallaxe.metrics\n"
+        "smallaxe.preprocessing, smallaxe.metrics, smallaxe.auto\n"
         f"packages = {OPTIONAL_PACKAGES!r}\n"
         "loaded = sorted(m for m in sys.modules if m.split('.')[0] in packages)\n"
         "print(json.dumps(loaded))\n"

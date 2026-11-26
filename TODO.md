@@ -89,6 +89,8 @@
 
 ### Phase 12: Automated Training (v0.11.0)
 
+**Done in 1.0 (unreleased)** as `smallaxe.auto.AutomatedTraining`, with a different API from the sketch below (`task`, `algorithms`, `metric`, `params`, `param_spaces`; `comparison` is a pandas DataFrame); see the README section "Automated training" and `tests/test_auto.py`.
+
 #### Step 12.1: AutomatedTraining Class
 - [ ] Create `smallaxe/auto/automated.py`
 - [ ] Implement `AutomatedTraining`:

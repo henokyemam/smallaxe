@@ -150,15 +150,17 @@ def load(
 def set_verbosity(level: str) -> None:
     """Set the global verbosity level.
 
-    The level decides one thing today: whether :func:`smallaxe.search.optimize.run`
-    shows hyperopt's progress bar when its ``verbose`` argument is None. Warnings
-    (``UserWarning``) are emitted at every level; silence them with the ``warnings``
-    module.
+    The level decides two things today: whether :func:`smallaxe.search.optimize.run`
+    shows hyperopt's progress bar when its ``verbose`` argument is None, and whether
+    :class:`smallaxe.auto.AutomatedTraining` prints a progress line per algorithm.
+    Warnings (``UserWarning``) are emitted at every level; silence them with the
+    ``warnings`` module.
 
     Args:
         level: One of:
-            - ``'quiet'``: ``optimize.run`` shows no progress bar.
-            - ``'normal'`` (default): ``optimize.run`` shows its progress bar.
+            - ``'quiet'``: no progress bar, no progress lines.
+            - ``'normal'`` (default): ``optimize.run`` shows its progress bar and
+              ``AutomatedTraining.fit`` prints its progress lines.
             - ``'verbose'``: the same as ``'normal'``; reserved for more output in a
               later release.
 

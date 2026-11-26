@@ -345,7 +345,9 @@ EXPECTED_ALL: Dict[str, List[str]] = {
         "set_verbosity",
         "verbosity",
     ],
-    "smallaxe.auto": [],
+    "smallaxe.auto": [
+        "AutomatedTraining",
+    ],
     "smallaxe.datasets": [
         "dataset_info",
         "load_sample_classification",
@@ -549,6 +551,21 @@ EXPECTED_FUNCTIONS: Dict[str, str] = {
 }
 
 EXPECTED_CLASSES: Dict[str, Dict[str, str]] = {
+    "smallaxe.auto.AutomatedTraining": {
+        "__init__": "(self, task, algorithms=None, metric=None, params=None, param_spaces=None, max_evals=20, seed=None)",
+        "algorithms": "property",
+        "best_algorithm": "property",
+        "best_model": "property",
+        "best_score": "property",
+        "comparison": "property",
+        "evaluate": "(self, dataframe, label_col=None)",
+        "fit": "(self, dataframe, label_col, feature_cols=None, exclude_cols=None, *, validation='train_test', test_size=0.2, n_folds=5, fold_key=None, cache_strategy=None)",
+        "metric": "property",
+        "models": "property",
+        "predict": "(self, dataframe, output_col='predict_label')",
+        "predict_proba": "(self, dataframe, output_col='probability')",
+        "task": "property",
+    },
     "smallaxe.exceptions.ColumnNotFoundError": {
         "__init__": "(self, message='Required column not found in DataFrame.', column=None, available_columns=None)",
     },

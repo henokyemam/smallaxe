@@ -201,7 +201,7 @@ The full local suite passed: 662 passed, 50 skipped, 0 failed (Python 3.11, PySp
   - Persist the winning model or full comparison run.
 - Keep the first version constrained to binary classification and continuous regression.
 
-**Status (2026-09-30):** not started (`smallaxe/auto/` is empty).
+**Status (2026-11-25):** done for 1.0 (unreleased), on branch `v1/auto`. `smallaxe.auto.AutomatedTraining` trains every installed algorithm for `simple_regression` or `binary` on one split seed, skips missing packages with a warning and install hint, reports training failures and continues, returns the comparison as a pandas DataFrame, and selects `best_model` by the chosen metric (the `optimize.run` metrics and orientation). Algorithms given a `param_spaces` entry are tuned with `optimize.run`. Persisting is the winner's own `save` plus `comparison.to_csv`; there is no artifact for the whole run. Multiclass is not supported yet. LightGBM and CatBoost are covered only by fake fits locally.
 
 ### 9. Hyperparameter Search
 
@@ -317,7 +317,7 @@ Items 1 to 4, 6, and 7 change trained models or scores; item 5 only changes spee
 7. **CatBoost categoricals.** The `Algorithm` record already carries `accepts_raw_categoricals` (false for every algorithm today). Either implement native categorical handling for CatBoost and set it true, or keep it false and remove the Pipeline's CatBoost exemption from the Encoder requirement. Removing the exemption is the smaller change and is enough for v1.
 8. **Databricks ergonomics.** An option to suppress MLflow autologging during internal fits, a warning when CatBoost trains on an autoscaling cluster, hardening of the SynapseML/CatBoost shim for the reverse import order, and model IO that works on Spark Connect and serverless sessions (`_fs._spark()` calls `spark._jvm`, which they do not have).
 9. **Validation module and artifact layout (items 6 and 7).** Public split utilities, a versioned artifact layout, and `load_model` / `load_pipeline`.
-10. **AutomatedTraining (item 8), then visualization.**
+10. **AutomatedTraining (item 8), then visualization.** AutomatedTraining done for 1.0 (see item 8); visualization is open.
 11. **Spark 4 support.** Relax `pyspark<4.0` once RF, XGBoost, and CatBoost (`catboost-spark_4.0_2.13`) pass the validation notebook on DBR 17.x. LightGBM stays Spark 3.5-only until SynapseML ships a Spark 4 build.
 
 Cross-cutting: make the Databricks validation notebook a release gate. It is currently the only run that exercises LightGBM and CatBoost against their JVM packages; CI skips those tests.
