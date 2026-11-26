@@ -839,7 +839,9 @@ class BaseModel(
             return multiclass_scores(full_df, label_col, self.PREDICTION_COL)
 
         # Basic metrics using class predictions
-        metrics = {
+        # The probability-based metrics below are None when the model writes no
+        # probabilities.
+        metrics: Dict[str, Optional[float]] = {
             "accuracy": accuracy(full_df, label_col, self.PREDICTION_COL),
             "precision": precision(full_df, label_col, self.PREDICTION_COL),
             "recall": recall(full_df, label_col, self.PREDICTION_COL),
@@ -864,9 +866,9 @@ class BaseModel(
             from pyspark.ml.functions import vector_to_array
 
             probabilities = vector_to_array(F.col(self.PROBABILITY_COL))
-            width = full_df.select(
-                F.min(F.when(probabilities.isNotNull(), F.size(probabilities)))
-            ).first()[0]
+            width = _checks.one_row(
+                full_df.select(F.min(F.when(probabilities.isNotNull(), F.size(probabilities))))
+            )[0]
             if width is not None and width < 2:
                 metrics["auc_roc"] = float("nan")
                 metrics["auc_pr"] = float("nan")

@@ -88,10 +88,15 @@ def write_metadata(path: str, kind: str, payload: Dict[str, Any]) -> None:
     _fs.write_json(_fs.join(path, METADATA_FILE), document)
 
 
-def read_json(path: str, kind: str) -> Any:
+def read_json(path: str, kind: str) -> object:
     """Parse the JSON file at ``path``, raising ValidationError when it cannot be read.
 
-    ``kind`` names what was being loaded, for the message.
+    Args:
+        path: The JSON file.
+        kind: What was being loaded, for the message.
+
+    Returns:
+        The parsed value, of whatever JSON type the file holds; the caller narrows it.
 
     Raises:
         ValidationError: If the file is not valid JSON, or the filesystem refuses to read

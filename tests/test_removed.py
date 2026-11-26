@@ -393,3 +393,59 @@ def test_smallaxe_emits_no_deprecation_warning(spark_session, tmp_path):
         )
     ]
     assert ours == []
+
+
+def _warn_from(module: str, source: str) -> None:
+    """Run ``source`` as code of the module named ``module``.
+
+    ``warnings.warn`` attributes a warning to the module whose frame it names (the
+    ``__name__`` of that frame's globals), which is what a ``filterwarnings`` module regex
+    matches; this gives the code that name without importing anything.
+    """
+    exec(compile(source, f"<{module}>", "exec"), {"__name__": module})
+
+
+_WARN = "import warnings\nwarnings.warn('old spelling', DeprecationWarning)\n"
+
+# A third-party function that warns about its own deprecation the usual way, attributing
+# the warning to its caller (stacklevel=2).
+_THIRD_PARTY = (
+    "import warnings\n"
+    "def old_api():\n"
+    "    warnings.warn('old_api is deprecated', DeprecationWarning, stacklevel=2)\n"
+)
+
+
+class TestDeprecationWarningFilter:
+    """pyproject.toml's ``filterwarnings`` makes a DeprecationWarning attributed to a
+    smallaxe module an error in the test suite.
+
+    Only the two ``..._is_an_error`` tests depend on the filter: without it they fail.
+    The ``..._stays_a_warning`` tests pass with or without it; they fail if the filter is
+    too broad (catching every module, or names that merely start with "smallaxe").
+    """
+
+    def test_deprecation_warning_from_smallaxe_is_an_error(self):
+        with pytest.raises(DeprecationWarning, match="old spelling"):
+            _warn_from("smallaxe.training.base", _WARN)
+
+    def test_third_party_deprecation_called_from_smallaxe_is_an_error(self):
+        # For example a numpy or standard-library deprecation hit by a line of smallaxe.
+        namespace = {"__name__": "thirdparty"}
+        exec(compile(_THIRD_PARTY, "<thirdparty>", "exec"), namespace)
+        caller = {"__name__": "smallaxe.search.optimize", "old_api": namespace["old_api"]}
+
+        with pytest.raises(DeprecationWarning, match="old_api is deprecated"):
+            exec(compile("old_api()\n", "<smallaxe.search.optimize>", "exec"), caller)
+
+    def test_deprecation_warning_from_a_third_party_module_stays_a_warning(self):
+        with warnings.catch_warnings(record=True) as record:
+            _warn_from("pyspark.sql.functions", _WARN)
+
+        assert [str(w.message) for w in record] == ["old spelling"]
+
+    def test_module_name_merely_starting_with_smallaxe_stays_a_warning(self):
+        with warnings.catch_warnings(record=True) as record:
+            _warn_from("smallaxe_plugin", _WARN)
+
+        assert [str(w.message) for w in record] == ["old spelling"]

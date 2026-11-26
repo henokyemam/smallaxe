@@ -20,14 +20,23 @@
 4. Ensure all tests pass: `pytest`
 5. Format code: `black .`
 6. Lint: `ruff check .`
-7. Open a pull request
+7. Type check: `mypy smallaxe` (strict; CI fails on any error)
+8. Open a pull request
 
 ## Code Style
 
 - Line length: 100 characters
 - Formatter: black
 - Linter: ruff
-- Type annotations required for public APIs
+- Full type annotations on every function (mypy runs with `disallow_untyped_defs`); a
+  `# type: ignore` carries an error code and the reason
+- In the test suite a `DeprecationWarning` attributed to a smallaxe module is an error:
+  one smallaxe raises about itself, or a deprecated numpy or standard-library call on a
+  line of smallaxe. PySpark's deprecations are `FutureWarning`s attributed to PySpark,
+  so the filter does not catch them
+- Dependencies: every entry in `[project] dependencies` has a `>=` floor (the
+  test-lowest CI job installs each floor, through `.github/scripts/floor_pins.py`);
+  keep `requirements-dev.txt` the same (`tests/test_packaging.py` checks both)
 - Google-style docstrings (Args / Returns / Raises) on every public class, method and function
 - User errors raise smallaxe exceptions (`smallaxe.exceptions`), never a raw `ValueError` / `KeyError` / `TypeError`
 

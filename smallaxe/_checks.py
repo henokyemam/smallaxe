@@ -1,17 +1,25 @@
 """Argument checks shared by the public entry points.
 
 A DataFrame, a list of column names, a new column's name, and Spark's own argument
-errors turned into ``ValidationError``.
+errors turned into ``ValidationError``; plus :func:`one_row`, for reading a global
+aggregate.
 """
 
 from contextlib import contextmanager
 from typing import Any, Iterator, List, Optional, Sequence
 
+from pyspark.sql import DataFrame, Row
 from pyspark.sql.utils import IllegalArgumentException
 
 from smallaxe.exceptions import ValidationError
 
-__all__ = ["require_dataframe", "column_names", "output_column", "spark_argument_errors"]
+__all__ = [
+    "require_dataframe",
+    "column_names",
+    "output_column",
+    "spark_argument_errors",
+    "one_row",
+]
 
 
 def require_dataframe(dataframe: Any, name: str = "dataframe") -> None:
@@ -91,3 +99,21 @@ def spark_argument_errors(context: str) -> Iterator[None]:
     except IllegalArgumentException as exc:
         detail = str(exc).splitlines()[0] if str(exc) else type(exc).__name__
         raise ValidationError(f"{context}: {detail}") from exc
+
+
+def one_row(dataframe: DataFrame) -> Row:
+    """The single row of a frame that always has exactly one.
+
+    A global aggregate (``select`` of aggregate expressions, or ``agg`` without
+    ``groupBy``) and ``spark.range(1).select(...)`` always return one row, even over an
+    empty input, so ``first()`` is never None here; the assertion records that.
+
+    Args:
+        dataframe: A one-row frame, such as ``df.select(F.mean("x"))``.
+
+    Returns:
+        Its row.
+    """
+    row = dataframe.first()
+    assert row is not None, "a global aggregate always returns one row"
+    return row

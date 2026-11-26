@@ -38,8 +38,13 @@ def _spark() -> Any:
     return spark
 
 
-def _fs_and_path(path: str):
-    """Resolve the Hadoop FileSystem and Path for ``path``."""
+def _fs_and_path(path: str) -> Tuple[Any, Any, Any]:
+    """Resolve the Hadoop FileSystem and Path for ``path``.
+
+    Returns:
+        The Py4J JVM view, the Hadoop ``FileSystem`` and the Hadoop ``Path`` (Py4J proxies,
+        which have no static types).
+    """
     spark = _spark()
     jvm = spark._jvm
     hpath = jvm.org.apache.hadoop.fs.Path(path)
@@ -124,8 +129,16 @@ def write_json(path: str, obj: Dict[str, Any]) -> None:
         writer.close()  # flushes and closes the underlying stream
 
 
-def read_json(path: str) -> Dict[str, Any]:
-    """Read and parse JSON from ``path`` on the resolved filesystem."""
+def read_json(path: str) -> object:
+    """Read and parse JSON from ``path`` on the resolved filesystem.
+
+    Args:
+        path: The file to read, local or a Hadoop URI.
+
+    Returns:
+        The parsed value, of whatever JSON type the file holds (typed ``object``, so a
+        caller narrows it, for example with ``isinstance(value, dict)``, before use).
+    """
     jvm, fs, hpath = _fs_and_path(path)
     stream = fs.open(hpath)
     reader = jvm.java.io.BufferedReader(jvm.java.io.InputStreamReader(stream, "UTF-8"))

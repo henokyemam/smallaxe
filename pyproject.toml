@@ -29,11 +29,24 @@ classifiers = [
     "Topic :: Software Development :: Libraries :: Python Modules",
 ]
 
+# Exactly what smallaxe imports at runtime, directly or through the PySpark and hyperopt
+# modules it imports, on each supported Python. Each has a ">=" floor: the test-lowest
+# CI job installs every floor exactly (.github/scripts/floor_pins.py).
 dependencies = [
     "pyspark>=3.3,<4.0",
+    # smallaxe catches py4j's Py4JJavaError; PySpark 3.3.0 pins py4j 0.10.9.5.
+    "py4j>=0.10.9.5",
+    # Imported by smallaxe.search and by pyspark.ml. 1.17.3: the first release with
+    # Python 3.8 wheels, and it has numpy.random.default_rng.
+    "numpy>=1.17.3",
+    # pyspark.ml.functions (vector_to_array) imports pandas from PySpark 3.4.
     "pandas>=1.0.0",
-    "hyperopt>=0.2.7",
-    "plotly>=5.0.0",
+    # hyperopt 0.3.0 needs Python 3.10, so 0.2.7 is the newest release before it. 0.2.x
+    # imports pkg_resources, which setuptools 82 removed; 0.3.0 does not.
+    "hyperopt>=0.2.7; python_version < '3.10'",
+    "hyperopt>=0.3.0; python_version >= '3.10'",
+    # pkg_resources for hyperopt 0.2.7. 56.0.0: the setuptools Python 3.8 bundles.
+    "setuptools>=56.0.0,<82; python_version < '3.10'",
     # PySpark 3.x imports distutils, which Python 3.12 removed; setuptools provides it.
     "setuptools>=68; python_version >= '3.12'",
 ]
@@ -41,8 +54,10 @@ dependencies = [
 [project.optional-dependencies]
 xgboost = [
     "xgboost>=1.7.0",
-    # xgboost.spark imports scikit-learn and runs its pandas UDFs through pyarrow.
+    # xgboost.spark imports scikit-learn and pandas (xgboost's own pandas floor is 1.2)
+    # and runs its pandas UDFs through pyarrow.
     "scikit-learn>=1.0",
+    "pandas>=1.2",
     "pyarrow>=4.0",
 ]
 lightgbm = [
@@ -52,18 +67,24 @@ lightgbm = [
 catboost = [
     "catboost>=1.1.0",
 ]
+# Visualization (smallaxe.viz) lands in a later release; nothing imports plotly yet.
+viz = [
+    "plotly>=5.0.0",
+]
 all = [
     "smallaxe[xgboost]",
     "smallaxe[lightgbm]",
     "smallaxe[catboost]",
+    "smallaxe[viz]",
 ]
 dev = [
     "pytest>=7.0.0",
     "pytest-spark>=0.6.0",
-    # Exact pins: CI lints with these versions. black 26 needs Python 3.10+.
+    # Exact pins: CI lints and type-checks with these versions. black 26 and mypy 2
+    # need Python 3.10+.
     "black==26.10.0; python_version >= '3.10'",
     "ruff==0.16.10",
-    "mypy>=1.0.0",
+    "mypy==2.4.0; python_version >= '3.10'",
 ]
 
 [project.urls]
@@ -100,9 +121,24 @@ ignore = [
 ]
 
 [tool.mypy]
-python_version = "3.8"
+# mypy 2.x checks Python 3.10 and later only; the code stays 3.8-compatible (ruff's
+# target-version and the test-lowest CI job on Python 3.8 hold that).
+python_version = "3.10"
+files = ["smallaxe"]
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+check_untyped_defs = true
+no_implicit_optional = true
+warn_redundant_casts = true
+warn_unused_ignores = true
 warn_return_any = true
 warn_unused_configs = true
+
+[[tool.mypy.overrides]]
+# Imported directly but untyped: hyperopt and py4j ship no stubs or py.typed, and
+# catboost_spark (a JVM package's Python half) is not installed where the check runs.
+# SynapseML and xgboost.spark are resolved from strings at runtime, so mypy never sees them.
+module = ["hyperopt", "hyperopt.*", "py4j", "py4j.*", "catboost_spark"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]
@@ -110,6 +146,15 @@ testpaths = ["tests"]
 python_files = ["test_*.py"]
 python_functions = ["test_*"]
 addopts = "-v"
+# A DeprecationWarning attributed to one of smallaxe's own modules fails the test that
+# triggered it: one smallaxe raises about itself, or a third-party one raised with
+# stacklevel=2 at a line of smallaxe (numpy's and the standard library's usually are).
+# Third-party packages' internal deprecations stay warnings. Not covered: PySpark warns
+# with FutureWarning attributed to PySpark itself, and smallaxe attributes its own
+# warnings to the caller, so tests/test_removed.py checks separately that it emits none.
+filterwarnings = [
+    'error::DeprecationWarning:smallaxe(\..*)?$',
+]
 
 [tool.setuptools_scm]
 version_scheme = "guess-next-dev"

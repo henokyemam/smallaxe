@@ -1,7 +1,7 @@
 """SparkModelMixin for Spark MLlib model operations."""
 
 from abc import ABC, abstractmethod
-from typing import Any, Dict, List, Optional, Tuple
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple, Type
 
 from pyspark.ml.feature import VectorAssembler
 from pyspark.ml.linalg import VectorUDT
@@ -9,6 +9,9 @@ from pyspark.sql import DataFrame
 from pyspark.sql.types import BooleanType, NumericType
 
 from smallaxe.exceptions import ColumnNotFoundError, ModelNotFittedError, ValidationError
+
+if TYPE_CHECKING:
+    from pyspark.ml.util import MLReadable
 
 __all__ = ["SparkModelMixin"]
 
@@ -323,12 +326,13 @@ class SparkModelMixin(ABC):
         model_path = os.path.join(path, "spark_model")
         self._spark_model.write().overwrite().save(model_path)
 
-    def _load_spark_model(self, path: str, model_class: type) -> None:
+    def _load_spark_model(self, path: str, model_class: "Type[MLReadable[Any]]") -> None:
         """Load a Spark MLlib model from disk.
 
         Args:
             path: Directory path where the model is saved.
-            model_class: The Spark MLlib model class to load.
+            model_class: The fitted Spark model class to load (any ``MLReadable``, so
+                Python-side models such as xgboost.spark's as well as JVM-backed ones).
         """
         import os
 

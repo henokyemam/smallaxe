@@ -208,8 +208,32 @@ deprecated in 0.11"), naming its replacement. In 1.0 a removed name raises
   them equal). Every public class, method and function has an Args / Returns / Raises
   docstring.
 - The package classifier is `Development Status :: 5 - Production/Stable`.
+- **The hard dependencies are what smallaxe imports.** `plotly` is no longer installed
+  with smallaxe (nothing imports it yet); install `smallaxe[viz]` or plotly itself if
+  your code used it through smallaxe. `numpy>=1.17.3` (imported by `smallaxe.search` and
+  by `pyspark.ml`) and `py4j>=0.10.9.5` (smallaxe catches its `Py4JJavaError`) are now
+  declared; PySpark already installed both. `pandas` stays required: from Spark 3.4
+  `pyspark.ml.functions`, which `smallaxe.preprocessing` (the Scaler) and binary
+  `Classifier.evaluate` import, imports it. The
+  `xgboost` extra also declares `pandas>=1.2`, which `xgboost.spark` imports.
+- **`import smallaxe.search` works in a fresh Python 3.8 or 3.9 environment.** There the
+  newest hyperopt is 0.2.7, which imports `pkg_resources`, and setuptools 82 removed it;
+  smallaxe now requires `setuptools>=56.0.0,<82` on Python 3.8 and 3.9 (pip downgrades
+  a newer setuptools there). On Python 3.10 and later it requires `hyperopt>=0.3.0`,
+  which does not import `pkg_resources`.
+- **The type annotations are checked strictly.** smallaxe ships `py.typed`, and
+  `mypy smallaxe` now passes with untyped and partially typed definitions disallowed,
+  `check_untyped_defs`, `no_implicit_optional`, `warn_return_any`, `warn_redundant_casts`
+  and `warn_unused_ignores` (CI blocks on it, with mypy pinned to 2.4.0). Private
+  annotations that were wrong are fixed (`Scaler`'s fitted model is Optional until
+  `fit`; the internal JSON reader returns whatever the file holds); no public
+  signature changed. mypy 2 checks Python 3.10 and later only, so the configured target
+  is 3.10; the code stays Python 3.8-compatible and is tested there.
 
 ### Added
+
+- **`smallaxe[viz]`**, an extra holding `plotly>=5.0.0` for the planned visualizations;
+  `smallaxe[all]` includes it.
 
 - **`Pipeline.fit` and `Pipeline.fit_transform` take the model's validation options**
   as keyword-only arguments: `validation`, `test_size`, `n_folds`, `fold_key`, `refit`

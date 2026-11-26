@@ -1,6 +1,7 @@
 """Tests for the versioned artifact metadata helper (smallaxe._artifact)."""
 
 import json
+import typing
 
 import pytest
 
@@ -30,6 +31,22 @@ class TestJoin:
 
     def test_trailing_slash(self):
         assert _fs.join("/tmp/a/", "b") == "/tmp/a/b"
+
+
+class TestReadJson:
+    """The JSON readers return whatever value the file holds; callers check it is a dict."""
+
+    @pytest.mark.parametrize("value", [[1, 2], "text", 3, None, {"a": 1}])
+    def test_returns_the_value_the_file_holds(self, tmp_path, value):
+        path = tmp_path / "x.json"
+        path.write_text(json.dumps(value))
+
+        assert _fs.read_json(str(path)) == value
+        assert _artifact.read_json(str(path), "model") == value
+
+    @pytest.mark.parametrize("reader", [_fs.read_json, _artifact.read_json])
+    def test_is_typed_as_returning_object_not_any(self, reader):
+        assert typing.get_type_hints(reader)["return"] is object
 
 
 class TestWriteMetadata:

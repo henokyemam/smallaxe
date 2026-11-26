@@ -318,7 +318,8 @@ def _multiclass_scores(
             ]
         )
     scores = {
-        name: float(value) for name, value in per_class.agg(*averages).first().asDict().items()
+        name: float(value)
+        for name, value in _checks.one_row(per_class.agg(*averages)).asDict().items()
     }
     for name in ("precision", "recall", "f1_score"):
         scores[name] = scores[f"{name}_macro"]
