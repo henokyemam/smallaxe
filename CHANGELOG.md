@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.11.0 (unreleased)
+## 0.11.0 (2026-11-25)
 
 ### Changed
 
@@ -347,17 +347,11 @@ code, docs and examples use only the replacements.
 - `Imputer` and `Scaler` metadata was written with local `open()`, so `save` / `load`
   on `dbfs:/` or other non-local paths wrote the metadata somewhere other than the
   Spark model.
-
-
-
-## 0.10.1 (unreleased)
-
-### Fixed
-
 - **`fit` and `optimize.run` work on Spark 3.3 again.** 0.10.0 compared the DataFrame's
   storage level with `StorageLevel.NONE`, which Spark only has from 3.4, so every `fit`
   on Spark 3.3 raised `AttributeError`. The check now reads the storage level's fields.
   Pull-request CI now runs on Spark 3.3 as well as 3.5.
+  0.10.1 was never released; this fix first ships in 0.11.0.
 
 ## 0.10.0 (2026-10-31)
 
