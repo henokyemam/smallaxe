@@ -177,7 +177,8 @@ def _resolve_metric(metric: Optional[str], task: str) -> str:
         ValidationError: If ``metric`` is not a metric a search can optimise, or not one
             the task's validation produces.
     """
-    metric = metric or _DEFAULT_METRICS[task]
+    if metric is None:
+        metric = _DEFAULT_METRICS[task]
     if not isinstance(metric, str) or metric not in _VALID_METRICS:
         raise ValidationError(
             f"Invalid metric '{metric}'. Supported metrics are: {sorted(_VALID_METRICS)}."
