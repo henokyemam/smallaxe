@@ -3,7 +3,7 @@
 # (equivalent to: pip install -e ".[dev]"; keep both in step with pyproject.toml)
 
 # Core dependencies ([project] dependencies in pyproject.toml)
-pyspark>=3.3,<4.0
+pyspark>=3.3,<4.4
 py4j>=0.10.9.5
 numpy>=1.17.3
 pandas>=1.0.0
