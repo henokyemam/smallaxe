@@ -424,8 +424,12 @@ pandas below 3, the range Spark 4.0 – 4.3 document (4.2 and 4.3 warn on pandas
   `ConfigurationError("smallaxe needs a classic Spark session; Spark Connect is not
   supported")`. Spark Connect is out of scope for 1.0.
 - **ANSI SQL mode** is on by default from Spark 4 (`spark.sql.ansi.enabled`). smallaxe
-  never changes the setting, and its results are the same with it on or off; the test
-  suite checks the metric, preprocessing, chart, split and dataset edge cases both ways.
+  never changes the setting, and its results are the same with it on or off: the ones
+  Spark 3's default mode (ANSI off) gives. Where ANSI mode would change a cast or an
+  operator (a string compared with a number, `"7.0"` read as an integer, integer
+  overflow, an integer subtracted from a float), smallaxe spells out the default
+  mode's cast. The test suite checks the metric, preprocessing, chart, split and dataset
+  edge cases both ways, and on Spark 3 against Spark's own implicit casts.
 - **XGBoost** on Spark 4 needs xgboost 3.3 or later, the first release that declares
   PySpark 4 support; it needs Python 3.12 or later. `smallaxe[xgboost]` keeps its
   floor (1.7.0) for Spark 3.3, so on Spark 4 install `xgboost>=3.3`. CI runs XGBoost on

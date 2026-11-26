@@ -14,6 +14,7 @@ smallaxe/
 │   ├── _checks.py             # Shared argument checks (a DataFrame, a list of column names)
 │   ├── _config.py             # Internal config state
 │   ├── _fs.py                 # Hadoop FileSystem IO (local, dbfs:/, s3://, hdfs://); the one JVM access point (refuses Spark Connect)
+│   ├── _sql.py                # Spark 3's default (non-ANSI) string-to-integer cast, in either ANSI mode; quoted()
 │   ├── _warn.py               # caller_stacklevel(): warnings point at the user's line
 │   ├── auto/                  # AutomatedTraining: every algorithm on one split, best kept
 │   │   └── _automated.py
@@ -184,7 +185,7 @@ Tests use a session-scoped `SparkSession` fixture (`local[2]` mode) defined in `
 - Task types: `'simple_regression'`, `'binary'`, `'multiclass'` (`AutomatedTraining`: the first two)
 - Optional deps are extras: `smallaxe[xgboost]`, `smallaxe[lightgbm]`, `smallaxe[catboost]`, `smallaxe[viz]` (plotly, for `smallaxe.viz`; imported lazily inside `smallaxe/viz/_style.py`, so `import smallaxe.viz` works without it and a chart raises `DependencyError`; the dev extra installs it so CI draws every chart), `smallaxe[all]`. Hard dependencies are exactly what smallaxe imports at runtime (pyspark, py4j, numpy, pandas, hyperopt; setuptools where PySpark needs `distutils` (3.12) or hyperopt 0.2.7 needs `pkg_resources` (3.8, 3.9)), each with a `>=` floor that the test-lowest CI job installs (`.github/scripts/floor_pins.py`); `tests/test_packaging.py` checks the set per Python and that `requirements-dev.txt` matches
 - In the test suite a `DeprecationWarning` attributed to a smallaxe module is an error (`filterwarnings` in `pyproject.toml`)
-- Results must not depend on Spark's ANSI SQL mode (on by default from Spark 4), and smallaxe never sets `spark.sql.ansi.enabled`: guard denominators, convert booleans and strings explicitly before comparing them with numbers (`smallaxe.metrics._checks.as_number`), use `try_cast` (a SQL function since Spark 3.2) where a cast may fail, and look up a map key only when it is present. `tests/test_ansi_mode.py` runs each edge case with ANSI mode on and off
+- Results must not depend on Spark's ANSI SQL mode (on by default from Spark 4), and smallaxe never sets `spark.sql.ansi.enabled`: the result is Spark 3's default (ANSI off) result, with the casts made explicit: compare columns of different types through `smallaxe.metrics._checks.comparable` / `is_one`, read a string as an integer with `smallaxe._sql.integral_from_string` (ANSI mode rejects `"7.0"`), do integer arithmetic in `decimal(20,0)` (`exact_integers`), cast an integer beside a float column to float (`widened`; ANSI mode widens to double), use `try_cast` (Spark 3.2) / `try_subtract` (3.3) / `try_divide` (3.2) where the default mode gives null, guard denominators, and look up a map key only when it is present. Never change a Spark 3 result to get mode independence. `tests/test_ansi_mode.py` runs each edge case with ANSI mode on and off
 
 ## Contributing Guidelines
 

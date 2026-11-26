@@ -322,9 +322,14 @@ Spark 4 changes three things a user can trip over:
   a missing map key raises instead of giving null. Before the fix, binary `accuracy` /
   `precision` / `recall` on a boolean label failed at analysis, on a string label holding
   a non-number at run time; `mape` on integer columns near the integer limits raised;
-  `Imputer(categorical_strategy="7.0")` on an integer column raised. Fix: every such
-  expression is explicit (doubles for arithmetic, `as_number` for comparisons,
-  `try_cast` for fills, a guarded map lookup), and smallaxe never sets the option.
+  `Imputer(categorical_strategy="7.0")` on an integer column raised. ANSI mode also
+  widens an integer and a float to double (Spark 3's default mode: float), which changes
+  `mape` and `accuracy` on such a pair without raising. Fix: every such expression
+  spells out Spark 3's default cast (`smallaxe._sql.integral_from_string`, and
+  `comparable`, `is_one`, `exact_integers`, `widened` in `smallaxe.metrics._checks`;
+  `try_cast` / `try_subtract` / `try_divide` where the default mode gives null; a
+  guarded map lookup), so the result in either mode is the Spark 3 default one, and
+  smallaxe never sets the option.
 - **Spark Connect.** Spark 4 can make Connect the default (`spark.api.mode=connect`, or
   the `pyspark-connect` package). smallaxe's artifact IO needs the JVM. Fix: on a
   Connect session, `save` and `load` raise `ConfigurationError("smallaxe needs a classic
@@ -337,9 +342,11 @@ Spark 4 changes three things a user can trip over:
   `-spark4.1`) are not validated with smallaxe, and nothing blocks them in code. CatBoost
   publishes `catboost-spark_4.0_2.13` and `catboost-spark_4.1_2.13`, also not validated.
 
-**Breaking.** No for numeric inputs. Without ANSI mode, a string compared with the
-positive class 1 is now read as a double, so `"1.5"` is no longer positive and `"1e0"`
-is; `mape` on integer columns no longer wraps around near the integer limits.
+**Breaking.** No. Without ANSI mode every result is the one smallaxe 0.x gave on
+Spark 3, except where integer arithmetic overflowed: `mape` on integer columns and
+`log_loss` on an integer label no longer wrap around near the integer limits.
+`tests/test_ansi_mode.py` pins the edge cases and, on Spark 3, compares them with
+Spark's own implicit casts and operators.
 
 **Done when.** `tests/test_ansi_mode.py` gives identical results with ANSI mode on and
 off; the full suite passes with `spark.sql.ansi.enabled=true` set for the session;

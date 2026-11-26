@@ -125,30 +125,42 @@ deprecated in 0.11"), naming its replacement. In 1.0 a removed name raises
 - **Results no longer depend on Spark's ANSI SQL mode** (`spark.sql.ansi.enabled`, on
   by default from Spark 4). With ANSI mode on, an implicit cast that fails, an
   arithmetic overflow, a boolean compared with a number, or (on Spark 3.3) a missing
-  map key raises where it gave null before; smallaxe never sets the option, and its
-  expressions now give the same result either way. `tests/test_ansi_mode.py` runs the
-  metric, preprocessing, visualization, split and dataset edge cases (zero
-  denominators, unseen categories, constant and all-null columns, nulls, NaN,
-  infinities) with the option on and off and requires identical results; the whole
-  suite also passes with it on (Spark 3.5). Fixed under ANSI mode, unchanged without it
-  except where noted:
+  map key raises where it gave null before, the string-to-integer cast no longer reads
+  a fraction (`"7.0"`), and an integer meets a float in double instead of float.
+  smallaxe never sets the option. Its results in either mode are the ones Spark 3's
+  default mode (ANSI off) gives, with each implicit cast spelled out
+  (`smallaxe._sql.integral_from_string` reads a string as an integer the way the
+  default cast does; `try_cast`, `try_subtract` and `try_divide` give null where the
+  default mode does). Without ANSI mode the results are unchanged, except where integer
+  arithmetic overflowed (below). `tests/test_ansi_mode.py` runs the metric,
+  preprocessing, visualization, split and dataset edge cases (zero denominators,
+  unseen categories, constant and all-null columns, nulls, NaN, infinities, strings and
+  booleans compared with numbers, float and decimal arithmetic, fills that round) with
+  the option on and off and requires identical results, pins the values, and on Spark 3
+  compares them with Spark's own implicit casts and operators; the whole suite also
+  passes with it on (Spark 3.5). Fixed under ANSI mode:
   - `accuracy`, and `precision` / `recall` / `f1_score` with `average='binary'`, on a
-    boolean column (an analysis error under ANSI mode) or a string column holding a
-    value that is not a number (a cast error). A boolean counts as 0 / 1; a string
-    compared with a number is the number it spells (`try_cast` to double), and one that
-    is not a number never matches; two string columns are still compared as strings.
-    Without ANSI mode, a string compared with the positive class 1 was cast to an
-    integer, so `"1.5"` counted as positive and `"1e0"` did not; it is now compared as a
-    double (`"1.5"` is not 1, `"1e0"` is).
-  - `mape` on integer columns: `label - prediction` and `abs(label)` are computed as
-    doubles, so they no longer overflow (ANSI mode raised; without it the value wrapped
-    around, giving a wrong score for values near the integer limits). `log_loss` also
-    computes in doubles.
+    boolean column (an analysis error under ANSI mode), a string column holding a value
+    that does not parse (a cast error), or an integer column compared with a float one
+    (compared in double). As in Spark 3's default mode, a boolean compared with a
+    number counts as 0 / 1; a string compared with an integer column is read as that
+    integer type (`"7.9"` is 7), with a float or double column as that type, with a
+    decimal column as a double, with a boolean column as a boolean (`"yes"`, `"1"`);
+    the positive class 1 reads a string as an integer (`"1.5"` is positive, `"1e0"` is
+    not); a string that does not parse never matches.
+  - `mape` and `log_loss`: integer columns are computed in `decimal(20,0)`, so
+    `label - prediction`, `abs(label)` and `1 - label` no longer overflow (ANSI mode
+    raised; without it the value wrapped around, giving a wrong score for values near
+    the integer limits; this is the one change without ANSI mode). Float and decimal
+    columns keep Spark's own arithmetic (an integer beside a float is a float), and a
+    decimal ratio that overflows is skipped as before instead of raising.
   - `Imputer` with a categorical fill on an integer column spelled with a fraction
     (`categorical_strategy="7.0"`): ANSI mode's string-to-integer cast rejects it, so
     `fit` raised `ValidationError` and `transform` a Spark error. The fill is now read
-    through a decimal, and checked with `try_cast` rather than a cast that raises; the
-    accepted and rejected fills are the ones Spark 3's default mode accepts and rejects.
+    the way Spark 3's default cast reads it, and checked with `try_cast` rather than a
+    cast that raises; the accepted fills, their values and the rejected fills are the
+    ones Spark 3's default mode gives (a fill that rounds, `"7.9999999999999999999"`,
+    or is too wide for the check, is still rejected).
   - `Encoder.transform` with a category not seen at fit, on Spark 3.3 with ANSI mode on
     (a missing map key raised there): the lookup is guarded, so the category maps to the
     `__OTHER__` / `__UNKNOWN__` index in every mode.
