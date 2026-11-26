@@ -29,8 +29,9 @@ deprecated in 0.11"), naming its replacement. In 1.0 a removed name raises
   `regressors.algorithms()` (every algorithm) and `regressors.available_models()` (which
   are installed). The `"class_name"` entry of `available_models()`: use the entry's key,
   the algorithm name.
-- `smallaxe.set_cache_strategy()` / `get_cache_strategy()`: pass
-  `cache_strategy=` to `fit`.
+- `smallaxe.set_cache_strategy()` / `get_cache_strategy()` (and the
+  `smallaxe.VALID_CACHE_STRATEGIES` they checked against): pass `cache_strategy=` to
+  `fit`.
 - `smallaxe.set_spark_session()` / `get_spark_session()`: use
   `dataframe.sparkSession` or `SparkSession.getActiveSession()`.
 - `model.set_param({...})`: use `model.set_params(**params)`.
@@ -72,8 +73,8 @@ deprecated in 0.11"), naming its replacement. In 1.0 a removed name raises
 - `smallaxe.warnings` (the standard library module, re-exported): `import warnings`.
 - Not deprecated in 0.11: `smallaxe.preprocessing.imputer.VALID_NUMERICAL_STRATEGIES` /
   `VALID_CATEGORICAL_STRATEGIES` (listed in the `Imputer` docstring);
-  `smallaxe.metrics.classification.MULTICLASS_AVERAGED_METRICS` (use
-  `TASK_METRICS["multiclass"]`); `smallaxe.preprocessing.encoder.OTHER` / `UNKNOWN` (the
+  `MULTICLASS_AVERAGED_METRICS` in `smallaxe.metrics` and
+  `smallaxe.metrics.classification` (use `TASK_METRICS["multiclass"]`); `smallaxe.preprocessing.encoder.OTHER` / `UNKNOWN` (the
   strings `"__OTHER__"` / `"__UNKNOWN__"`); `smallaxe.pipeline.pipeline.step_kind`; the
   `REGRESSION_TASKS`, `CLASSIFICATION_TASKS`, `VALID_TASKS`, `VALID_VALIDATION` and
   `VALID_CACHE_STRATEGIES` attributes of the model classes (use
@@ -234,8 +235,6 @@ deprecated in 0.11"), naming its replacement. In 1.0 a removed name raises
     an unhashable value, and "Unknown algorithm" for any other).
   - Metric functions raise `ValidationError` for a column name that is not a string.
   - `pipeline["name"]` for a missing step raises `ValidationError` (was `KeyError`).
-  - `dataset_info` raises only `ValidationError` for an unknown name; in 0.11 the error
-    was also a `ValueError`.
 - **`set_params` checks every value before setting any.** A bool is rejected for an int
   or float parameter (`n_estimators=True`), and `seed` must be an int or None. Earlier a
   failing value left the parameters before it set.
@@ -244,7 +243,9 @@ deprecated in 0.11"), naming its replacement. In 1.0 a removed name raises
 - **`ConfigurationError` builds its message for every value given, falsy ones
   included.** `set_verbosity("")`, `set_verbosity(0)` and `set_verbosity(None)` now say
   `Invalid value '' for setting 'verbosity'. Allowed values: [...]` instead of the
-  generic default message; the value is shown with `repr`.
+  generic default message; the value is shown with `repr`. The constructor's `value`
+  argument defaults to a private sentinel instead of None, so `value=None` is reported
+  as a value.
 - **The verbosity levels are documented as they behave.** `'quiet'` hides
   `optimize.run`'s progress bar (and `AutomatedTraining`'s progress lines, see "Added");
   `'normal'` (default) and `'verbose'` show them and do nothing else differently today. The docstrings no longer promise detailed logging.
@@ -253,7 +254,9 @@ deprecated in 0.11"), naming its replacement. In 1.0 a removed name raises
   `Regressor.load` / `Classifier.load` on the other kind say
   `Cannot load model: Regressor.load expects a regressor, but ...`.
 - `dataset_info(name, *, verbose=False)`: `verbose` is a keyword-only bool and the
-  default prints nothing. The printed text's usage lines no longer pass `spark`.
+  default prints nothing. The printed text's usage lines no longer pass `spark`. An
+  unknown name raises only `ValidationError`; in 0.11 the error was also a
+  `ValueError`.
 - Every factory function's docstring lists all of its algorithm's parameters with their
   descriptions and defaults, taken from the algorithm's parameter table (a test keeps
   them equal). Every public class, method and function has an Args / Returns / Raises
@@ -314,8 +317,8 @@ deprecated in 0.11"), naming its replacement. In 1.0 a removed name raises
   The PySpark APIs smallaxe imports exist unchanged in PySpark 4.3, PySpark 4 no longer
   imports `distutils` (the `setuptools` requirement on Python 3.12 is for PySpark 3.5),
   and results no longer depend on ANSI SQL mode, which Spark 4 turns on (see
-  "Changed"). The ANSI part is tested locally on Spark 3.5; the Spark 4 legs are new in
-  CI.
+  "Changed"); `tests/test_ansi_mode.py` runs on every CI leg, the Spark 4 ones
+  included.
 - **`smallaxe.auto.AutomatedTraining`**: one call that trains every installed algorithm
   on the same data and the same validation rows, compares them on one metric and keeps
   the best fitted model. `AutomatedTraining(task, algorithms=None, metric=None,
@@ -396,7 +399,6 @@ deprecated in 0.11"), naming its replacement. In 1.0 a removed name raises
 - **`smallaxe[viz]`**, an extra holding `plotly>=5.0.0` for `smallaxe.viz`;
   `smallaxe[all]` includes it. The `dev` extra and `requirements-dev.txt` also install
   it, so the test suite draws every chart.
-
 - **`Pipeline.fit` and `Pipeline.fit_transform` take the model's validation options**
   as keyword-only arguments: `validation`, `test_size`, `n_folds`, `fold_key`, `refit`
   and `cache_strategy`, with `Model.fit`'s defaults. They reach the model step, which

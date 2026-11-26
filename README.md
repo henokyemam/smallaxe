@@ -462,7 +462,7 @@ removed argument raises `TypeError`.
 | `algorithm.COLUMN_ROLES` | `algorithm.get(name).cols` |
 | `algorithm.LEGACY_CLASS_NAMES` | `smallaxe.load_model()`, which reads 0.8.x artifacts |
 | `HYPEROPT_AVAILABLE` (in `smallaxe.search` and `smallaxe.search.optimize`), `optimize.HYPEROPT_INSTALL_HINT` | nothing: hyperopt is a required dependency |
-| `optimize.MAXIMIZE_METRICS`, `MINIMIZE_METRICS`, `VALID_METRICS`; `smallaxe.metrics.classification.MULTICLASS_AVERAGED_METRICS` | `smallaxe.metrics.TASK_METRICS` (`TASK_METRICS["multiclass"]` for the multiclass names) |
+| `optimize.MAXIMIZE_METRICS`, `MINIMIZE_METRICS`, `VALID_METRICS`; `MULTICLASS_AVERAGED_METRICS` in `smallaxe.metrics` and `smallaxe.metrics.classification` (not deprecated in 0.11) | `smallaxe.metrics.TASK_METRICS` (`TASK_METRICS["multiclass"]` for the multiclass names) |
 | `XGBOOST_AVAILABLE`, `LIGHTGBM_AVAILABLE`, `CATBOOST_AVAILABLE`, `smallaxe.training.catboost.is_catboost_available()` | `smallaxe.training.algorithm.get(name).available()` or `regressors.available_models()` |
 | `smallaxe.training.catboost.catboost_install_hint()` | `algorithm.get("catboost").dependency.install_hint` |
 | `smallaxe.preprocessing.encoder.VALID_METHODS`, `VALID_HANDLE_RARE`; `smallaxe.preprocessing.scaler.VALID_METHODS` | the values listed in the class docstrings; an invalid value raises `ValidationError` |
