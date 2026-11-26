@@ -41,6 +41,14 @@ def _dependencies() -> List[Requirement]:
     return [Requirement(spec) for spec in re.findall(r'"([^"]+)"', code)]
 
 
+def _extra(name: str) -> List[Requirement]:
+    """The requirements of one ``[project.optional-dependencies]`` extra, parsed."""
+    block = re.search(rf"^{name} = \[(.*?)^\]", _pyproject(), re.S | re.M)
+    assert block is not None, name
+    code = "\n".join(line.split("#", 1)[0] for line in block.group(1).splitlines())
+    return [Requirement(spec) for spec in re.findall(r'"([^"]+)"', code)]
+
+
 def _on(python: str, requirements: List[Requirement]) -> Dict[str, Requirement]:
     """The requirements whose marker holds on ``python``, by name (one each)."""
     applying: Dict[str, Requirement] = {}
@@ -135,3 +143,31 @@ class TestDeclaredDependencies:
         ]
 
         assert [str(r) for r in listed] == [str(r) for r in _dependencies()]
+
+    def test_requirements_dev_lists_the_dev_extra(self):
+        # Everything after the core section: testing and code-quality tools, uncommented.
+        text = (ROOT / "requirements-dev.txt").read_text(encoding="utf-8")
+        rest = text.split("# Core dependencies", 1)[1].split("\n\n", 1)[1]
+        listed = [
+            Requirement(line)
+            for line in rest.splitlines()
+            if line.strip() and not line.startswith("#")
+        ]
+
+        assert [str(r) for r in listed] == [str(r) for r in _extra("dev")]
+
+
+class TestVizExtra:
+    """plotly is optional for users and installed for the tests."""
+
+    def test_plotly_is_not_a_hard_dependency(self):
+        assert "plotly" not in {requirement.name for requirement in _dependencies()}
+
+    def test_the_dev_extra_installs_plotly_at_the_viz_floor(self):
+        (viz,) = _extra("viz")
+        dev = {requirement.name: requirement for requirement in _extra("dev")}
+
+        assert viz.name == "plotly"
+        assert str(dev["plotly"].specifier) == str(viz.specifier) == ">=5.0.0"
+        # No marker: plotly 5.0.0 supports Python 3.6+, so every supported Python gets it.
+        assert dev["plotly"].marker is None

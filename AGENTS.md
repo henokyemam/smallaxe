@@ -45,7 +45,12 @@ smallaxe/
 │   │   ├── random_forest.py   # Random Forest ALGORITHM record
 │   │   ├── regressors.py      # regressors.<algorithm>() / load() / algorithms() / available_models()
 │   │   └── xgboost.py         # XGBoost ALGORITHM record
-│   └── viz/                   # Plotly-based visualization (planned; empty; extra `viz`)
+│   └── viz/                   # Plotly charts that aggregate in Spark (extra `viz`)
+│       ├── _classification.py # confusion_matrix, roc_curve, precision_recall_curve
+│       ├── _regression.py     # residuals, actual_vs_predicted
+│       ├── _models.py         # feature_importances, model_comparison
+│       ├── _frames.py         # The rows a chart counts; the one collect of an aggregate
+│       └── _style.py          # Lazy plotly import, shared layout, argument checks
 ├── tests/                     # pytest test suite (session-scoped SparkSession)
 ├── .github/workflows/
 │   ├── ci.yml                 # CI pipeline
@@ -116,6 +121,29 @@ per run), and the record's `available()` probe. It supports `simple_regression` 
 `binary`; failures are caught as `SmallaxeError` or `_fs.jvm_error_types()`, never a bare
 `except`.
 
+### Visualization
+
+`smallaxe.viz` exports seven functions, each returning a `plotly.graph_objects.Figure`
+and never calling `show()`. A DataFrame chart aggregates in Spark and collects only the
+aggregate: one `groupBy(label, prediction).count()` for `confusion_matrix` (at most
+`50 * 50 + 1` rows collected; more than 50 classes is a `ValidationError`), one
+`groupBy` over score bins for `roc_curve` / `precision_recall_curve` (at most `n_bins + 1`
+rows), a global aggregate and then one `groupBy` over value bins for `residuals` (at most
+`n_bins` rows) and `actual_vs_predicted` (at most `n_bins * n_bins`). Every collect goes
+through `smallaxe/viz/_frames.py`; never call `collect()` / `toPandas()` on row-level
+data, and name the user's columns with `_frames.column(name)` (quoted, so `a.y` is one
+column, not struct access). The curves' area is the exact `smallaxe.metrics.auc_roc` /
+`auc_pr`, computed on the frame `_scored` projects to `label` / `score` (a numeric score
+cast to double, which Spark's evaluator requires). The regression charts bin only finite
+values (`_frames.finite`) and note the rows left out.
+`feature_importances` reads `Model.feature_importances` (a Pipeline's model step), and
+`model_comparison` reads `AutomatedTraining.comparison` or a mapping of scores, ordered
+with `optimize.py`'s `_higher_is_better` (the one orientation rule). plotly is imported
+only inside `_style.plotly()`; annotations use a `TYPE_CHECKING` import. The charts use
+only `plotly.graph_objects` features present in plotly 5.0 (the extra's floor): cell
+labels are layout annotations, not the heatmap `texttemplate` of 5.5. `tests/test_viz.py`
+asserts on figure data and on the row counts of the private aggregation helpers.
+
 ## Development
 
 ### Prerequisites
@@ -153,7 +181,7 @@ Tests use a session-scoped `SparkSession` fixture (`local[2]` mode) defined in `
 - Validation strategies: `'none'`, `'train_test'`, `'kfold'`
 - Cache strategies (per `fit` call): `None` (default: cache only when fit reads the data more than once), `'none'`, `'memory'`, `'disk'`.
 - Task types: `'simple_regression'`, `'binary'`, `'multiclass'` (`AutomatedTraining`: the first two)
-- Optional deps are extras: `smallaxe[xgboost]`, `smallaxe[lightgbm]`, `smallaxe[catboost]`, `smallaxe[viz]` (plotly, for the planned `smallaxe.viz`), `smallaxe[all]`. Hard dependencies are exactly what smallaxe imports at runtime (pyspark, py4j, numpy, pandas, hyperopt; setuptools where PySpark needs `distutils` (3.12) or hyperopt 0.2.7 needs `pkg_resources` (3.8, 3.9)), each with a `>=` floor that the test-lowest CI job installs (`.github/scripts/floor_pins.py`); `tests/test_packaging.py` checks the set per Python and that `requirements-dev.txt` matches
+- Optional deps are extras: `smallaxe[xgboost]`, `smallaxe[lightgbm]`, `smallaxe[catboost]`, `smallaxe[viz]` (plotly, for `smallaxe.viz`; imported lazily inside `smallaxe/viz/_style.py`, so `import smallaxe.viz` works without it and a chart raises `DependencyError`; the dev extra installs it so CI draws every chart), `smallaxe[all]`. Hard dependencies are exactly what smallaxe imports at runtime (pyspark, py4j, numpy, pandas, hyperopt; setuptools where PySpark needs `distutils` (3.12) or hyperopt 0.2.7 needs `pkg_resources` (3.8, 3.9)), each with a `>=` floor that the test-lowest CI job installs (`.github/scripts/floor_pins.py`); `tests/test_packaging.py` checks the set per Python and that `requirements-dev.txt` matches
 - In the test suite a `DeprecationWarning` attributed to a smallaxe module is an error (`filterwarnings` in `pyproject.toml`)
 
 ## Contributing Guidelines

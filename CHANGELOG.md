@@ -209,8 +209,8 @@ deprecated in 0.11"), naming its replacement. In 1.0 a removed name raises
   docstring.
 - The package classifier is `Development Status :: 5 - Production/Stable`.
 - **The hard dependencies are what smallaxe imports.** `plotly` is no longer installed
-  with smallaxe (nothing imports it yet); install `smallaxe[viz]` or plotly itself if
-  your code used it through smallaxe. `numpy>=1.17.3` (imported by `smallaxe.search` and
+  with smallaxe (only `smallaxe.viz` imports it, when a chart is drawn); install
+  `smallaxe[viz]` or plotly itself if your code used it through smallaxe. `numpy>=1.17.3` (imported by `smallaxe.search` and
   by `pyspark.ml`) and `py4j>=0.10.9.5` (smallaxe catches its `Py4JJavaError`) are now
   declared; PySpark already installed both. `pandas` stays required: from Spark 3.4
   `pyspark.ml.functions`, which `smallaxe.preprocessing` (the Scaler) and binary
@@ -267,8 +267,59 @@ deprecated in 0.11"), naming its replacement. In 1.0 a removed name raises
   last and never wins. There is no new artifact kind: save `best_model` and
   `comparison.to_csv(...)`. With the global verbosity above `'quiet'`, `fit` prints one
   progress line per algorithm.
-- **`smallaxe[viz]`**, an extra holding `plotly>=5.0.0` for the planned visualizations;
-  `smallaxe[all]` includes it.
+- **`smallaxe.viz`: plotly charts for evaluating models on DataFrames of any size.**
+  Every chart aggregates in Spark and collects only the aggregated rows, bounded by its
+  bins or classes, never by the row count; each returns a `plotly.graph_objects.Figure`
+  (it never calls `show()`) and takes `title=` to replace its default title. Rows with a
+  null or NaN value in a column a chart reads are left out and not counted. Column names
+  holding a dot or a backtick are read as that one column, not as struct access.
+  - `confusion_matrix(dataframe, label_col, prediction_col="predict_label", *,
+    normalize=False, title=None)`: one `groupBy(label, prediction).count()`, binary or
+    multiclass. Actual classes on y, predicted on x, ascending; every class in either
+    column is on both axes and an absent pair is 0. `normalize=True` divides each row by
+    its actual-class total and keeps the counts in the hover text. More than 50 distinct
+    classes raises `ValidationError` (a continuous label passed by mistake).
+  - `roc_curve(dataframe, label_col, probability_col="probability", *, n_bins=200,
+    title=None)` and `precision_recall_curve(...)` (same arguments): binary 0/1 labels;
+    the score is element 1 of `predict_proba`'s vector (length 2) or a numeric column of
+    any numeric type (float, int, decimal: cast to double for the exact area) in [0, 1]. One `groupBy` over `n_bins` equal-width score bins (an int in [10, 10000]),
+    accumulated on the driver from the highest bin down; ROC runs from (0, 0) to (1, 1)
+    with a chance diagonal, PR starts at recall 0 with the first point's precision (as
+    Spark's curve does) and shows the positive-rate baseline. The legend and title carry
+    the exact `smallaxe.metrics.auc_roc` / `auc_pr` to 4 decimals. A one-class input,
+    labels other than 0/1, vectors of another length and scores outside [0, 1] raise
+    `ValidationError`.
+  - `residuals(dataframe, label_col, prediction_col="predict_label", *, n_bins=50,
+    title=None)`: a histogram of `label - prediction` in `n_bins` (an int in [1, 10000])
+    equal-width bins between the smallest and largest residual (one bar when they are
+    equal), with a line at 0 and the mean and standard deviation in the subtitle.
+    Rows whose residual is infinite or undefined (an infinite label or prediction) are
+    left out and counted in the subtitle; a range too wide to bin in double precision
+    raises `ValidationError`.
+  - `actual_vs_predicted(dataframe, label_col, prediction_col="predict_label", *,
+    n_bins=50, title=None)`: a 2-D density heatmap, actual on x and predicted on y, in
+    `n_bins` x `n_bins` (an int in [5, 500]) equal-width cells over the joint range, with
+    the y = x line. Rows with an infinite value are left out and counted in the subtitle.
+  - `feature_importances(model, *, top_n=20, title=None)`: horizontal bars of a fitted
+    model's `feature_importances` (or a fitted Pipeline's model step), largest at the
+    top, the `top_n` largest. An unfitted model raises `ModelNotFittedError`; an
+    algorithm that reports none, `ValidationError`.
+  - `model_comparison(results, metric=None, *, title=None)`: one bar per model, best
+    first by the metric's direction (the one `optimize.run` and `AutomatedTraining` use;
+    a k-fold `mean_<metric>` key has its metric's), the best bar highlighted and value
+    labels on the bars. `results` is a fitted `AutomatedTraining` (its `ok` comparison
+    rows; `metric` defaults to its metric) or a mapping of model name to a mapping of
+    metric name to score, such as `validation_scores` (`metric` required). Undefined
+    scores are left out and named in the subtitle. An unfitted `AutomatedTraining`
+    raises `ModelNotFittedError`; an empty mapping, or a metric missing from every
+    entry, `ValidationError`.
+
+  plotly stays optional: `import smallaxe.viz` does not import it, and a chart called
+  without it raises `DependencyError` naming `pip install smallaxe[viz]`. Wrong-typed or
+  missing arguments raise `ValidationError` / `ColumnNotFoundError` before any Spark job.
+- **`smallaxe[viz]`**, an extra holding `plotly>=5.0.0` for `smallaxe.viz`;
+  `smallaxe[all]` includes it. The `dev` extra and `requirements-dev.txt` also install
+  it, so the test suite draws every chart.
 
 - **`Pipeline.fit` and `Pipeline.fit_transform` take the model's validation options**
   as keyword-only arguments: `validation`, `test_size`, `n_folds`, `fold_key`, `refit`

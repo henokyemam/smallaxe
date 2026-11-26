@@ -17,6 +17,7 @@ PySpark MLlib has a steep learning curve and verbose API. **smallaxe** provides 
 - **Metrics** - Classification (accuracy, precision, recall, F1, AUC-ROC, AUC-PR, log loss) and regression (MSE, RMSE, MAE, R², MAPE)
 - **Hyperparameter Optimization** - hyperopt-backed search over any model's parameters
 - **Automated Training** - train every installed algorithm on the same validation rows and keep the best
+- **Visualization** - plotly charts (confusion matrix, ROC and precision-recall curves, residuals, actual vs predicted, feature importances, model comparison) that aggregate in Spark, so they work on DataFrames of any size
 
 ## Installation
 
@@ -30,7 +31,7 @@ Install with optional algorithm dependencies:
 pip install smallaxe[xgboost]    # XGBoost support
 pip install smallaxe[lightgbm]   # LightGBM support (SynapseML)
 pip install smallaxe[catboost]   # CatBoost support
-pip install smallaxe[viz]        # plotly, for the planned visualizations
+pip install smallaxe[viz]        # plotly, for the smallaxe.viz charts
 pip install smallaxe[all]        # All of the above
 ```
 
@@ -246,6 +247,58 @@ The preprocessing steps are fitted on every row before the model is validated, s
 their statistics (imputed means, scaling ranges, encoder categories) include the rows
 validation holds out. The scores measure the model on that preprocessed data.
 
+### Visualization
+
+`smallaxe.viz` draws evaluation charts with [plotly](https://plotly.com/python/)
+(`pip install smallaxe[viz]`). Every chart aggregates in Spark and collects only the
+aggregated rows: a confusion matrix is one `groupBy(label, prediction).count()`, and a
+curve, histogram or density is one `groupBy` over score or value bins, so what reaches
+the driver is bounded by the bins or classes, never by the number of rows. Each function
+returns a `plotly.graph_objects.Figure` (call `.show()`, `.write_html(path)` or
+`.to_json()` on it) and takes `title=` to replace its default title.
+
+Classification, on the output of `predict` / `predict_proba`:
+
+```python
+from smallaxe import viz
+
+predictions = model.predict(test)               # adds predict_label
+viz.confusion_matrix(predictions, label_col="churn", normalize=True).show()
+
+probabilities = model.predict_proba(test)       # adds the probability vector
+viz.roc_curve(probabilities, label_col="churn").show()               # exact AUC-ROC in the legend
+viz.precision_recall_curve(probabilities, label_col="churn", n_bins=500)
+```
+
+`confusion_matrix` works for binary and multiclass labels (at most 50 classes); the
+curves are for binary 0/1 labels and accept the `predict_proba` vector or a numeric
+column (of any numeric type) holding the positive-class score. Their legend carries the exact
+`smallaxe.metrics.auc_roc` / `auc_pr`, not the binned approximation.
+
+Regression, on the output of `predict`:
+
+```python
+predictions = regressor.predict(test)
+viz.residuals(predictions, label_col="price").show()            # histogram of label - prediction
+viz.actual_vs_predicted(predictions, label_col="price").show()  # 2-D density with y = x
+```
+
+Models:
+
+```python
+viz.feature_importances(model, top_n=15).show()     # a fitted model or Pipeline
+viz.model_comparison(auto).show()                   # a fitted AutomatedTraining
+viz.model_comparison(
+    {"rf": rf.validation_scores, "xgb": xgb.validation_scores}, metric="rmse"
+).show()
+```
+
+`model_comparison` sorts best first by the metric's direction (`rmse`, `mse`, `mae`,
+`mape` and `log_loss` are minimised, the others maximised), highlights the best bar and
+names the models whose score is undefined. Rows with a null or NaN label, prediction or
+score are left out of every chart. The regression charts also leave out rows with an
+infinite value (they cannot be binned) and say how many in the subtitle.
+
 ## Upgrading to 1.0
 
 smallaxe 1.0 removes every spelling that 0.11 deprecated. Run your code on 0.11 first
@@ -393,7 +446,6 @@ dependencies or network are unavailable, so the core suite always runs offline.
 
 Planned for future releases (not yet available):
 
-- Plotly-based evaluation visualizations.
 - Multiclass/multilabel metrics, quantile regression, MLflow integration.
 
 ## License

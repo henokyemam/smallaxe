@@ -503,7 +503,15 @@ EXPECTED_ALL: Dict[str, List[str]] = {
     "smallaxe.training.xgboost": [
         "ALGORITHM",
     ],
-    "smallaxe.viz": [],
+    "smallaxe.viz": [
+        "actual_vs_predicted",
+        "confusion_matrix",
+        "feature_importances",
+        "model_comparison",
+        "precision_recall_curve",
+        "residuals",
+        "roc_curve",
+    ],
 }
 
 EXPECTED_FUNCTIONS: Dict[str, str] = {
@@ -548,6 +556,13 @@ EXPECTED_FUNCTIONS: Dict[str, str] = {
     "smallaxe.training.regressors.random_forest": "(**params)",
     "smallaxe.training.regressors.xgboost": "(**params)",
     "smallaxe.verbosity": "(level)",
+    "smallaxe.viz.actual_vs_predicted": "(dataframe, label_col, prediction_col='predict_label', *, n_bins=50, title=None)",
+    "smallaxe.viz.confusion_matrix": "(dataframe, label_col, prediction_col='predict_label', *, normalize=False, title=None)",
+    "smallaxe.viz.feature_importances": "(model, *, top_n=20, title=None)",
+    "smallaxe.viz.model_comparison": "(results, metric=None, *, title=None)",
+    "smallaxe.viz.precision_recall_curve": "(dataframe, label_col, probability_col='probability', *, n_bins=200, title=None)",
+    "smallaxe.viz.residuals": "(dataframe, label_col, prediction_col='predict_label', *, n_bins=50, title=None)",
+    "smallaxe.viz.roc_curve": "(dataframe, label_col, probability_col='probability', *, n_bins=200, title=None)",
 }
 
 EXPECTED_CLASSES: Dict[str, Dict[str, str]] = {

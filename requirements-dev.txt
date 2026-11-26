@@ -12,9 +12,10 @@ hyperopt>=0.3.0; python_version >= "3.10"
 setuptools>=56.0.0,<82; python_version < "3.10"
 setuptools>=68; python_version >= "3.12"
 
-# Testing
+# Testing (tests/test_viz.py draws every chart with plotly, the viz extra)
 pytest>=7.0.0
 pytest-spark>=0.6.0
+plotly>=5.0.0
 
 # Code quality (exact pins, matching the dev extra in pyproject.toml; CI lints and
 # type-checks with these versions; black 26 and mypy 2 need Python 3.10+)
@@ -26,4 +27,4 @@ mypy==2.4.0; python_version >= "3.10"
 # xgboost: xgboost>=1.7.0, scikit-learn>=1.0, pandas>=1.2, pyarrow>=4.0
 # lightgbm: lightgbm>=3.3.0, synapseml>=1.0.0
 # catboost: catboost>=1.1.0
-# viz: plotly>=5.0.0
+# viz: plotly>=5.0.0 (already listed above, for the tests)
