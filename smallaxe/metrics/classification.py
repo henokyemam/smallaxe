@@ -12,11 +12,18 @@ from pyspark.ml.evaluation import BinaryClassificationEvaluator
 from pyspark.ml.linalg import VectorUDT
 from pyspark.sql import DataFrame
 from pyspark.sql import functions as F
-from pyspark.sql.types import NumericType
+from pyspark.sql.types import FloatType, NumericType
 
 from smallaxe import _checks
+from smallaxe._sql import quoted
 from smallaxe.exceptions import ValidationError
-from smallaxe.metrics._checks import as_number, comparable, require_numeric, require_rows
+from smallaxe.metrics._checks import (
+    comparable,
+    exact_integers,
+    is_one,
+    require_numeric,
+    require_rows,
+)
 from smallaxe.metrics._checks import validate_columns as _validate_columns
 
 __all__ = [
@@ -46,9 +53,12 @@ def accuracy(
 
     Every row counts in the total; a row with a null label or prediction is never
     correct, so a frame where every row has one scores 0.0. (``multiclass_scores``
-    instead ignores such rows.) A boolean column counts as 0 and 1; a string column
-    compared with a number is the number it spells, and a string that is not a number
-    is never correct. Two string columns are compared as strings.
+    instead ignores such rows.) Columns of different types are compared as Spark 3's
+    default mode compares them, whether or not ANSI mode is on: a boolean counts as 0
+    and 1; a string compared with an integer column is read as that integer type
+    (``"7.9"`` is 7), with a float or double as that type, with a decimal as a double
+    (both sides), with a boolean as a boolean (``"true"``, ``"1"``); a string that does
+    not parse is never correct. Two string columns are compared as strings.
 
     Args:
         dataframe: PySpark DataFrame containing true and predicted labels.
@@ -84,9 +94,10 @@ def precision(
 
     Precision = TP / (TP + FP)
 
-    With ``average='binary'`` the positive class is the number 1: a boolean column
-    counts True as 1, and a string column the strings that spell 1 (``"1"``, ``"1.0"``);
-    a string that is not a number is never positive.
+    With ``average='binary'`` the positive class is 1, read as Spark 3's default mode
+    reads ``col = 1`` whether or not ANSI mode is on: a boolean column counts True as 1,
+    and a string column is read as an integer (``"1"``, ``"1.0"`` and ``"1.5"`` are 1;
+    ``"1e0"`` and a string that is not a number are not).
 
     Args:
         dataframe: PySpark DataFrame containing true and predicted labels.
@@ -111,10 +122,10 @@ def precision(
     _validate_columns(dataframe, label_col, prediction_col)
     require_rows(dataframe, "precision")
 
-    # Positive is the number 1: a boolean True, or a string that spells 1 (as_number).
-    is_positive = as_number(dataframe, prediction_col) == 1
+    # Positive is the class 1, read as Spark 3's default ``col = 1`` reads it (is_one).
+    is_positive = is_one(dataframe, prediction_col)
     # Count true positives (predicted positive and actually positive)
-    true_positives = dataframe.filter(is_positive & (as_number(dataframe, label_col) == 1)).count()
+    true_positives = dataframe.filter(is_positive & is_one(dataframe, label_col)).count()
 
     # Count all positive predictions
     predicted_positives = dataframe.filter(is_positive).count()
@@ -136,9 +147,10 @@ def recall(
 
     Recall = TP / (TP + FN)
 
-    With ``average='binary'`` the positive class is the number 1: a boolean column
-    counts True as 1, and a string column the strings that spell 1 (``"1"``, ``"1.0"``);
-    a string that is not a number is never positive.
+    With ``average='binary'`` the positive class is 1, read as Spark 3's default mode
+    reads ``col = 1`` whether or not ANSI mode is on: a boolean column counts True as 1,
+    and a string column is read as an integer (``"1"``, ``"1.0"`` and ``"1.5"`` are 1;
+    ``"1e0"`` and a string that is not a number are not).
 
     Args:
         dataframe: PySpark DataFrame containing true and predicted labels.
@@ -163,12 +175,10 @@ def recall(
     _validate_columns(dataframe, label_col, prediction_col)
     require_rows(dataframe, "recall")
 
-    # Positive is the number 1: a boolean True, or a string that spells 1 (as_number).
-    is_positive = as_number(dataframe, label_col) == 1
+    # Positive is the class 1, read as Spark 3's default ``col = 1`` reads it (is_one).
+    is_positive = is_one(dataframe, label_col)
     # Count true positives (predicted positive and actually positive)
-    true_positives = dataframe.filter(
-        (as_number(dataframe, prediction_col) == 1) & is_positive
-    ).count()
+    true_positives = dataframe.filter(is_one(dataframe, prediction_col) & is_positive).count()
 
     # Count all actual positives
     actual_positives = dataframe.filter(is_positive).count()
@@ -461,10 +471,25 @@ def log_loss(
     require_numeric(dataframe, "log_loss", label_col, probability_col)
     require_rows(dataframe, "log_loss")
 
-    # Both as doubles, so ``1 - label`` cannot overflow an integer label (ANSI mode
-    # raises on that) and the arithmetic is the same in and out of ANSI mode.
-    label = F.col(label_col).cast("double")
-    probability = F.col(probability_col).cast("double")
+    # Spark 3's default arithmetic, made independent of ANSI mode: an integer label as
+    # an exact decimal, so ``1 - label`` cannot overflow (ANSI mode raises; without it
+    # the value wraps); any other label through try_subtract, which is null where the
+    # plain operator would overflow without ANSI mode and raise with it. A float label's
+    # ``1 - label`` is float arithmetic in the default mode (double with ANSI mode on),
+    # so the 1 is a float.
+    integers = exact_integers(dataframe, label_col)
+    if integers is not None:
+        label = integers[0]
+        complement = 1 - label
+    else:
+        label = F.col(quoted(label_col))
+        one = (
+            "CAST(1 AS FLOAT)"
+            if isinstance(dataframe.schema[label_col].dataType, FloatType)
+            else "1"
+        )
+        complement = F.expr(f"try_subtract({one}, {quoted(label_col)})")
+    probability = F.col(quoted(probability_col))
     # Clip probabilities to avoid log(0)
     clipped_prob = (
         F.when(probability < eps, eps).when(probability > 1 - eps, 1 - eps).otherwise(probability)
@@ -473,7 +498,7 @@ def log_loss(
     # Calculate log loss
     # -[y * log(p) + (1-y) * log(1-p)]
     result = dataframe.select(
-        F.avg(-(label * F.log(clipped_prob) + (1 - label) * F.log(1 - clipped_prob))).alias(
+        F.avg(-(label * F.log(clipped_prob) + complement * F.log(1 - clipped_prob))).alias(
             "log_loss"
         )
     ).first()

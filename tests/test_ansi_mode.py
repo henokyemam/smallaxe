@@ -17,6 +17,7 @@ from decimal import Decimal
 from pathlib import Path
 from typing import Any, Callable, Dict
 
+import pyspark
 import pytest
 from pyspark.ml.linalg import Vectors
 from pyspark.sql import Row, SparkSession
@@ -177,6 +178,135 @@ def _auc_integer_scores(spark: SparkSession) -> Any:
     return [auc_roc(df), auc_pr(df)]
 
 
+# Frame builders (no leading underscore, so CASES leaves them out); the reference tests
+# below recompute the same frames with Spark's own operators.
+
+
+def mape_float_frame(spark: SparkSession) -> Any:
+    return spark.createDataFrame(
+        [(0.1, 0.3), (0.7, 0.2), (1.3, 1.1)], "label float, predict_label float"
+    )
+
+
+def mape_decimal_frame(spark: SparkSession) -> Any:
+    return spark.createDataFrame(
+        [(Decimal("3.00"), Decimal("1.00")), (Decimal("7.00"), Decimal("1.00"))],
+        "label decimal(10,2), predict_label decimal(10,2)",
+    )
+
+
+def mape_decimal_overflow_frame(spark: SparkSession) -> Any:
+    # The ratio of the first row does not fit the division's decimal type: null without
+    # ANSI mode (the row is skipped), an error with it unless smallaxe guards it.
+    return spark.createDataFrame(
+        [(Decimal("0.01"), Decimal("1" + "0" * 35)), (Decimal("2.00"), Decimal("1.00"))],
+        "label decimal(38,2), predict_label decimal(38,2)",
+    )
+
+
+def mape_bigint_frame(spark: SparkSession) -> Any:
+    return spark.createDataFrame(
+        [(9007199254740993, 6004799503160662)], "label bigint, predict_label bigint"
+    )
+
+
+def mape_int_float_frame(spark: SparkSession) -> Any:
+    # Spark 3's default mode subtracts an int and a float in float (ANSI mode in double).
+    return spark.createDataFrame(
+        [(16777217, 1.5), (3, 0.1), (-7, 2.25)], "label int, predict_label float"
+    )
+
+
+def log_loss_float_frame(spark: SparkSession) -> Any:
+    # ``1 - label`` is float arithmetic in Spark: 1 - 1e-8 is 1.0 as a float.
+    return spark.createDataFrame(
+        [(1e-8, 0.4), (0.9, 0.7), (1.0, 0.6)], "label float, probability double"
+    )
+
+
+def _mape_float_columns(spark: SparkSession) -> Any:
+    return mape(mape_float_frame(spark))
+
+
+def _mape_decimal_columns(spark: SparkSession) -> Any:
+    return mape(mape_decimal_frame(spark))
+
+
+def _mape_decimal_overflow(spark: SparkSession) -> Any:
+    return mape(mape_decimal_overflow_frame(spark))
+
+
+def _mape_bigint_beyond_double(spark: SparkSession) -> Any:
+    return mape(mape_bigint_frame(spark))
+
+
+def _mape_int_and_float_columns(spark: SparkSession) -> Any:
+    return mape(mape_int_float_frame(spark))
+
+
+def _log_loss_float_labels(spark: SparkSession) -> Any:
+    return log_loss(log_loss_float_frame(spark))
+
+
+def _accuracy_string_against_typed_columns(spark: SparkSession) -> Any:
+    df = spark.createDataFrame(
+        [
+            (7, 9007199254740993, 0.1, Decimal("1.50"), True, "7.9"),
+            (2, 9007199254740993, 0.7, Decimal("2.00"), False, "x"),
+        ],
+        "i int, l bigint, f float, m decimal(10,2), b boolean, s string",
+    )
+    pairs = {
+        "int": ("i", "s"),
+        "bigint": ("l", "s"),
+        "float": ("f", "s"),
+        "decimal": ("m", "s"),
+        "boolean": ("b", "s"),
+    }
+    results = {}
+    for name, (label, prediction) in pairs.items():
+        frame = df.selectExpr(f"{label} AS label", f"{prediction} AS predict_label")
+        results[name] = accuracy(frame)
+    strings = spark.createDataFrame(
+        [
+            (7, 9007199254740993, 0.1, Decimal("1.50"), True, "7.9", "9007199254740992"),
+            (2, 3, 0.7, Decimal("2.00"), False, "2", "3"),
+        ],
+        "i int, l bigint, f float, m decimal(10,2), b boolean, s string, t string",
+    )
+    for name, (label, prediction) in {
+        "int_fraction": ("i", "s"),
+        "bigint_exact": ("l", "t"),
+        "float_spelled": ("f", "CAST(f AS STRING)"),
+        "decimal_spelled": ("m", "CAST(m AS STRING)"),
+        "boolean_words": ("b", "IF(b, 'yes', 'f')"),
+    }.items():
+        frame = strings.selectExpr(f"{label} AS label", f"{prediction} AS predict_label")
+        results[name] = accuracy(frame)
+    return results
+
+
+def _binary_scores_string_fraction(spark: SparkSession) -> Any:
+    # Spark 3's default ``"1.5" = 1`` reads the string as the integer 1.
+    df = spark.createDataFrame(
+        [("1.5", "1"), ("1e0", "1"), ("1.0", "1.9"), ("0", "1")],
+        "label string, predict_label string",
+    )
+    return [precision(df), recall(df), f1_score(df)]
+
+
+def _binary_scores_boolean_against_decimal(spark: SparkSession) -> Any:
+    df = spark.createDataFrame(
+        [(True, Decimal("1.0")), (False, Decimal("0.0")), (True, Decimal("0.5"))],
+        "label boolean, predict_label decimal(2,1)",
+    )
+    narrow = spark.createDataFrame(
+        [(True, Decimal("0.5")), (False, Decimal("0.0"))],
+        "label boolean, predict_label decimal(1,1)",
+    )
+    return [accuracy(df), precision(df), recall(df), accuracy(narrow)]
+
+
 # --- Preprocessing ----------------------------------------------------------------------
 
 
@@ -242,6 +372,28 @@ def _imputer_categorical_typed_columns(spark: SparkSession) -> Any:
             results.append((column, fill, _rows(imputed)))
         except SmallaxeError as exc:
             results.append((column, fill, type(exc).__name__))
+    return results
+
+
+def _imputer_fills_that_round(spark: SparkSession) -> Any:
+    # A fill that rounds in the check's decimal, or does not fit it, does not keep its
+    # value, so Spark 3's default mode rejects it.
+    results = []
+    for data_type, value, fill in (
+        ("int", 3, "7.9999999999999999999"),
+        ("tinyint", 3, "7.99999999999999999999"),
+        ("bigint", 3, "7.0000000000000000001"),
+        ("decimal(38,0)", Decimal(3), "12345678901234567890123.5"),
+        ("decimal(38,0)", Decimal(3), "123456789012345678901234567890"),
+        ("decimal(38,10)", Decimal(3), "12345678901234567890123.5"),
+        ("decimal(10,2)", Decimal(3), "12.5"),
+    ):
+        df = spark.createDataFrame([(1, value), (2, None)], f"id int, c {data_type}")
+        try:
+            imputed = Imputer(categorical_strategy=fill).fit_transform(df, categorical_cols=["c"])
+            results.append((data_type, fill, _rows(imputed)))
+        except SmallaxeError as exc:
+            results.append((data_type, fill, type(exc).__name__))
     return results
 
 
@@ -424,6 +576,187 @@ class TestExpectedValues:
         onehot, label = _encoder_unseen_and_null(spark_session)
         assert [row["c"] for row in label] == [0, 2, None]
         assert [row["c_UNKNOWN"] for row in onehot] == [0.0, 1.0, 0.0]
+
+
+class TestSpark3DefaultResults:
+    """The mode-independent results are Spark 3's default (ANSI off) results.
+
+    Each value is pinned, and the classes below the pins also recompute it with Spark's
+    own implicit casts and operators with ANSI mode off (the expressions smallaxe 0.x
+    used), so a difference from Spark 3's default mode fails on every Spark 3 leg.
+    """
+
+    def test_mape_on_float_and_decimal_columns_keeps_their_arithmetic(self, spark_session):
+        assert _mape_float_columns(spark_session) == 95.60439933103537
+        assert _mape_decimal_columns(spark_session) == 76.19047619048
+
+    def test_mape_skips_a_decimal_ratio_that_overflows(self, spark_session):
+        assert _mape_decimal_overflow(spark_session) == 50.0
+
+    def test_mape_on_bigint_columns_beyond_double_precision(self, spark_session):
+        assert _mape_bigint_beyond_double(spark_session) == 33.333333333333336
+
+    def test_log_loss_on_float_labels_keeps_their_arithmetic(self, spark_session):
+        assert _log_loss_float_labels(spark_session) == pytest.approx(
+            0.48768533562449895, rel=1e-15
+        )
+
+    def test_a_string_is_read_as_the_type_it_is_compared_with(self, spark_session):
+        results = _accuracy_string_against_typed_columns(spark_session)
+        assert results["int_fraction"] == 1.0  # "7.9" is the integer 7
+        assert results["bigint_exact"] == 0.5  # 2^53 + 1 is not "2^53"
+        assert results["float_spelled"] == 1.0  # "0.1" is the float 0.1
+        assert results["decimal_spelled"] == 1.0
+        assert results["boolean_words"] == 1.0  # "yes" and "f" are booleans
+
+    def test_a_string_positive_class_is_read_as_an_integer(self, spark_session):
+        # Positive labels "1.5", "1.0"; positive predictions "1", "1", "1.9", "1".
+        prec, rec, f1 = _binary_scores_string_fraction(spark_session)
+        assert (prec, rec) == (0.5, 1.0)
+        assert f1 == pytest.approx(2 / 3)
+
+    def test_a_boolean_is_cast_to_the_decimal_it_is_compared_with(self, spark_session):
+        acc, prec, rec, narrow = _binary_scores_boolean_against_decimal(spark_session)
+        assert (acc, prec, rec) == (pytest.approx(2 / 3), 1.0, 0.5)
+        assert narrow == 0.5  # True does not fit decimal(1,1): null, never correct
+
+    def test_imputer_rejects_fills_that_round(self, spark_session):
+        outcomes = {
+            (dt, fill): result for dt, fill, result in _imputer_fills_that_round(spark_session)
+        }
+        assert outcomes[("bigint", "7.0000000000000000001")][1]["c"] == 7
+        assert outcomes[("decimal(10,2)", "12.5")][1]["c"] == Decimal("12.50")
+        rejected = {key for key, result in outcomes.items() if result == "ValidationError"}
+        assert rejected == {
+            ("int", "7.9999999999999999999"),
+            ("tinyint", "7.99999999999999999999"),
+            ("decimal(38,0)", "12345678901234567890123.5"),
+            ("decimal(38,0)", "123456789012345678901234567890"),
+            ("decimal(38,10)", "12345678901234567890123.5"),
+        }
+
+
+def _with_ansi_off(spark: SparkSession, compute: Callable[[], Any]) -> Any:
+    previous = spark.conf.get(ANSI)
+    spark.conf.set(ANSI, "false")
+    try:
+        return compute()
+    finally:
+        spark.conf.set(ANSI, previous)
+
+
+_SPARK_3 = int(pyspark.__version__.split(".")[0]) < 4
+
+
+@pytest.mark.skipif(
+    not _SPARK_3,
+    reason="the reference is Spark 3's own default mode; the pinned values above hold "
+    "on every Spark",
+)
+class TestAgainstSpark3ImplicitCasts:
+    """smallaxe's explicit casts give what Spark 3's implicit ones give with ANSI off."""
+
+    TYPED = [
+        ("i", "int", 7),
+        ("t", "tinyint", 7),
+        ("l", "bigint", 9007199254740993),
+        ("f", "float", 0.1),
+        ("d", "double", 0.1),
+        ("m", "decimal(10,2)", Decimal("1.50")),
+        ("n", "decimal(1,1)", Decimal("0.5")),
+        ("b", "boolean", True),
+    ]
+    STRINGS = [
+        "7",
+        "7.9",
+        " 7 ",
+        "1e0",
+        "0.1",
+        "1.50",
+        "1.5",
+        "true",
+        "yes",
+        "f",
+        "1",
+        "x",
+        "",
+        "9007199254740992",
+        "9007199254740993",
+        "Infinity",
+        None,
+    ]
+
+    def _frame(self, spark: SparkSession) -> Any:
+        rows = [tuple(value for _, _, value in self.TYPED) + (s,) for s in self.STRINGS]
+        schema = ", ".join(f"{name} {kind}" for name, kind, _ in self.TYPED) + ", s string"
+        return spark.createDataFrame(rows, schema)
+
+    def test_accuracy_matches_spark_3_equality(self, spark_session):
+        df = self._frame(spark_session)
+        for name, _, _ in self.TYPED + [("s", "string", None)]:
+            for other in [col for col, _, _ in self.TYPED] + ["s"]:
+                pair = df.selectExpr(f"{name} AS label", f"{other} AS predict_label")
+                expected = _with_ansi_off(
+                    spark_session,
+                    lambda pair=pair: pair.filter("label = predict_label").count() / pair.count(),
+                )
+                for ansi in ("false", "true"):
+                    assert _outcome(lambda _, pair=pair: accuracy(pair), spark_session, ansi) == (
+                        "ok",
+                        expected,
+                    ), (name, other, ansi)
+
+    def test_binary_positive_class_matches_spark_3_equality_with_1(self, spark_session):
+        df = self._frame(spark_session)
+        for name, _, _ in self.TYPED + [("s", "string", None)]:
+            pair = df.selectExpr(f"{name} AS label", "s AS predict_label")
+            positives = _with_ansi_off(
+                spark_session,
+                lambda pair=pair: (
+                    pair.filter("label = 1 AND predict_label = 1").count(),
+                    pair.filter("predict_label = 1").count(),
+                    pair.filter("label = 1").count(),
+                ),
+            )
+            tp, predicted, actual = positives
+            expected = [tp / predicted if predicted else 0.0, tp / actual if actual else 0.0]
+            for ansi in ("false", "true"):
+                got = _outcome(
+                    lambda _, pair=pair: [precision(pair), recall(pair)], spark_session, ansi
+                )
+                assert got == ("ok", expected), (name, ansi)
+
+    @pytest.mark.parametrize(
+        "frame",
+        [
+            mape_float_frame,
+            mape_decimal_frame,
+            mape_decimal_overflow_frame,
+            mape_bigint_frame,
+            mape_int_float_frame,
+        ],
+    )
+    def test_mape_matches_spark_3_arithmetic(self, spark_session, frame):
+        df = frame(spark_session)
+        expected = _with_ansi_off(
+            spark_session,
+            lambda: df.filter("label != 0")
+            .selectExpr("avg(abs(label - predict_label) / abs(label)) * 100")
+            .first()[0],
+        )
+        for ansi in ("false", "true"):
+            assert _outcome(lambda _: mape(df), spark_session, ansi) == ("ok", float(expected))
+
+    def test_log_loss_matches_spark_3_arithmetic(self, spark_session):
+        df = log_loss_float_frame(spark_session)
+        expected = _with_ansi_off(
+            spark_session,
+            lambda: df.selectExpr(
+                "avg(-(label * ln(probability) + (1 - label) * ln(1 - probability)))"
+            ).first()[0],
+        )
+        for ansi in ("false", "true"):
+            assert _outcome(lambda _: log_loss(df), spark_session, ansi) == ("ok", expected)
 
 
 def test_smallaxe_never_sets_the_ansi_option():

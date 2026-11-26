@@ -1,6 +1,5 @@
 """Imputer for handling missing values in PySpark DataFrames."""
 
-import re
 from typing import Dict, List, Optional, Union
 
 from pyspark.sql import Column, DataFrame
@@ -15,6 +14,7 @@ from pyspark.sql.types import (
 )
 
 from smallaxe import _artifact, _checks, _fs
+from smallaxe._sql import integral_from_string
 from smallaxe.exceptions import (
     ColumnNotFoundError,
     ModelNotFittedError,
@@ -49,31 +49,31 @@ def _present(col: str) -> Column:
 _EXACT = DecimalType(38, 18)
 
 
-# The strings Spark's non-ANSI string-to-integer cast reads: an optional sign, digits and
-# an optional fraction, after trimming the characters up to the space (no exponent, ASCII
-# digits only). ANSI mode reads only the integers among them ("7", not "7.0"), so the
-# fill goes through ``_EXACT`` instead, which reads them all in either mode.
-_INTEGRAL_FILL = re.compile(r"[+-]?(?:[0-9]+\.?[0-9]*|\.[0-9]+)")
-_TRIMMED = "".join(chr(code) for code in range(33))
+def _typed_fill(data_type: DataType) -> Column:
+    """The string column ``fill`` cast to ``data_type`` as Spark 3's default cast does.
 
-
-def _integral_fill(fill: str) -> bool:
-    """Whether ``fill`` is spelled the way Spark reads a string as an integer."""
-    return _INTEGRAL_FILL.fullmatch(fill.strip(_TRIMMED)) is not None
+    The same value in and out of ANSI mode, null where the cast fails: an integer
+    column's fill goes through :func:`smallaxe._sql.integral_from_string` (ANSI mode's
+    cast rejects ``"7.0"``, which the default one reads as 7), any other type through
+    ``try_cast`` (a SQL function from Spark 3.2), which reads the strings the default
+    cast reads and is null for the others where ANSI mode's cast raises.
+    """
+    if isinstance(data_type, IntegralType):
+        return integral_from_string(F.col("fill"), data_type)
+    return F.expr(f"try_cast(fill AS {data_type.simpleString()})")
 
 
 def _fill_literal(fill: str, data_type: DataType) -> Column:
     """The categorical fill value as a literal of the column's own type.
 
     ``fit`` checked that the cast succeeds and keeps the value (``_check_categorical_fill``),
-    so it raises in neither ANSI mode. An integer column's fill is read through
-    ``_EXACT``: ANSI mode's string-to-integer cast rejects ``"7.0"``, which the non-ANSI
-    one reads as 7; the decimal reads it as 7 in both.
+    so neither cast raises in either ANSI mode, and both give the value Spark 3's default
+    cast gives.
     """
     if isinstance(data_type, StringType):
         return F.lit(fill)
     if isinstance(data_type, IntegralType):
-        return F.lit(fill).cast(_EXACT).cast(data_type)
+        return integral_from_string(F.lit(fill), data_type)
     return F.lit(fill).cast(data_type)
 
 
@@ -312,35 +312,27 @@ class Imputer:
         """
         if isinstance(data_type, StringType):
             return
-        # try_cast (a SQL function from Spark 3.2) is null for a value that does not fit,
-        # in and out of ANSI mode, where a plain cast would raise with ANSI mode on.
-        target = data_type.simpleString()
-        exact_sql = f"try_cast(fill AS {_EXACT.simpleString()})"
-        if isinstance(data_type, IntegralType):
-            typed_sql = f"try_cast({exact_sql} AS {target})"
-        else:
-            typed_sql = f"try_cast(fill AS {target})"
         exact = isinstance(data_type, (IntegralType, DecimalType))
-        if isinstance(data_type, IntegralType) and not _integral_fill(fill):
-            valid = False
-        else:
-            try:
-                row = _checks.one_row(
-                    dataframe.sparkSession.range(1)
-                    .select(F.lit(fill).alias("fill"))
-                    .selectExpr(
-                        f"{typed_sql} IS NOT NULL AS cast_ok",
-                        (
-                            f"try_cast({typed_sql} AS {_EXACT.simpleString()}) <=> {exact_sql}"
-                            if exact
-                            else "true"
-                        )
-                        + " AS exact",
+        try:
+            fills = dataframe.sparkSession.range(1).select(F.lit(fill).alias("fill"))
+            row = _checks.one_row(
+                fills.select(
+                    _typed_fill(data_type).alias("typed"),
+                    F.expr(f"try_cast(fill AS {_EXACT.simpleString()})").alias("exact_fill"),
+                ).selectExpr(
+                    "typed IS NOT NULL AS cast_ok",
+                    # ``=``, not ``<=>``: a fill too wide for ``_EXACT`` (null) is rejected.
+                    (
+                        f"try_cast(typed AS {_EXACT.simpleString()}) = exact_fill"
+                        if exact
+                        else "true"
                     )
+                    + " AS exact",
                 )
-                valid = bool(row["cast_ok"]) and bool(row["exact"])
-            except _fs.jvm_error_types():  # a cast to a complex type fails at analysis
-                valid = False
+            )
+            valid = bool(row["cast_ok"]) and bool(row["exact"])
+        except _fs.jvm_error_types():  # a cast to a complex type fails at analysis
+            valid = False
         if not valid:
             raise ValidationError(
                 f"Cannot impute categorical column '{col}' of type "
