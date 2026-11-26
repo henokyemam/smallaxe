@@ -122,6 +122,36 @@ deprecated in 0.11"), naming its replacement. In 1.0 a removed name raises
   of `smallaxe.training.mixins` stay in their modules' `__all__`, but the README's
   stability policy leaves them out of the public API: their members are public as
   members of `Model`, `Regressor` and `Classifier`.
+- **Results no longer depend on Spark's ANSI SQL mode** (`spark.sql.ansi.enabled`, on
+  by default from Spark 4). With ANSI mode on, an implicit cast that fails, an
+  arithmetic overflow, a boolean compared with a number, or (on Spark 3.3) a missing
+  map key raises where it gave null before; smallaxe never sets the option, and its
+  expressions now give the same result either way. `tests/test_ansi_mode.py` runs the
+  metric, preprocessing, visualization, split and dataset edge cases (zero
+  denominators, unseen categories, constant and all-null columns, nulls, NaN,
+  infinities) with the option on and off and requires identical results; the whole
+  suite also passes with it on (Spark 3.5). Fixed under ANSI mode, unchanged without it
+  except where noted:
+  - `accuracy`, and `precision` / `recall` / `f1_score` with `average='binary'`, on a
+    boolean column (an analysis error under ANSI mode) or a string column holding a
+    value that is not a number (a cast error). A boolean counts as 0 / 1; a string
+    compared with a number is the number it spells (`try_cast` to double), and one that
+    is not a number never matches; two string columns are still compared as strings.
+    Without ANSI mode, a string compared with the positive class 1 was cast to an
+    integer, so `"1.5"` counted as positive and `"1e0"` did not; it is now compared as a
+    double (`"1.5"` is not 1, `"1e0"` is).
+  - `mape` on integer columns: `label - prediction` and `abs(label)` are computed as
+    doubles, so they no longer overflow (ANSI mode raised; without it the value wrapped
+    around, giving a wrong score for values near the integer limits). `log_loss` also
+    computes in doubles.
+  - `Imputer` with a categorical fill on an integer column spelled with a fraction
+    (`categorical_strategy="7.0"`): ANSI mode's string-to-integer cast rejects it, so
+    `fit` raised `ValidationError` and `transform` a Spark error. The fill is now read
+    through a decimal, and checked with `try_cast` rather than a cast that raises; the
+    accepted and rejected fills are the ones Spark 3's default mode accepts and rejects.
+  - `Encoder.transform` with a category not seen at fit, on Spark 3.3 with ANSI mode on
+    (a missing map key raised there): the lookup is guarded, so the category maps to the
+    `__OTHER__` / `__UNKNOWN__` index in every mode.
 - **A Spark Connect session raises `ConfigurationError`.** smallaxe needs a classic
   (JVM, py4j) Spark session: every `save` and `load` reads and writes through the
   Hadoop FileSystem on the JVM (`smallaxe._fs`). With a Spark Connect session active

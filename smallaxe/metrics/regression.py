@@ -185,10 +185,14 @@ def mape(
     require_numeric(dataframe, "mape", label_col, prediction_col)
     require_rows(dataframe, "mape")
 
-    label = F.col(label_col)
+    # As doubles: integer ``label - prediction`` or ``abs(label)`` can overflow (ANSI mode
+    # raises; without it the value wraps). Zero labels are filtered out first, so the
+    # division never sees a zero denominator.
+    label = F.col(label_col).cast("double")
+    prediction = F.col(prediction_col).cast("double")
     result = (
         dataframe.filter(label != 0)
-        .select(F.avg(F.abs(label - F.col(prediction_col)) / F.abs(label)).alias("mape"))
+        .select(F.avg(F.abs(label - prediction) / F.abs(label)).alias("mape"))
         .first()
     )
     assert result is not None  # an aggregate without GROUP BY always yields one row

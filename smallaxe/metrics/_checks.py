@@ -1,14 +1,15 @@
-"""Input checks shared by the metric functions."""
+"""Input checks and column conversions shared by the metric functions."""
 
 from typing import List
 
-from pyspark.sql import DataFrame
-from pyspark.sql.types import NumericType
+from pyspark.sql import Column, DataFrame
+from pyspark.sql import functions as F
+from pyspark.sql.types import BooleanType, NumericType, StringType
 
 from smallaxe._checks import require_dataframe
 from smallaxe.exceptions import ColumnNotFoundError, ValidationError
 
-__all__ = ["validate_columns", "require_numeric", "require_rows"]
+__all__ = ["validate_columns", "require_numeric", "require_rows", "as_number", "comparable"]
 
 
 def validate_columns(dataframe: DataFrame, *cols: str) -> None:
@@ -53,3 +54,59 @@ def require_rows(dataframe: DataFrame, metric: str) -> None:
     """
     if dataframe.limit(1).count() == 0:
         raise ValidationError(f"Cannot compute {metric}: the DataFrame has no rows.")
+
+
+def _quoted(col: str) -> str:
+    """``col`` as a SQL identifier, so a name holding a dot or a backtick is one column."""
+    return "`" + col.replace("`", "``") + "`"
+
+
+def as_number(dataframe: DataFrame, col: str) -> Column:
+    """``col`` for comparing with a number, with the same result in and out of ANSI mode.
+
+    Spark compares a boolean or string column with a number through an implicit cast,
+    and ANSI mode (the default from Spark 4) changes it: a boolean compared with a
+    number is an analysis error, and a string that is not a number raises at run time
+    instead of becoming null. The conversion is made explicit here instead:
+
+    - a numeric column is returned as it is;
+    - a boolean column as the integer 0 or 1;
+    - a string column as the number it spells (``try_cast`` to double, which is null,
+      in either mode, for a string that is not a number); ``try_cast`` is a SQL function
+      from Spark 3.2, so it is written as a SQL expression;
+    - any other type unchanged.
+
+    Args:
+        dataframe: The DataFrame holding ``col``.
+        col: A column of ``dataframe``.
+
+    Returns:
+        The column expression.
+    """
+    data_type = dataframe.schema[col].dataType
+    if isinstance(data_type, BooleanType):
+        return F.col(_quoted(col)).cast("int")
+    if isinstance(data_type, StringType):
+        return F.expr(f"try_cast({_quoted(col)} AS DOUBLE)")
+    return F.col(_quoted(col))
+
+
+def comparable(dataframe: DataFrame, label_col: str, prediction_col: str) -> List[Column]:
+    """The label and prediction columns, converted so ``label == prediction`` is mode-independent.
+
+    Two string columns are compared as strings. Otherwise, when either column is a
+    number or a boolean, both go through :func:`as_number`, so the comparison is between
+    numbers in and out of ANSI mode. Columns of other types are returned unchanged.
+
+    Args:
+        dataframe: The DataFrame holding both columns.
+        label_col: The label column.
+        prediction_col: The prediction column.
+
+    Returns:
+        ``[label, prediction]`` column expressions.
+    """
+    types = [dataframe.schema[col].dataType for col in (label_col, prediction_col)]
+    if any(isinstance(t, (NumericType, BooleanType)) for t in types):
+        return [as_number(dataframe, col) for col in (label_col, prediction_col)]
+    return [F.col(_quoted(col)) for col in (label_col, prediction_col)]
