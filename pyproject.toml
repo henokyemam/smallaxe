@@ -39,7 +39,8 @@ dependencies = [
     # Imported by smallaxe.search and by pyspark.ml. 1.17.3: the first release with
     # Python 3.8 wheels, and it has numpy.random.default_rng.
     "numpy>=1.17.3",
-    # pyspark.ml.functions (vector_to_array) imports pandas from PySpark 3.4.
+    # Imported by smallaxe.auto (the comparison table), and by pyspark.ml.functions
+    # (vector_to_array) from PySpark 3.4.
     "pandas>=1.0.0",
     # hyperopt 0.3.0 needs Python 3.10, so 0.2.7 is the newest release before it. 0.2.x
     # imports pkg_resources, which setuptools 82 removed; 0.3.0 does not.
@@ -135,10 +136,11 @@ warn_return_any = true
 warn_unused_configs = true
 
 [[tool.mypy.overrides]]
-# Imported directly but untyped: hyperopt and py4j ship no stubs or py.typed, and
+# Imported directly but untyped: hyperopt, py4j and pandas (smallaxe.auto builds its
+# comparison table with it) ship no py.typed, and pandas-stubs is not a dependency;
 # catboost_spark (a JVM package's Python half) is not installed where the check runs.
 # SynapseML and xgboost.spark are resolved from strings at runtime, so mypy never sees them.
-module = ["hyperopt", "hyperopt.*", "py4j", "py4j.*", "catboost_spark"]
+module = ["hyperopt", "hyperopt.*", "py4j", "py4j.*", "pandas", "pandas.*", "catboost_spark"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]
