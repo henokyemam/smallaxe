@@ -5,7 +5,7 @@ from typing import Any, Dict, List, Set, Tuple
 from pyspark.sql import Column, DataFrame
 from pyspark.sql import functions as F
 
-from smallaxe import _artifact
+from smallaxe import _artifact, _deprecation
 from smallaxe.exceptions import (
     ColumnNotFoundError,
     ModelNotFittedError,
@@ -19,8 +19,8 @@ from smallaxe.preprocessing._common import (
     unique_column_name,
 )
 
-VALID_METHODS = {"onehot", "label"}
-VALID_HANDLE_RARE = {"other", "keep", "error"}
+_VALID_METHODS = {"onehot", "label"}
+_VALID_HANDLE_RARE = {"other", "keep", "error"}
 
 OTHER = "__OTHER__"
 UNKNOWN = "__UNKNOWN__"
@@ -74,8 +74,8 @@ class Encoder:
 
     Example:
         >>> encoder = Encoder(method='onehot', max_categories=50)
-        >>> encoder.fit(df, categorical_cols=['category', 'color'])
-        >>> encoded_df = encoder.transform(df)
+        >>> encoder.fit(dataframe, categorical_cols=['category', 'color'])
+        >>> encoded_df = encoder.transform(dataframe)
     """
 
     def __init__(
@@ -118,17 +118,17 @@ class Encoder:
 
     def _validate_method(self, method: str) -> None:
         """Validate the encoding method."""
-        if method not in VALID_METHODS:
+        if method not in _VALID_METHODS:
             raise ValidationError(
-                f"Invalid method '{method}'. Must be one of {sorted(VALID_METHODS)}."
+                f"Invalid method '{method}'. Must be one of {sorted(_VALID_METHODS)}."
             )
 
     def _validate_handle_rare(self, handle_rare: str) -> None:
         """Validate the handle_rare option."""
-        if handle_rare not in VALID_HANDLE_RARE:
+        if handle_rare not in _VALID_HANDLE_RARE:
             raise ValidationError(
                 f"Invalid handle_rare '{handle_rare}'. Must be one of "
-                f"{sorted(VALID_HANDLE_RARE)}."
+                f"{sorted(_VALID_HANDLE_RARE)}."
             )
 
     def _validate_max_categories(self, max_categories: int) -> None:
@@ -140,18 +140,18 @@ class Encoder:
 
     def _validate_columns(
         self,
-        df: DataFrame,
+        dataframe: DataFrame,
         categorical_cols: List[str],
     ) -> None:
         """Validate that all specified columns exist in the DataFrame."""
-        available_columns = df.columns
+        available_columns = dataframe.columns
         for col in categorical_cols:
             if col not in available_columns:
                 raise ColumnNotFoundError(column=col, available_columns=available_columns)
 
     def _get_top_categories(
         self,
-        df: DataFrame,
+        dataframe: DataFrame,
         col: str,
     ) -> List[str]:
         """Return the column's categories, most frequent first.
@@ -161,7 +161,7 @@ class Encoder:
         order does not depend on partitioning.
         """
         category_counts = (
-            df.select(column_ref(col).cast("string").alias("category"))
+            dataframe.select(column_ref(col).cast("string").alias("category"))
             .filter(F.col("category").isNotNull())
             .groupBy("category")
             .count()
@@ -172,11 +172,11 @@ class Encoder:
 
     def _build_category_mapping(
         self,
-        df: DataFrame,
+        dataframe: DataFrame,
         col: str,
     ) -> Dict[str, int]:
         """Build category to index mapping for a column."""
-        categories = self._get_top_categories(df, col)
+        categories = self._get_top_categories(dataframe, col)
         reserved = [cat for cat in categories if cat in _RESERVED]
         if reserved:
             raise ValidationError(
@@ -207,15 +207,16 @@ class Encoder:
 
         return mapping
 
+    @_deprecation.df_keyword
     def fit(
         self,
-        df: DataFrame,
+        dataframe: DataFrame,
         categorical_cols: List[str],
     ) -> "Encoder":
         """Fit the encoder by learning category mappings from the DataFrame.
 
         Args:
-            df: PySpark DataFrame to fit on.
+            dataframe: PySpark DataFrame to fit on.
             categorical_cols: List of categorical column names to encode.
 
         Returns:
@@ -230,8 +231,8 @@ class Encoder:
         if not categorical_cols:
             raise ValidationError("categorical_cols cannot be empty for Encoder.")
 
-        self._validate_columns(df, categorical_cols)
-        mappings = {col: self._build_category_mapping(df, col) for col in categorical_cols}
+        self._validate_columns(dataframe, categorical_cols)
+        mappings = {col: self._build_category_mapping(dataframe, col) for col in categorical_cols}
 
         self._categorical_cols = list(categorical_cols)
         self._category_mappings = mappings
@@ -296,11 +297,12 @@ class Encoder:
             layout[col] = columns
         return layout
 
-    def transform(self, df: DataFrame) -> DataFrame:
+    @_deprecation.df_keyword
+    def transform(self, dataframe: DataFrame) -> DataFrame:
         """Transform the DataFrame by encoding categorical columns.
 
         Args:
-            df: PySpark DataFrame to transform.
+            dataframe: PySpark DataFrame to transform.
 
         Returns:
             DataFrame with encoded categorical columns (see the class docstring for the
@@ -318,21 +320,23 @@ class Encoder:
         if not self._is_fitted:
             raise ModelNotFittedError("Encoder has not been fitted. Call fit() before transform().")
 
-        self._validate_columns(df, self._categorical_cols)
+        self._validate_columns(dataframe, self._categorical_cols)
 
         if self._method == "label":
-            return self._transform_label(df)
+            return self._transform_label(dataframe)
 
-        return self._transform_onehot(df)
+        return self._transform_onehot(dataframe)
 
-    def _transform_label(self, df: DataFrame) -> DataFrame:
+    def _transform_label(self, dataframe: DataFrame) -> DataFrame:
         """Transform using label encoding."""
-        return df.withColumns({col: self._index_expr(col) for col in self._categorical_cols})
+        return dataframe.withColumns({col: self._index_expr(col) for col in self._categorical_cols})
 
-    def _transform_onehot(self, df: DataFrame) -> DataFrame:
+    def _transform_onehot(self, dataframe: DataFrame) -> DataFrame:
         """Transform using one-hot encoding built from the Encoder's own mapping."""
         layout = self._onehot_layout()
-        taken = list(df.columns) + [name for columns in layout.values() for name, _ in columns]
+        taken = list(dataframe.columns) + [
+            name for columns in layout.values() for name, _ in columns
+        ]
         index_cols: Dict[str, str] = {}
         for col in self._categorical_cols:
             name = unique_column_name(f"__{col}_index", taken)
@@ -340,7 +344,7 @@ class Encoder:
             index_cols[col] = name
 
         encoded = {col.lower() for col in self._categorical_cols}
-        kept = {col.lower(): col for col in df.columns if col.lower() not in encoded}
+        kept = {col.lower(): col for col in dataframe.columns if col.lower() not in encoded}
         clashes = [
             (name, kept[name.lower()])
             for columns in layout.values()
@@ -355,7 +359,7 @@ class Encoder:
                 "column before transform."
             )
 
-        result_df = df.withColumns(
+        result_df = dataframe.withColumns(
             {index_cols[col]: self._index_expr(col) for col in self._categorical_cols}
         )
         # Drop the inputs before adding the outputs, so an output named like an encoded
@@ -371,22 +375,23 @@ class Encoder:
 
         return result_df.drop(*index_cols.values())
 
+    @_deprecation.df_keyword
     def fit_transform(
         self,
-        df: DataFrame,
+        dataframe: DataFrame,
         categorical_cols: List[str],
     ) -> DataFrame:
         """Fit and transform in a single step.
 
         Args:
-            df: PySpark DataFrame to fit and transform.
+            dataframe: PySpark DataFrame to fit and transform.
             categorical_cols: List of categorical column names to encode.
 
         Returns:
             DataFrame with encoded categorical columns.
         """
-        self.fit(df, categorical_cols)
-        return self.transform(df)
+        self.fit(dataframe, categorical_cols)
+        return self.transform(dataframe)
 
     def save(self, path: str) -> None:
         """Save the fitted encoder as a directory holding ``metadata.json``.
@@ -550,3 +555,20 @@ class Encoder:
             return list(self._categorical_cols)
         layout = self._onehot_layout()
         return [name for col in self._categorical_cols for name, _ in layout[col]]
+
+
+# Deprecated public names, removed in smallaxe 1.0.
+_MOVED = {
+    "VALID_METHODS": (
+        "The methods are listed in the Encoder docstring; an invalid one raises "
+        "ValidationError.",
+        lambda: _VALID_METHODS,
+    ),
+    "VALID_HANDLE_RARE": (
+        "The handle_rare options are listed in the Encoder docstring; an invalid one raises "
+        "ValidationError.",
+        lambda: _VALID_HANDLE_RARE,
+    ),
+}
+__getattr__ = _deprecation.module_getattr(__name__, _MOVED)
+__dir__ = _deprecation.module_dir(globals(), _MOVED)

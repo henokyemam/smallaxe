@@ -18,7 +18,7 @@ from smallaxe.training.algorithm import (
     Algorithm,
     Dependency,
     Param,
-    estimator_kwargs,
+    _estimator_kwargs,
 )
 from smallaxe.training.base import Classifier, Model, Regressor
 from tests.fakes import FakeEstimator, columns_for, install_fake_modules
@@ -47,48 +47,48 @@ def _record(**overrides) -> Algorithm:
 
 class TestEstimatorKwargs:
     def test_defaults_translate_to_spark_names(self):
-        ctor, setters = estimator_kwargs(_record(), "simple_regression", {}, {})
+        ctor, setters = _estimator_kwargs(_record(), "simple_regression", {}, {})
         assert ctor == {"numTrees": 10, "max_depth": 5}
         assert setters == []
 
     def test_user_values_replace_defaults(self):
-        ctor, _ = estimator_kwargs(_record(), "simple_regression", {"n_estimators": 50}, {})
+        ctor, _ = _estimator_kwargs(_record(), "simple_regression", {"n_estimators": 50}, {})
         assert ctor["numTrees"] == 50
 
     def test_none_is_never_forwarded(self):
-        ctor, setters = estimator_kwargs(_record(), "binary", {"max_depth": None}, {})
+        ctor, setters = _estimator_kwargs(_record(), "binary", {"max_depth": None}, {})
         assert "max_depth" not in ctor
         assert "classWeight" not in ctor
         assert setters == []
 
     def test_setter_params_are_returned_separately(self):
-        ctor, setters = estimator_kwargs(_record(), "simple_regression", {"seed": 7}, {})
+        ctor, setters = _estimator_kwargs(_record(), "simple_regression", {"seed": 7}, {})
         assert "seed" not in ctor
         assert setters == [("setSeed", 7)]
 
     def test_params_are_visible_per_task(self):
-        ctor, _ = estimator_kwargs(_record(), "binary", {"weight": 2.0}, {})
+        ctor, _ = _estimator_kwargs(_record(), "binary", {"weight": 2.0}, {})
         assert ctor["classWeight"] == 2.0
-        ctor, _ = estimator_kwargs(_record(), "simple_regression", {"weight": 2.0}, {})
+        ctor, _ = _estimator_kwargs(_record(), "simple_regression", {"weight": 2.0}, {})
         assert "classWeight" not in ctor
 
     def test_task_params_override_user_params(self):
         record = _record(params=(Param("objective", "loss", "regression"),))
-        ctor, _ = estimator_kwargs(record, "binary", {"objective": "poisson"}, {})
+        ctor, _ = _estimator_kwargs(record, "binary", {"objective": "poisson"}, {})
         assert ctor["objective"] == "binary"
 
     def test_columns_win_over_everything(self):
         record = _record(params=(Param("label", "label", "wrong", spark="labelCol"),))
-        ctor, _ = estimator_kwargs(record, "simple_regression", {}, {"label": "y"})
+        ctor, _ = _estimator_kwargs(record, "simple_regression", {}, {"label": "y"})
         assert ctor["labelCol"] == "y"
 
     def test_unmapped_column_roles_are_ignored(self):
-        ctor, _ = estimator_kwargs(_record(), "binary", {}, columns_for("binary"))
+        ctor, _ = _estimator_kwargs(_record(), "binary", {}, columns_for("binary"))
         assert ctor["featuresCol"] == "features"
         assert "probability" not in ctor.values()
 
     def test_cols_none_ignores_columns(self):
-        ctor, _ = estimator_kwargs(_record(cols=None), "binary", {}, columns_for("binary"))
+        ctor, _ = _estimator_kwargs(_record(cols=None), "binary", {}, columns_for("binary"))
         assert "features" not in ctor.values()
 
 
@@ -139,11 +139,11 @@ class TestRegistry:
     @pytest.mark.parametrize("name", algorithm.names())
     @pytest.mark.parametrize("task_type", ["regression", "classification"])
     def test_legacy_names_round_trip(self, name, task_type):
-        legacy = algorithm.legacy_class_name(name, task_type)
-        assert algorithm.LEGACY_CLASS_NAMES[legacy] == (name, task_type)
+        legacy = algorithm._legacy_class_name(name, task_type)
+        assert algorithm._LEGACY_CLASS_NAMES[legacy] == (name, task_type)
 
     def test_legacy_map_covers_all_eight_classes(self):
-        assert len(algorithm.LEGACY_CLASS_NAMES) == 2 * len(algorithm.names())
+        assert len(algorithm._LEGACY_CLASS_NAMES) == 2 * len(algorithm.names())
 
 
 @pytest.mark.parametrize("task", TASKS)
@@ -158,7 +158,7 @@ class TestRecordTranslation:
         return record
 
     def test_defaults_reach_the_estimator_under_spark_names(self, record, task):
-        ctor, setters = estimator_kwargs(record, task, {}, columns_for(task))
+        ctor, setters = _estimator_kwargs(record, task, {}, columns_for(task))
         forwarded = set(ctor) | {setter for setter, _ in setters}
         for param in record.visible_params(task):
             key = param.setter or param.spark or param.name
@@ -168,25 +168,27 @@ class TestRecordTranslation:
                 assert key in forwarded, (record.name, param.name)
 
     def test_column_names_are_wired(self, record, task):
-        ctor, _ = estimator_kwargs(record, task, {}, columns_for(task))
+        ctor, _ = _estimator_kwargs(record, task, {}, columns_for(task))
         if record.cols is None:
             return
         for role, column in columns_for(task).items():
             assert ctor[record.cols[role]] == column
 
     def test_task_params_are_present(self, record, task):
-        ctor, _ = estimator_kwargs(record, task, {}, columns_for(task))
+        ctor, _ = _estimator_kwargs(record, task, {}, columns_for(task))
         for key, value in record.task_params.get(task, {}).items():
             assert ctor[key] == value
 
     def test_model_builds_the_estimator(self, record, task):
         kind = Classifier if task in CLASSIFICATION_TASKS else Regressor
         model = kind(record, task)
-        model.set_param({"n_estimators": 3, "seed": 11})
+        model.set_params(n_estimators=3, seed=11)
         estimator = model._create_spark_estimator(label_col="y")
 
         assert isinstance(estimator, FakeEstimator)
-        ctor, setters = estimator_kwargs(record, task, model.get_params(), model._column_names("y"))
+        ctor, setters = _estimator_kwargs(
+            record, task, model.get_params(), model._column_names("y")
+        )
         assert estimator.kwargs == ctor
         assert all(call in estimator.calls for call in setters)
         if record.cols is None:
@@ -204,13 +206,13 @@ class TestXGBoost:
     def test_n_estimators_is_forwarded_as_n_estimators(self, task):
         """xgboost.spark reads the round count from n_estimators; num_round is ignored."""
         kind = Classifier if task in CLASSIFICATION_TASKS else Regressor
-        model = kind("xgboost", task).set_param({"n_estimators": 7})
+        model = kind("xgboost", task).set_params(n_estimators=7)
         estimator = model._create_spark_estimator(label_col="y")
         assert estimator.kwargs["n_estimators"] == 7
         assert "num_round" not in estimator.kwargs
 
     def test_seed_is_forwarded_as_seed(self):
-        estimator = Regressor("xgboost").set_param({"seed": 3})._create_spark_estimator("y")
+        estimator = Regressor("xgboost").set_params(seed=3)._create_spark_estimator("y")
         assert estimator.kwargs["seed"] == 3
 
 
@@ -232,7 +234,7 @@ class TestLightGBM:
         assert "objective" not in estimator.kwargs
 
     def test_seed_goes_through_setter(self):
-        estimator = Regressor("lightgbm").set_param({"seed": 3})._create_spark_estimator("y")
+        estimator = Regressor("lightgbm").set_params(seed=3)._create_spark_estimator("y")
         assert ("setSeed", 3) in estimator.calls
         assert "seed" not in estimator.kwargs
 
@@ -255,7 +257,7 @@ class TestCatBoost:
         assert "scale_pos_weight" in Classifier("catboost").params
         assert "scale_pos_weight" not in Regressor("catboost").params
         with pytest.raises(ValidationError, match="Invalid parameter"):
-            Regressor("catboost").set_param({"scale_pos_weight": 2.0})
+            Regressor("catboost").set_params(scale_pos_weight=2.0)
 
     def test_optional_params_are_not_forwarded_when_unset(self):
         estimator = Regressor("catboost")._create_spark_estimator(label_col="y")
@@ -336,7 +338,7 @@ class TestModelConstruction:
         assert model.default_params["n_estimators"] == 20
 
     def test_clone_copies_algorithm_task_and_params(self):
-        model = Classifier("random_forest", "multiclass").set_param({"max_depth": 9})
+        model = Classifier("random_forest", "multiclass").set_params(max_depth=9)
         clone = model.clone()
         assert type(clone) is Classifier
         assert clone.algorithm is model.algorithm
@@ -356,14 +358,14 @@ class TestDeprecatedAliases:
     @pytest.mark.parametrize(
         "legacy, factory",
         [
-            (name, "Regressors" if kind == "regression" else "Classifiers")
-            for name, (_, kind) in algorithm.LEGACY_CLASS_NAMES.items()
+            (name, "regressors" if kind == "regression" else "classifiers")
+            for name, (_, kind) in algorithm._LEGACY_CLASS_NAMES.items()
         ],
     )
     def test_alias_warns_and_binds_its_algorithm(self, monkeypatch, legacy, factory):
         from smallaxe import training
 
-        algorithm_name, task_type = algorithm.LEGACY_CLASS_NAMES[legacy]
+        algorithm_name, task_type = algorithm._LEGACY_CLASS_NAMES[legacy]
         install_fake_modules(monkeypatch, algorithm.get(algorithm_name))
         alias = getattr(training, legacy)
 

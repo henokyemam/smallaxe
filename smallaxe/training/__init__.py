@@ -7,15 +7,9 @@ which both patch pyspark.ml.wrapper process-wide, always in the order
 ``algorithm._PATCHES_PYSPARK`` fixes.
 """
 
-from smallaxe.training import algorithm
-from smallaxe.training.base import (
-    BaseClassifier,
-    BaseModel,
-    BaseRegressor,
-    Classifier,
-    Model,
-    Regressor,
-)
+from smallaxe import _deprecation
+from smallaxe.training import algorithm, base, classifiers, regressors
+from smallaxe.training.base import Classifier, Model, Regressor
 from smallaxe.training.catboost import CatBoostClassifier, CatBoostRegressor
 from smallaxe.training.classifiers import Classifiers
 from smallaxe.training.lightgbm import LightGBMClassifier, LightGBMRegressor
@@ -25,15 +19,15 @@ from smallaxe.training.xgboost import XGBoostClassifier, XGBoostRegressor
 
 __all__ = [
     "algorithm",
-    "BaseModel",
-    "BaseRegressor",
-    "BaseClassifier",
     "Model",
     "Regressor",
     "Classifier",
+    "regressors",
+    "classifiers",
+    # Deprecated factory classes, removed in smallaxe 1.0: use the regressors / classifiers functions.
     "Regressors",
     "Classifiers",
-    # Deprecated 0.8.x class aliases, removed in 1.0.
+    # Deprecated 0.8.x class aliases, removed in smallaxe 1.0.
     "RandomForestRegressor",
     "RandomForestClassifier",
     "XGBoostRegressor",
@@ -43,3 +37,13 @@ __all__ = [
     "CatBoostRegressor",
     "CatBoostClassifier",
 ]
+
+
+# Deprecated exports, removed in smallaxe 1.0. The classes stay in smallaxe.training.base.
+_MOVED = {
+    "BaseModel": ("Use smallaxe.training.Model instead.", lambda: base.BaseModel),
+    "BaseRegressor": ("Use smallaxe.training.Regressor instead.", lambda: base.BaseRegressor),
+    "BaseClassifier": ("Use smallaxe.training.Classifier instead.", lambda: base.BaseClassifier),
+}
+__getattr__ = _deprecation.module_getattr(__name__, _MOVED)
+__dir__ = _deprecation.module_dir(globals(), _MOVED)

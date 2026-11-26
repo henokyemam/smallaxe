@@ -146,7 +146,7 @@
   `pipeline.skipped_steps` names it; it is saved and loaded as skipped. The `Scaler` and
   `Encoder` are fitted on the lists as given: a listed column that is missing raises
   `ColumnNotFoundError` instead of being dropped from the list without a message.
-- **A duck-typed preprocessing step is fitted as `fit(df, numerical_cols=...,
+- **A duck-typed preprocessing step is fitted as `fit(dataframe, numerical_cols=...,
   categorical_cols=...)` and nothing else.** Errors from its `fit` propagate; 0.10 caught
   `TypeError`, retried `fit(df)`, and on a second `TypeError` left the step unfitted
   without a message.
@@ -180,7 +180,7 @@
 - `smallaxe.load_model(path)` loads any saved model, whatever its algorithm, returning the
   `Regressor` or `Classifier` it was, for artifacts of this and every earlier release.
   `import smallaxe` still imports no training code; it is imported on the first call.
-- `model.evaluate(df, label_col=None)` scores a fitted model on any DataFrame with the
+- `model.evaluate(dataframe, label_col=None)` scores a fitted model on any DataFrame with the
   metrics its validation computes for its task (the same keys as `validation_scores`,
   without `validation_type` / `test_size` / fold bookkeeping), undefined metrics as
   `None`. `label_col` defaults to the label the model was fitted with. It raises
@@ -189,8 +189,8 @@
 - `Encoder.output_cols`: the columns `transform` writes for the encoded features, in
   order (the encoded columns themselves for `'label'`, the generated columns for
   `'onehot'`).
-- `Pipeline.predict_proba(df, output_col="probability")` and
-  `Pipeline.evaluate(df, label_col=None)` apply the preprocessing steps and delegate to
+- `Pipeline.predict_proba(dataframe, output_col="probability")` and
+  `Pipeline.evaluate(dataframe, label_col=None)` apply the preprocessing steps and delegate to
   the model; `Pipeline.predict` gains `output_col` (default `"predict_label"`, as
   `model.predict`). They raise `ValidationError` on a pipeline without a model, and
   `predict_proba` does on a regressor. `pipeline.feature_cols` and
@@ -200,10 +200,86 @@
   unversioned model, pipeline, Imputer and Scaler layouts of 0.10 and earlier), choosing
   by the kind the artifact records. `load_model` and `load_pipeline` reject other kinds.
   `import smallaxe` still imports neither.
+- `model.set_params(**params)`, `regressors.<algorithm>()` / `classifiers.<algorithm>()`
+  and their `load`, `algorithms` and `available_models`, `dataset_info(...)` returning a
+  dict and its `verbose` argument: see Deprecated below.
 
+### Deprecated
+
+0.11.0 is the release that warns: every spelling below still works exactly as in 0.10,
+emits one `DeprecationWarning` that names its replacement and says it is removed in
+smallaxe 1.0, attributed to the caller's line, and is removed in 1.0. smallaxe's own
+code, docs and examples use only the replacements.
+
+- `model.set_param({...})`: use `model.set_params(**params)`, which validates the same
+  way and returns the model.
+- The `df` argument: every public callable that takes a DataFrame now calls it
+  `dataframe` (`optimize.run` already did). Positional calls are unaffected; `df=` by
+  keyword still works and warns, and passing both `df=` and `dataframe` raises
+  `ValidationError`. Renamed in `Model.fit` / `predict` / `evaluate`,
+  `Classifier.predict_proba`, `Pipeline.fit` / `transform` / `fit_transform` /
+  `predict` / `predict_proba` / `evaluate`, `Imputer` / `Scaler` / `Encoder` `fit` /
+  `transform` / `fit_transform`, and every function in `smallaxe.metrics` (`mse`,
+  `rmse`, `mae`, `r2`, `mape`, `accuracy`, `precision`, `recall`, `f1_score`,
+  `multiclass_scores`, `auc_roc`, `auc_pr`, `log_loss`).
+- `stratified=` in `Model.fit` and `optimize.run`: it has no effect (splits hash each
+  row's content, which is label-independent, so every class splits in the same
+  proportion in expectation) and is removed in 1.0. Passing any value other than None
+  warns; results are unchanged.
+- `datasets.dataset_info(name)` printing by default: it now also returns the
+  description as a dict (the 1.0 contract). Pass `verbose=False` to only get the dict,
+  or `verbose=True` to keep printing; neither warns. An unknown name raises
+  `ValidationError` instead of `ValueError`; in 0.11 the error is also a `ValueError`,
+  so existing `except ValueError` keeps working until 1.0.
+- `Regressors` / `Classifiers`: use the module functions `regressors.random_forest()`,
+  `regressors.xgboost()`, `regressors.lightgbm()`, `regressors.catboost()`,
+  `regressors.load(path)` and `regressors.available_models()`, and the same in
+  `classifiers` (constructors keep `task=`), after
+  `from smallaxe.training import regressors, classifiers`. Every static method of the
+  two classes warns and delegates; importing the classes does not warn.
+  `Regressors.list_models()` / `Classifiers.list_models()` (the 0.8.x class names of
+  the installed algorithms): use `regressors.algorithms()` (all algorithm names) and
+  `regressors.available_models()` (which are installed). The module
+  `available_models()` has no `class_name` entry; the deprecated class method still
+  returns it.
+- `metrics.log_loss(dataframe, label_col, probability_col, eps)` with `eps`
+  positional: `eps` is keyword-only (`log_loss(..., eps=1e-6)`).
+- Names that become private, with what to use instead. Each old name still imports
+  (module `__getattr__`) and warns when read:
+  - `smallaxe.training.BaseModel` / `BaseRegressor` / `BaseClassifier`: use
+    `smallaxe.training.Model` / `Regressor` / `Classifier`. They are no longer in
+    `smallaxe.training.__all__`; the classes stay in `smallaxe.training.base`.
+  - `smallaxe.training.base.infer_feature_cols`, `warn_ignored_cols`,
+    `check_training_data`: `Model.fit` does each of these.
+  - `smallaxe.training.mixins.validation_mixin.hashable_columns`, `split_hash`: use
+    `fit(validation=..., fold_key=...)`; `resolve_split_seed`: use `smallaxe.set_seed()`
+    or the model's `seed`.
+  - `smallaxe.training.algorithm.resolve`, `estimator_kwargs`, `legacy_class_name`,
+    `package_version`, `COLUMN_ROLES`, `LEGACY_CLASS_NAMES`. `names`, `get`,
+    `Algorithm`, `Param`, `Dependency` and the task constants stay public.
+  - `smallaxe.search.optimize.HYPEROPT_INSTALL_HINT`, `MAXIMIZE_METRICS`,
+    `MINIMIZE_METRICS`, `VALID_METRICS` (use `smallaxe.metrics.TASK_METRICS`), and
+    `HYPEROPT_AVAILABLE` in `smallaxe.search` and `smallaxe.search.optimize` (hyperopt
+    is a required dependency, so it is always True). `smallaxe.search.__all__` no longer
+    lists it.
+  - `smallaxe.training.catboost.is_catboost_available`, `catboost_install_hint`, and
+    `XGBOOST_AVAILABLE`, `LIGHTGBM_AVAILABLE`, `CATBOOST_AVAILABLE` in the algorithm
+    modules: use `smallaxe.training.algorithm.get(name).available()` or
+    `regressors.available_models()`.
+  - `VALID_METHODS` in `smallaxe.preprocessing.encoder` and `scaler`, and
+    `VALID_HANDLE_RARE` in `encoder`.
+- The earlier deprecations (the eight 0.8.x class aliases, `set_cache_strategy` /
+  `get_cache_strategy`, `set_spark_session` / `get_spark_session`) are unchanged, and
+  their messages now all say "removed in smallaxe 1.0"; the class aliases name the
+  `regressors` / `classifiers` function that replaces them.
 
 ### Fixed
 
+- **smallaxe's warnings point at the caller's line.** The feature-inference, caching,
+  k-fold undefined-metric, legacy multiclass-score and deprecation warnings are
+  attributed to the first frame outside smallaxe, so one raised inside a pipeline or a
+  search points at the user's `pipeline.fit(...)` / `optimize.run(...)` line instead of
+  a line in smallaxe.
 - **A pipeline with a model step can be saved and loaded.** 0.10's `Pipeline.load` had no
   way to load a model step, so such a pipeline could be saved but never loaded.
 - `Pipeline.save` and `Pipeline.load` wrote and read with local `open()` / `os`, so a

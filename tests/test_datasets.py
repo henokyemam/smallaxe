@@ -12,6 +12,7 @@ from smallaxe.datasets import (
     load_sample_classification,
     load_sample_regression,
 )
+from smallaxe.exceptions import ValidationError
 
 
 class TestRegressionDataset:
@@ -265,13 +266,13 @@ class TestRandomState:
 
     def test_loading_does_not_fix_the_unseeded_split_seed(self, spark_session):
         """The old global reseed made every later unseeded fit draw the same split."""
-        from smallaxe.training.mixins.validation_mixin import resolve_split_seed
+        from smallaxe.training.mixins.validation_mixin import _resolve_split_seed
 
         smallaxe.set_seed(None)
         drawn = set()
         for _ in range(3):
             load_sample_regression(spark_session, n_rows=5, seed=42)
-            drawn.add(resolve_split_seed())
+            drawn.add(_resolve_split_seed())
         assert len(drawn) == 3
 
 
@@ -280,7 +281,7 @@ class TestDatasetInfo:
 
     def test_dataset_info_regression(self, capsys):
         """Test that dataset_info prints regression info."""
-        dataset_info("regression")
+        dataset_info("regression", verbose=True)
         captured = capsys.readouterr()
 
         assert "Housing Prices" in captured.out
@@ -290,7 +291,7 @@ class TestDatasetInfo:
 
     def test_dataset_info_classification(self, capsys):
         """Test that dataset_info prints classification info."""
-        dataset_info("classification")
+        dataset_info("classification", verbose=True)
         captured = capsys.readouterr()
 
         assert "Customer Churn" in captured.out
@@ -299,23 +300,41 @@ class TestDatasetInfo:
         assert "LABEL COLUMN" in captured.out
 
     def test_dataset_info_invalid_raises_error(self):
-        """Test that invalid dataset name raises ValueError."""
-        with pytest.raises(ValueError) as exc_info:
-            dataset_info("invalid")
+        """Test that invalid dataset name raises ValidationError."""
+        with pytest.raises(ValidationError) as exc_info:
+            dataset_info("invalid", verbose=True)
 
         assert "Unknown dataset" in str(exc_info.value)
         assert "invalid" in str(exc_info.value)
 
     def test_dataset_info_regression_contains_usage(self, capsys):
         """Test that regression info contains usage example."""
-        dataset_info("regression")
+        dataset_info("regression", verbose=True)
         captured = capsys.readouterr()
 
         assert "load_sample_regression" in captured.out
 
     def test_dataset_info_classification_contains_usage(self, capsys):
         """Test that classification info contains usage example."""
-        dataset_info("classification")
+        dataset_info("classification", verbose=True)
         captured = capsys.readouterr()
 
         assert "load_sample_classification" in captured.out
+
+    def test_dataset_info_returns_the_description(self):
+        """dataset_info returns a fresh dict describing the dataset."""
+        info = dataset_info("classification", verbose=False)
+
+        assert info["title"] == "Customer Churn"
+        assert info["task"] == "binary"
+        assert list(info["columns"]) == [
+            "tenure",
+            "monthly_charges",
+            "total_charges",
+            "contract",
+            "payment_method",
+            "churn",
+        ]
+        assert info["columns"]["churn"]["type"] == "int"
+        info["label"] = "changed"
+        assert dataset_info("classification", verbose=False)["label"] == "churn"

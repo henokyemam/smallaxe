@@ -69,7 +69,7 @@ from smallaxe.exceptions import DependencyError, ValidationError
 from smallaxe.pipeline import Pipeline
 from smallaxe.preprocessing import Encoder, Imputer, Scaler
 from smallaxe.search import optimize
-from smallaxe.training import Classifiers, Regressors
+from smallaxe.training import classifiers, regressors
 
 SEED = 42
 smallaxe.set_seed(SEED)
@@ -131,8 +131,8 @@ ENV = {
     "sklearn": ver("sklearn"),
     "executors": spark.sparkContext._jsc.sc().getExecutorMemoryStatus().size() - 1,
     "default_parallelism": spark.sparkContext.defaultParallelism,
-    "regressors_available": {k: v["available"] for k, v in Regressors.available_models().items()},
-    "classifiers_available": {k: v["available"] for k, v in Classifiers.available_models().items()},
+    "regressors_available": {k: v["available"] for k, v in regressors.available_models().items()},
+    "classifiers_available": {k: v["available"] for k, v in classifiers.available_models().items()},
 }
 print(json.dumps(ENV, indent=1))
 
@@ -334,8 +334,8 @@ PARAMS = {
 def make(algo, ds, **overrides):
     params = {**PARAMS[algo], **overrides}
     if ds.task == "simple_regression":
-        return getattr(Regressors, algo)(**params)
-    return getattr(Classifiers, algo)(task=ds.task, **params)
+        return getattr(regressors, algo)(**params)
+    return getattr(classifiers, algo)(task=ds.task, **params)
 
 
 def prep_steps(encoder_method="onehot"):
@@ -605,7 +605,6 @@ def kfold_check(algo, ds, n_folds=3):
         feature_cols=ds.feats,
         validation="kfold",
         n_folds=n_folds,
-        stratified=True,
         cache_strategy="disk",
     )
     s = m.validation_scores
@@ -725,7 +724,7 @@ def persist_check(algo, ds):
     m = fitted(algo, ds)
     path = f"{ART}/models/{algo}_{ds.key}"
     m.save(path)
-    factory = Regressors if ds.task == "simple_regression" else Classifiers
+    factory = regressors if ds.task == "simple_regression" else classifiers
     loaded = factory.load(path)
     assert type(loaded) is type(m), f"{type(loaded).__name__} != {type(m).__name__}"
     assert loaded._feature_cols == m._feature_cols and loaded.get_params() == m.get_params()

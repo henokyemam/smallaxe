@@ -68,14 +68,17 @@ def test_importing_smallaxe_alone_stays_light():
     ],
 )
 def test_availability_flags_are_importable_and_current(monkeypatch, module, flag, name):
+    """The deprecated flags still import, warn, and are probed on every read."""
     namespace = {}
-    exec(f"from {module} import {flag}", namespace)
+    with pytest.warns(DeprecationWarning, match=f"{flag} is deprecated"):
+        exec(f"from {module} import {flag}", namespace)
     assert namespace[flag] is algorithm.get(name).available()
 
     record = algorithm.get(name)
     estimator_module = next(iter(record.estimators.values())).rpartition(".")[0]
     monkeypatch.setitem(sys.modules, estimator_module, None)
-    assert getattr(importlib.import_module(module), flag) is False
+    with pytest.warns(DeprecationWarning, match="available_models"):
+        assert getattr(importlib.import_module(module), flag) is False
 
 
 def test_unknown_module_attribute_still_raises():

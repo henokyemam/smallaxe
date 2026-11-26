@@ -1,4 +1,7 @@
-"""Regressors / Classifiers factories: construction, availability, and loading."""
+"""The regressors / classifiers functions: construction, availability, and loading.
+
+The deprecated Regressors / Classifiers classes are tested in test_deprecations.py.
+"""
 
 import os
 import sys
@@ -7,7 +10,7 @@ import tempfile
 import pytest
 
 from smallaxe.exceptions import DependencyError, ValidationError
-from smallaxe.training import Classifier, Classifiers, Regressor, Regressors
+from smallaxe.training import Classifier, Regressor, classifiers, regressors
 
 # (factory method, estimator module, dependency package, extra) for the optional algorithms.
 OPTIONAL = [
@@ -38,54 +41,48 @@ def without_optional_algorithms(monkeypatch):
 
 class TestRegressorsFactory:
     def test_random_forest_creates_regressor(self):
-        model = Regressors.random_forest()
+        model = regressors.random_forest()
         assert isinstance(model, Regressor)
         assert model.algorithm.name == "random_forest"
         assert model.task == "simple_regression"
         assert model.task_type == "regression"
 
     def test_random_forest_with_params(self):
-        model = Regressors.random_forest(n_estimators=100, max_depth=10)
+        model = regressors.random_forest(n_estimators=100, max_depth=10)
         assert model.get_param("n_estimators") == 100
         assert model.get_param("max_depth") == 10
 
     def test_random_forest_default_params(self):
-        model = Regressors.random_forest()
+        model = regressors.random_forest()
         assert model.get_param("n_estimators") == 20
         assert model.get_param("max_depth") == 5
 
     def test_invalid_param_raises(self):
         with pytest.raises(ValidationError, match="Invalid parameter"):
-            Regressors.random_forest(not_a_param=1)
+            regressors.random_forest(not_a_param=1)
 
     def test_random_forest_fit_predict(self, regression_df):
-        model = Regressors.random_forest(n_estimators=10, seed=42)
+        model = regressors.random_forest(n_estimators=10, seed=42)
         model.fit(regression_df, label_col="target", feature_cols=["age", "income"])
 
         predictions = model.predict(regression_df)
         assert "predict_label" in predictions.columns
         assert predictions.count() == regression_df.count()
 
-    def test_list_models(self):
-        models = Regressors.list_models()
-        assert isinstance(models, list)
-        assert "RandomForestRegressor" in models
+    def test_algorithms(self):
+        assert regressors.algorithms() == ["random_forest", "xgboost", "lightgbm", "catboost"]
 
     def test_available_models_reports_optional_regressors(self):
-        models = Regressors.available_models()
+        models = regressors.available_models()
 
         assert list(models) == ["random_forest", "xgboost", "lightgbm", "catboost"]
         assert models["random_forest"] == {
-            "class_name": "RandomForestRegressor",
             "available": True,
             "dependency": None,
             "install_hint": None,
         }
-        assert models["xgboost"]["class_name"] == "XGBoostRegressor"
         assert models["xgboost"]["dependency"] == "xgboost"
-        assert models["lightgbm"]["class_name"] == "LightGBMRegressor"
         assert models["lightgbm"]["dependency"] == "synapseml"
-        assert models["catboost"]["class_name"] == "CatBoostRegressor"
         assert models["catboost"]["dependency"] == "catboost_spark"
         for name in ("xgboost", "lightgbm", "catboost"):
             assert isinstance(models[name]["available"], bool)
@@ -98,55 +95,54 @@ class TestRegressorsFactory:
         monkeypatch.setitem(sys.modules, module, None)
 
         with pytest.raises(DependencyError, match=f"{package} is not installed") as info:
-            getattr(Regressors, name)()
+            getattr(regressors, name)()
         assert extra in info.value.install_command
 
     def test_available_models_includes_install_hints_for_missing(self, without_optional_algorithms):
-        models = Regressors.available_models()
+        models = regressors.available_models()
 
         assert models["random_forest"]["available"] is True
         for name, _, package, extra in OPTIONAL:
             assert models[name]["available"] is False
             assert models[name]["dependency"] == package
             assert extra in models[name]["install_hint"]
-        assert Regressors.list_models() == ["RandomForestRegressor"]
 
     def test_load_regressor(self, regression_df):
-        model = Regressors.random_forest(n_estimators=10, seed=42)
+        model = regressors.random_forest(n_estimators=10, seed=42)
         model.fit(regression_df, label_col="target", feature_cols=["age", "income"])
 
         with tempfile.TemporaryDirectory() as tmpdir:
             save_path = os.path.join(tmpdir, "model")
             model.save(save_path)
 
-            loaded = Regressors.load(save_path)
+            loaded = regressors.load(save_path)
             assert isinstance(loaded, Regressor)
             assert loaded.algorithm.name == "random_forest"
             assert loaded.get_param("n_estimators") == 10
             assert loaded._is_fitted
 
     def test_load_regressor_can_predict(self, regression_df):
-        model = Regressors.random_forest(seed=42)
+        model = regressors.random_forest(seed=42)
         model.fit(regression_df, label_col="target", feature_cols=["age", "income"])
 
         with tempfile.TemporaryDirectory() as tmpdir:
             save_path = os.path.join(tmpdir, "model")
             model.save(save_path)
 
-            predictions = Regressors.load(save_path).predict(regression_df)
+            predictions = regressors.load(save_path).predict(regression_df)
             assert "predict_label" in predictions.columns
             assert predictions.count() == regression_df.count()
 
     def test_load_nonexistent_path_raises_error(self):
         with pytest.raises(ValidationError, match="'/nonexistent/path' does not exist"):
-            Regressors.load("/nonexistent/path")
+            regressors.load("/nonexistent/path")
 
     def test_load_directory_without_metadata_raises_error(self, tmp_path):
         with pytest.raises(ValidationError, match="expected metadata.json"):
-            Regressors.load(str(tmp_path))
+            regressors.load(str(tmp_path))
 
     def test_load_classifier_as_regressor_raises_error(self, classification_df):
-        model = Classifiers.random_forest()
+        model = classifiers.random_forest()
         model.fit(classification_df, label_col="label", feature_cols=["age", "income"])
 
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -154,31 +150,31 @@ class TestRegressorsFactory:
             model.save(save_path)
 
             with pytest.raises(ValidationError, match="not a supported regressor"):
-                Regressors.load(save_path)
+                regressors.load(save_path)
 
 
 class TestClassifiersFactory:
     def test_random_forest_creates_classifier(self):
-        model = Classifiers.random_forest()
+        model = classifiers.random_forest()
         assert isinstance(model, Classifier)
         assert model.algorithm.name == "random_forest"
         assert model.task == "binary"
         assert model.task_type == "classification"
 
     def test_random_forest_multiclass(self):
-        assert Classifiers.random_forest(task="multiclass").task == "multiclass"
+        assert classifiers.random_forest(task="multiclass").task == "multiclass"
 
     def test_invalid_task_raises(self):
         with pytest.raises(ValidationError, match="Invalid classification task"):
-            Classifiers.random_forest(task="simple_regression")
+            classifiers.random_forest(task="simple_regression")
 
     def test_random_forest_with_params(self):
-        model = Classifiers.random_forest(n_estimators=100, max_depth=10)
+        model = classifiers.random_forest(n_estimators=100, max_depth=10)
         assert model.get_param("n_estimators") == 100
         assert model.get_param("max_depth") == 10
 
     def test_random_forest_fit_predict_proba(self, classification_df):
-        model = Classifiers.random_forest(n_estimators=10, seed=42)
+        model = classifiers.random_forest(n_estimators=10, seed=42)
         model.fit(classification_df, label_col="label", feature_cols=["age", "income"])
 
         predictions = model.predict(classification_df)
@@ -187,22 +183,18 @@ class TestClassifiersFactory:
         assert "probability" in proba.columns
         assert proba.count() == classification_df.count()
 
-    def test_list_models(self):
-        assert "RandomForestClassifier" in Classifiers.list_models()
+    def test_algorithms(self):
+        assert classifiers.algorithms() == ["random_forest", "xgboost", "lightgbm", "catboost"]
 
     def test_available_models_reports_optional_classifiers(self):
-        models = Classifiers.available_models()
+        models = classifiers.available_models()
 
         assert list(models) == ["random_forest", "xgboost", "lightgbm", "catboost"]
         assert models["random_forest"] == {
-            "class_name": "RandomForestClassifier",
             "available": True,
             "dependency": None,
             "install_hint": None,
         }
-        assert models["xgboost"]["class_name"] == "XGBoostClassifier"
-        assert models["lightgbm"]["class_name"] == "LightGBMClassifier"
-        assert models["catboost"]["class_name"] == "CatBoostClassifier"
 
     @pytest.mark.parametrize("name, module, package, extra", OPTIONAL)
     def test_missing_dependency_raises_actionable_error(
@@ -211,26 +203,25 @@ class TestClassifiersFactory:
         monkeypatch.setitem(sys.modules, module, None)
 
         with pytest.raises(DependencyError, match=f"{package} is not installed") as info:
-            getattr(Classifiers, name)(task="binary")
+            getattr(classifiers, name)(task="binary")
         assert extra in info.value.install_command
 
     def test_available_models_includes_install_hints_for_missing(self, without_optional_algorithms):
-        models = Classifiers.available_models()
+        models = classifiers.available_models()
 
         for name, _, _, extra in OPTIONAL:
             assert models[name]["available"] is False
             assert extra in models[name]["install_hint"]
-        assert Classifiers.list_models() == ["RandomForestClassifier"]
 
     def test_load_classifier(self, classification_df):
-        model = Classifiers.random_forest(task="binary", n_estimators=10, seed=42)
+        model = classifiers.random_forest(task="binary", n_estimators=10, seed=42)
         model.fit(classification_df, label_col="label", feature_cols=["age", "income"])
 
         with tempfile.TemporaryDirectory() as tmpdir:
             save_path = os.path.join(tmpdir, "model")
             model.save(save_path)
 
-            loaded = Classifiers.load(save_path)
+            loaded = classifiers.load(save_path)
             assert isinstance(loaded, Classifier)
             assert loaded.algorithm.name == "random_forest"
             assert loaded.task == "binary"
@@ -242,14 +233,14 @@ class TestClassifiersFactory:
 
     def test_load_nonexistent_path_raises_error(self):
         with pytest.raises(ValidationError, match="'/nonexistent/path' does not exist"):
-            Classifiers.load("/nonexistent/path")
+            classifiers.load("/nonexistent/path")
 
     def test_load_directory_without_metadata_raises_error(self, tmp_path):
         with pytest.raises(ValidationError, match="expected metadata.json"):
-            Classifiers.load(str(tmp_path))
+            classifiers.load(str(tmp_path))
 
     def test_load_regressor_as_classifier_raises_error(self, regression_df):
-        model = Regressors.random_forest()
+        model = regressors.random_forest()
         model.fit(regression_df, label_col="target", feature_cols=["age", "income"])
 
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -257,12 +248,12 @@ class TestClassifiersFactory:
             model.save(save_path)
 
             with pytest.raises(ValidationError, match="not a supported classifier"):
-                Classifiers.load(save_path)
+                classifiers.load(save_path)
 
 
 class TestFactoryIntegration:
     def test_regressor_full_workflow(self, regression_df):
-        model = Regressors.random_forest(n_estimators=15, max_depth=6, seed=42)
+        model = regressors.random_forest(n_estimators=15, max_depth=6, seed=42)
         model.fit(
             regression_df,
             label_col="target",
@@ -278,14 +269,14 @@ class TestFactoryIntegration:
         with tempfile.TemporaryDirectory() as tmpdir:
             save_path = os.path.join(tmpdir, "model")
             model.save(save_path)
-            loaded = Regressors.load(save_path)
+            loaded = regressors.load(save_path)
 
             assert loaded.predict(regression_df).count() == original_count
             assert loaded.get_param("n_estimators") == 15
             assert loaded.get_param("max_depth") == 6
 
     def test_classifier_full_workflow(self, classification_df):
-        model = Classifiers.random_forest(task="binary", n_estimators=15, max_depth=6, seed=42)
+        model = classifiers.random_forest(task="binary", n_estimators=15, max_depth=6, seed=42)
         model.fit(
             classification_df,
             label_col="label",
@@ -301,7 +292,7 @@ class TestFactoryIntegration:
         with tempfile.TemporaryDirectory() as tmpdir:
             save_path = os.path.join(tmpdir, "model")
             model.save(save_path)
-            loaded = Classifiers.load(save_path)
+            loaded = classifiers.load(save_path)
 
             assert loaded.predict(classification_df).count() == original_count
             assert loaded.predict_proba(classification_df).count() == original_count
@@ -309,8 +300,8 @@ class TestFactoryIntegration:
             assert loaded.task == "binary"
 
     def test_model_interoperability(self, regression_df, classification_df):
-        reg_model = Regressors.random_forest(seed=42)
-        clf_model = Classifiers.random_forest(seed=42)
+        reg_model = regressors.random_forest(seed=42)
+        clf_model = classifiers.random_forest(seed=42)
         reg_model.fit(regression_df, label_col="target", feature_cols=["age", "income"])
         clf_model.fit(classification_df, label_col="label", feature_cols=["age", "income"])
 
@@ -320,10 +311,10 @@ class TestFactoryIntegration:
             reg_model.save(reg_path)
             clf_model.save(clf_path)
 
-            assert isinstance(Regressors.load(reg_path), Regressor)
-            assert isinstance(Classifiers.load(clf_path), Classifier)
+            assert isinstance(regressors.load(reg_path), Regressor)
+            assert isinstance(classifiers.load(clf_path), Classifier)
 
             with pytest.raises(ValidationError):
-                Regressors.load(clf_path)
+                regressors.load(clf_path)
             with pytest.raises(ValidationError):
-                Classifiers.load(reg_path)
+                classifiers.load(reg_path)

@@ -25,7 +25,7 @@ from pyspark.sql import functions as F  # noqa: E402
 
 import smallaxe  # noqa: E402
 from smallaxe.search import optimize  # noqa: E402
-from smallaxe.training import Classifiers  # noqa: E402
+from smallaxe.training import classifiers  # noqa: E402
 
 TITANIC_URL = "https://raw.githubusercontent.com/datasciencedojo/datasets/master/titanic.csv"
 
@@ -36,14 +36,14 @@ def load_titanic(spark: SparkSession):
     if not os.path.exists(cache):
         urllib.request.urlretrieve(TITANIC_URL, cache)
 
-    df = spark.read.csv(cache, header=True, inferSchema=True)
+    dataframe = spark.read.csv(cache, header=True, inferSchema=True)
 
     # Engineer numeric features. Encode the two key categoricals (Sex, Embarked)
     # to numeric codes and impute the missing Age/Fare/Embarked values.
-    age_median = df.approxQuantile("Age", [0.5], 0.0)[0]
-    fare_median = df.approxQuantile("Fare", [0.5], 0.0)[0]
-    df = (
-        df.withColumn("sex_code", F.when(F.col("Sex") == "male", 1).otherwise(0))
+    age_median = dataframe.approxQuantile("Age", [0.5], 0.0)[0]
+    fare_median = dataframe.approxQuantile("Fare", [0.5], 0.0)[0]
+    dataframe = (
+        dataframe.withColumn("sex_code", F.when(F.col("Sex") == "male", 1).otherwise(0))
         .withColumn(
             "embarked_code",
             F.when(F.col("Embarked") == "S", 0).when(F.col("Embarked") == "C", 1).otherwise(2),
@@ -62,7 +62,7 @@ def load_titanic(spark: SparkSession):
             "embarked_code",
         )
     )
-    return df
+    return dataframe
 
 
 def main() -> None:
@@ -76,16 +76,16 @@ def main() -> None:
     spark.sparkContext.setLogLevel("ERROR")
     smallaxe.set_seed(42)
 
-    df = load_titanic(spark)
-    n = df.count()
-    print(f"Loaded Titanic: {n} rows, columns: {df.columns}")
+    dataframe = load_titanic(spark)
+    n = dataframe.count()
+    print(f"Loaded Titanic: {n} rows, columns: {dataframe.columns}")
 
     feature_cols = ["Pclass", "sex_code", "Age", "SibSp", "Parch", "Fare", "embarked_code"]
 
     # --- Train + evaluate a Random Forest classifier (train/test split). ---
-    model = Classifiers.random_forest(task="binary", n_estimators=100, max_depth=5, seed=42)
+    model = classifiers.random_forest(task="binary", n_estimators=100, max_depth=5, seed=42)
     model.fit(
-        df,
+        dataframe,
         label_col="Survived",
         feature_cols=feature_cols,
         validation="train_test",
@@ -100,9 +100,9 @@ def main() -> None:
     # --- Save and reload; confirm identical predictions. ---
     model_dir = os.path.join(tempfile.mkdtemp(), "titanic_rf")
     model.save(model_dir)
-    loaded = Classifiers.load(model_dir)
-    before = model.predict(df).select("PassengerId", "predict_label")
-    after = loaded.predict(df).select("PassengerId", "predict_label")
+    loaded = classifiers.load(model_dir)
+    before = model.predict(dataframe).select("PassengerId", "predict_label")
+    after = loaded.predict(dataframe).select("PassengerId", "predict_label")
     mismatches = (
         before.join(after.withColumnRenamed("predict_label", "predict_label2"), "PassengerId")
         .filter(F.col("predict_label") != F.col("predict_label2"))
@@ -114,8 +114,8 @@ def main() -> None:
     from hyperopt import hp
 
     result = optimize.run(
-        Classifiers.random_forest(task="binary", seed=42),
-        df,
+        classifiers.random_forest(task="binary", seed=42),
+        dataframe,
         label_col="Survived",
         feature_cols=feature_cols,
         param_space={
@@ -137,7 +137,7 @@ def main() -> None:
     print(f"[Optimization] best params: {result.best_params}")
 
     # --- Predict with the tuned model. ---
-    preds = result.best_model.predict(df)
+    preds = result.best_model.predict(dataframe)
     survivors = preds.filter(F.col("predict_label") == 1).count()
     print(f"\n[Prediction] tuned model predicts {survivors}/{n} survivors")
 

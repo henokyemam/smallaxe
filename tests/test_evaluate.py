@@ -18,7 +18,7 @@ from smallaxe.metrics.classification import (
     recall,
 )
 from smallaxe.metrics.regression import mae, mape, mse, r2, rmse
-from smallaxe.training import Classifiers, Regressors
+from smallaxe.training import classifiers, regressors
 
 FEATURES = ["x1", "x2"]
 
@@ -54,7 +54,7 @@ def _validation_keys(model, frame, label):
 
 class TestModelEvaluate:
     def test_regression_matches_the_metric_functions(self, frame):
-        model = Regressors.random_forest(n_estimators=5, seed=1)
+        model = regressors.random_forest(n_estimators=5, seed=1)
         model.fit(frame, label_col="target", feature_cols=FEATURES)
         preds = model.predict(frame)
 
@@ -68,7 +68,7 @@ class TestModelEvaluate:
         assert set(scores) == _validation_keys(model, frame, "target")
 
     def test_binary_matches_the_metric_functions(self, frame):
-        model = Classifiers.random_forest(n_estimators=5, seed=1)
+        model = classifiers.random_forest(n_estimators=5, seed=1)
         model.fit(frame, label_col="binary", feature_cols=FEATURES)
         preds = model.predict(frame).withColumn("p1", vector_to_array("probability")[1])
 
@@ -87,7 +87,7 @@ class TestModelEvaluate:
         assert set(scores) == _validation_keys(model, frame, "binary")
 
     def test_multiclass_matches_the_metric_functions(self, frame):
-        model = Classifiers.random_forest(task="multiclass", n_estimators=5, seed=1)
+        model = classifiers.random_forest(task="multiclass", n_estimators=5, seed=1)
         model.fit(frame, label_col="multiclass", feature_cols=FEATURES)
         preds = model.predict(frame)
 
@@ -97,7 +97,7 @@ class TestModelEvaluate:
         assert set(scores) == _validation_keys(model, frame, "multiclass")
 
     def test_undefined_metrics_are_none(self, frame):
-        model = Classifiers.random_forest(n_estimators=5, seed=1)
+        model = classifiers.random_forest(n_estimators=5, seed=1)
         model.fit(frame, label_col="binary", feature_cols=FEATURES)
 
         # One class only: AUC-ROC is undefined.
@@ -107,14 +107,14 @@ class TestModelEvaluate:
         assert isinstance(scores["accuracy"], float)
 
     def test_label_col_defaults_to_the_fitted_label_and_can_be_overridden(self, frame):
-        model = Regressors.random_forest(n_estimators=5, seed=1)
+        model = regressors.random_forest(n_estimators=5, seed=1)
         model.fit(frame, label_col="target", feature_cols=FEATURES)
         renamed = frame.withColumnRenamed("target", "y")
 
         _assert_scores(model.evaluate(renamed, label_col="y"), model.evaluate(frame))
 
     def test_extra_columns_are_ignored(self, frame):
-        model = Regressors.random_forest(n_estimators=5, seed=1)
+        model = regressors.random_forest(n_estimators=5, seed=1)
         model.fit(frame, label_col="target", feature_cols=FEATURES)
         extra = frame.withColumn("note", F.lit("n"))
 
@@ -124,9 +124,9 @@ class TestModelEvaluate:
     def test_columns_named_like_model_outputs_are_ignored(self, frame, task):
         """A frame that already holds prediction-like columns can still be evaluated."""
         if task == "regression":
-            model, label = Regressors.random_forest(n_estimators=5, seed=1), "target"
+            model, label = regressors.random_forest(n_estimators=5, seed=1), "target"
         else:
-            model, label = Classifiers.random_forest(n_estimators=5, seed=1), "binary"
+            model, label = classifiers.random_forest(n_estimators=5, seed=1), "binary"
         model.fit(frame, label_col=label, feature_cols=FEATURES)
         clashing = frame
         for name in ("prediction", "probability", "rawPrediction", "predict_label"):
@@ -136,17 +136,17 @@ class TestModelEvaluate:
 
     def test_before_fit_raises(self, frame):
         with pytest.raises(ModelNotFittedError):
-            Regressors.random_forest().evaluate(frame)
+            regressors.random_forest().evaluate(frame)
 
     def test_missing_label_raises(self, frame):
-        model = Regressors.random_forest(n_estimators=5, seed=1)
+        model = regressors.random_forest(n_estimators=5, seed=1)
         model.fit(frame, label_col="target", feature_cols=FEATURES)
 
         with pytest.raises(ColumnNotFoundError, match="target"):
             model.evaluate(frame.drop("target"))
 
     def test_missing_feature_raises(self, frame):
-        model = Regressors.random_forest(n_estimators=5, seed=1)
+        model = regressors.random_forest(n_estimators=5, seed=1)
         model.fit(frame, label_col="target", feature_cols=FEATURES)
 
         with pytest.raises(ColumnNotFoundError, match="x2"):
@@ -155,7 +155,7 @@ class TestModelEvaluate:
     def test_evaluate_after_load_is_identical(self, frame, tmp_path):
         from smallaxe import load_model
 
-        model = Classifiers.random_forest(n_estimators=5, seed=1)
+        model = classifiers.random_forest(n_estimators=5, seed=1)
         model.fit(frame, label_col="binary", feature_cols=FEATURES)
         model.save(str(tmp_path / "m"))
 

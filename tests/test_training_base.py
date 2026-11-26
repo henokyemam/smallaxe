@@ -296,7 +296,7 @@ class TestSeedParam:
                 return {**super().default_params, "seed": None}
 
         assert Seeded()._seed_param() is None
-        assert Seeded().set_param({"seed": 4})._seed_param() == 4
+        assert Seeded().set_params(seed=4)._seed_param() == 4
 
     def test_errors_reading_params_propagate(self):
         """A broken param table must not silently unseed the model."""

@@ -7,18 +7,18 @@ CatBoost) using the model's own ``fit`` / ``validation_scores`` machinery, so
 the search honors the same validation strategy, stratification, and seed as
 ordinary training.
 
-hyperopt is an optional dependency. Calling :func:`run` without it raises a
+hyperopt is a required dependency of smallaxe. If it is missing, :func:`run` raises a
 :class:`~smallaxe.exceptions.DependencyError` with an install hint.
 
 Example:
     >>> from hyperopt import hp
     >>> from smallaxe.search import optimize
-    >>> from smallaxe.training import Regressors
+    >>> from smallaxe.training import regressors
     >>>
-    >>> model = Regressors.random_forest(seed=42)
+    >>> model = regressors.random_forest(seed=42)
     >>> result = optimize.run(
     ...     model,
-    ...     df,
+    ...     dataframe,
     ...     label_col="price",
     ...     param_space={
     ...         "n_estimators": hp.quniform("n_estimators", 20, 200, 20),
@@ -30,7 +30,7 @@ Example:
     ... )
     >>> result.best_params
     {'n_estimators': 120, 'max_depth': 8, ...}
-    >>> predictions = result.best_model.predict(df)
+    >>> predictions = result.best_model.predict(dataframe)
 """
 
 import math
@@ -39,28 +39,34 @@ from typing import Any, Dict, List, Optional
 from pyspark.sql import DataFrame
 
 import smallaxe
+from smallaxe import _deprecation
 from smallaxe.exceptions import DependencyError, ValidationError
 from smallaxe.metrics import TASK_METRICS
 from smallaxe.metrics.classification import MULTICLASS_AVERAGED_METRICS
-from smallaxe.training.base import check_training_data, infer_feature_cols, warn_ignored_cols
-from smallaxe.training.mixins.validation_mixin import resolve_split_seed
+from smallaxe.training.base import (
+    _check_training_data,
+    _infer_feature_cols,
+    _warn_ignored_cols,
+    _warn_stratified,
+)
+from smallaxe.training.mixins.validation_mixin import _resolve_split_seed
 
-# hyperopt is an optional dependency. Guard the import so the module remains
-# importable (and the rest of smallaxe keeps working) when it is absent.
+# hyperopt is a required dependency. Guard the import anyway so the module remains
+# importable (and the rest of smallaxe keeps working) in a broken install.
 try:
     from hyperopt import STATUS_FAIL, STATUS_OK, Trials, fmin, hp, space_eval, tpe
     from hyperopt.early_stop import no_progress_loss
     from hyperopt.exceptions import AllTrialsFailed
 
-    HYPEROPT_AVAILABLE = True
+    _HYPEROPT_AVAILABLE = True
 except ImportError:  # pragma: no cover - exercised in environments without hyperopt
-    HYPEROPT_AVAILABLE = False
+    _HYPEROPT_AVAILABLE = False
 
-HYPEROPT_INSTALL_HINT = "pip install hyperopt"
+_HYPEROPT_INSTALL_HINT = "pip install hyperopt"
 
 # Metric direction. Search always minimizes loss internally; for metrics where
 # a higher value is better we minimize the negated score.
-MAXIMIZE_METRICS = {
+_MAXIMIZE_METRICS = {
     "r2",
     "accuracy",
     "precision",
@@ -69,20 +75,20 @@ MAXIMIZE_METRICS = {
     "auc_roc",
     "auc_pr",
 } | MULTICLASS_AVERAGED_METRICS
-MINIMIZE_METRICS = {
+_MINIMIZE_METRICS = {
     "mse",
     "rmse",
     "mae",
     "mape",
     "log_loss",
 }
-VALID_METRICS = MAXIMIZE_METRICS | MINIMIZE_METRICS
+_VALID_METRICS = _MAXIMIZE_METRICS | _MINIMIZE_METRICS
 
 
 def _check_hyperopt_available() -> None:
     """Raise an actionable error when hyperopt is not installed."""
-    if not HYPEROPT_AVAILABLE:
-        raise DependencyError(package="hyperopt", install_command=HYPEROPT_INSTALL_HINT)
+    if not _HYPEROPT_AVAILABLE:
+        raise DependencyError(package="hyperopt", install_command=_HYPEROPT_INSTALL_HINT)
 
 
 class SearchResult:
@@ -264,7 +270,7 @@ def run(
     negating the score for metrics where higher is better.
 
     Args:
-        model: A smallaxe model instance (e.g. from ``Regressors.xgboost()``).
+        model: A smallaxe model instance (e.g. from ``regressors.xgboost()``).
             Its current parameters are used as the fixed baseline; only the
             parameters present in ``param_space`` are searched. Used as a
             template only — it is not mutated.
@@ -278,8 +284,9 @@ def run(
             ``'auc_roc'`` for binary classification, and ``'accuracy'`` for
             multiclass. Multiclass precision/recall/f1_score use macro averages;
             explicit ``*_macro`` and ``*_weighted`` names are also supported.
-            Must be one of :data:`VALID_METRICS` and produced for the model's
-            task (e.g. ``auc_roc`` is binary-only, ``*_macro`` multiclass-only).
+            Must be a metric of the model's task in
+            :data:`smallaxe.metrics.TASK_METRICS` (e.g. ``auc_roc`` is binary-only,
+            ``*_macro`` multiclass-only).
         max_evals: Maximum number of hyperparameter evaluations. Default 20.
         validation: Validation strategy used to score each trial. One of
             ``'train_test'`` (default) or ``'kfold'``. ``'none'`` is rejected
@@ -288,8 +295,8 @@ def run(
         test_size: Test proportion when ``validation='train_test'``. Default 0.2.
         feature_cols: Feature columns. If None, inferred from numeric columns.
         exclude_cols: Columns to exclude from inferred features.
-        stratified: Whether to stratify splits. If None, defaults to True for
-            classification and False for regression (matching ``fit``).
+        stratified: Deprecated; has no effect and is removed in smallaxe 1.0, as for
+            ``fit``. Passing a value other than None warns once.
         fold_key: Column whose value alone decides a row's fold or split, as in
             ``fit``. Every trial scores on the same folds either way.
         seed: Seed for hyperopt's sampler and for the data splits. Defaults to
@@ -313,6 +320,8 @@ def run(
             model's task does not produce, empty space, validation='none', etc.).
     """
     _check_hyperopt_available()
+    if stratified is not None:
+        _warn_stratified("optimize.run()")
 
     # --- Validate arguments up front for clear, early failures. ---
     if not label_col:
@@ -328,9 +337,9 @@ def run(
         raise ValidationError(f"max_evals must be at least 1, got {max_evals}.")
 
     metric = metric or _default_metric(model)
-    if metric not in VALID_METRICS:
+    if metric not in _VALID_METRICS:
         raise ValidationError(
-            f"Invalid metric '{metric}'. Supported metrics are: {sorted(VALID_METRICS)}."
+            f"Invalid metric '{metric}'. Supported metrics are: {sorted(_VALID_METRICS)}."
         )
     # A metric the task's validation never produces would fail every trial only after fitting it.
     task_metrics = TASK_METRICS[model.task]
@@ -342,15 +351,15 @@ def run(
 
     space = _normalize_space(param_space)
     type_reference = model.default_params
-    maximize = metric in MAXIMIZE_METRICS
+    maximize = metric in _MAXIMIZE_METRICS
 
     # Infer features once and check the data once, so bad data fails here rather
     # than in every trial, and the inference warning is given at most once.
     if feature_cols is None:
-        feature_cols, ignored = infer_feature_cols(dataframe, label_col, exclude_cols or [])
-        warn_ignored_cols(feature_cols, ignored, stacklevel=2)
+        feature_cols, ignored = _infer_feature_cols(dataframe, label_col, exclude_cols or [])
+        _warn_ignored_cols(feature_cols, ignored)
     model._validate_columns(dataframe, label_col, feature_cols)
-    check_training_data(dataframe, label_col, feature_cols, model._accepts_missing())
+    _check_training_data(dataframe, label_col, feature_cols, model._accepts_missing())
 
     if seed is None:
         seed = smallaxe.get_seed()
@@ -359,7 +368,7 @@ def run(
     # Every trial must score on the same split. Unseeded, each fit would draw its own
     # random split seed, so draw one here for all trials. It only decides the split:
     # unseeded estimators stay unseeded.
-    split_seed = seed if seed is not None else resolve_split_seed()
+    split_seed = seed if seed is not None else _resolve_split_seed()
 
     def _build_model(overrides: Dict[str, Any], trial: bool = True) -> Any:
         """Create a fresh model with base params overridden by ``overrides``.
@@ -370,13 +379,13 @@ def run(
         candidate = model.clone()
         if trial:
             candidate._split_seed_fallback = split_seed
-        candidate.set_param(overrides)
+        candidate.set_params(**overrides)
         if (
             seed is not None
             and "seed" in type_reference
             and candidate.get_params().get("seed") is None
         ):
-            candidate.set_param({"seed": seed})
+            candidate.set_params(seed=seed)
         return candidate
 
     def objective(sampled: Dict[str, Any]) -> Dict[str, Any]:
@@ -391,7 +400,6 @@ def run(
                 validation=validation,
                 n_folds=n_folds,
                 test_size=test_size,
-                stratified=stratified,
                 fold_key=fold_key,
                 cache_strategy="none",
                 refit=False,
@@ -491,3 +499,43 @@ def run(
         validation=validation,
         max_evals=max_evals,
     )
+
+
+# Deprecated public names, removed in smallaxe 1.0.
+_METRICS_ADVICE = (
+    "Use smallaxe.metrics.TASK_METRICS for the metrics each task produces; optimize.run "
+    "raises ValidationError for one it cannot optimize."
+)
+_MOVED = {
+    "HYPEROPT_AVAILABLE": (
+        "hyperopt is a required dependency, so the flag is always True; drop the check.",
+        lambda: _HYPEROPT_AVAILABLE,
+    ),
+    "HYPEROPT_INSTALL_HINT": (
+        "hyperopt is a required dependency; install it with 'pip install hyperopt'.",
+        _deprecation.renamed(_HYPEROPT_INSTALL_HINT),
+    ),
+    "MAXIMIZE_METRICS": (_METRICS_ADVICE, _deprecation.renamed(_MAXIMIZE_METRICS)),
+    "MINIMIZE_METRICS": (_METRICS_ADVICE, _deprecation.renamed(_MINIMIZE_METRICS)),
+    "VALID_METRICS": (_METRICS_ADVICE, _deprecation.renamed(_VALID_METRICS)),
+    # Helpers this module imported, and so exposed, in 0.10.
+    "infer_feature_cols": (
+        "Use Model.fit(), which infers feature_cols when none are given, instead.",
+        _deprecation.with_df_keyword(_infer_feature_cols),
+    ),
+    "warn_ignored_cols": (
+        "Use Model.fit(), which warns about the columns it leaves out, instead.",
+        lambda: _warn_ignored_cols,
+    ),
+    "check_training_data": (
+        "Use Model.fit(), which runs this check, instead.",
+        _deprecation.with_df_keyword(_check_training_data),
+    ),
+    "resolve_split_seed": (
+        "Use smallaxe.set_seed() or the model's seed parameter, which decide the split "
+        "seed, instead.",
+        lambda: _resolve_split_seed,
+    ),
+}
+__getattr__ = _deprecation.module_getattr(__name__, _MOVED)
+__dir__ = _deprecation.module_dir(globals(), _MOVED)

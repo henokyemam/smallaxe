@@ -1,9 +1,12 @@
 """ParamMixin for managing model hyperparameters."""
 
 from abc import ABC, abstractmethod
-from typing import Any, Dict
+from typing import Any, Dict, Mapping, TypeVar
 
+from smallaxe import _deprecation
 from smallaxe.exceptions import ValidationError
+
+_Self = TypeVar("_Self", bound="ParamMixin")
 
 
 class ParamMixin(ABC):
@@ -42,8 +45,25 @@ class ParamMixin(ABC):
         """
         pass
 
-    def set_param(self, params: Dict[str, Any]) -> "ParamMixin":
+    def set_params(self: _Self, **params: Any) -> _Self:
         """Set one or more model parameters.
+
+        Args:
+            **params: Parameter names and the values to set.
+
+        Returns:
+            self: The model instance, for method chaining.
+
+        Raises:
+            ValidationError: If a parameter name is invalid or value fails validation.
+
+        Example:
+            >>> model.set_params(n_estimators=200, max_depth=10)
+        """
+        return self._set_params(params)
+
+    def set_param(self: _Self, params: Dict[str, Any]) -> _Self:
+        """Deprecated: use :meth:`set_params` (``set_params(**params)``). Removed in 1.0.
 
         Args:
             params: Dictionary of parameter names and values to set.
@@ -53,10 +73,15 @@ class ParamMixin(ABC):
 
         Raises:
             ValidationError: If a parameter name is invalid or value fails validation.
-
-        Example:
-            >>> model.set_param({'n_estimators': 200, 'max_depth': 10})
         """
+        _deprecation.warn(
+            "set_param(dict) is deprecated and will be removed in smallaxe 1.0. "
+            "Use set_params(**params) instead."
+        )
+        return self._set_params(params)
+
+    def _set_params(self: _Self, params: Mapping[Any, Any]) -> _Self:
+        """Validate and set each of ``params``: the rule behind set_params and set_param."""
         valid_params = set(self.params.keys())
 
         for name, value in params.items():

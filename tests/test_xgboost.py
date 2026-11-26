@@ -6,7 +6,7 @@ fake estimators is in ``test_algorithm.py``.
 
 import pytest
 
-from smallaxe.training import Classifiers, Regressors, algorithm
+from smallaxe.training import algorithm, classifiers, regressors
 
 pytestmark = pytest.mark.skipif(
     not algorithm.get("xgboost").available(), reason="xgboost is not installed"
@@ -26,10 +26,10 @@ def frame(spark_session):
 
 def _fit(frame, task, **params):
     if task == "simple_regression":
-        model = Regressors.xgboost(**params)
+        model = regressors.xgboost(**params)
         label = "y"
     else:
-        model = Classifiers.xgboost(task=task, **params)
+        model = classifiers.xgboost(task=task, **params)
         label = task
     return model.fit(frame, label_col=label, feature_cols=FEATURES)
 

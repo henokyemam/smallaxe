@@ -2,7 +2,7 @@
 smallaxe - A PySpark MLOps library for simplified model training and optimization.
 """
 
-import warnings
+import warnings  # noqa: F401 - smallaxe.warnings was importable in 0.10; kept until 1.0
 from contextlib import contextmanager
 from importlib.metadata import PackageNotFoundError, version
 from typing import TYPE_CHECKING, Any, Generator, Optional, Union, cast
@@ -64,7 +64,7 @@ def load_model(path: str) -> Union["Regressor", "Classifier"]:
 
     Example:
         >>> model = smallaxe.load_model('/path/to/model')
-        >>> predictions = model.predict(df)
+        >>> predictions = model.predict(dataframe)
     """
     from smallaxe.training.base import Model
 
@@ -91,7 +91,7 @@ def load_pipeline(path: str) -> "Pipeline":
 
     Example:
         >>> pipeline = smallaxe.load_pipeline('/path/to/pipeline')
-        >>> predictions = pipeline.predict(df)
+        >>> predictions = pipeline.predict(dataframe)
     """
     from smallaxe.pipeline import Pipeline
 
@@ -186,7 +186,7 @@ def verbosity(level: str) -> Generator[None, None, None]:
 
     Example:
         >>> with smallaxe.verbosity('quiet'):
-        ...     model.fit(df, label_col='target')  # runs silently
+        ...     model.fit(dataframe, label_col='target')  # runs silently
     """
     previous_level = get_verbosity()
     set_verbosity(level)
@@ -200,24 +200,24 @@ def set_spark_session(spark: Any) -> None:
     """Deprecated: smallaxe reads the session from the DataFrame it is given.
 
     Stores the value for :func:`get_spark_session`, but no library code uses it.
-    Will be removed in 1.0.
+    Removed in smallaxe 1.0.
     """
-    warnings.warn(
-        "smallaxe.set_spark_session has no effect and will be removed in 1.0. smallaxe "
-        "uses the session of the DataFrame it is given, or the active session.",
-        DeprecationWarning,
-        stacklevel=2,
+    from smallaxe import _deprecation
+
+    _deprecation.warn(
+        "smallaxe.set_spark_session has no effect and will be removed in smallaxe 1.0. "
+        "smallaxe uses the session of the DataFrame it is given, or the active session."
     )
     _config._spark_session = spark
 
 
 def get_spark_session() -> Optional[Any]:
-    """Deprecated: returns whatever :func:`set_spark_session` stored. Removed in 1.0."""
-    warnings.warn(
-        "smallaxe.get_spark_session will be removed in 1.0; use df.sparkSession or "
-        "SparkSession.getActiveSession().",
-        DeprecationWarning,
-        stacklevel=2,
+    """Deprecated: returns whatever :func:`set_spark_session` stored. Removed in smallaxe 1.0."""
+    from smallaxe import _deprecation
+
+    _deprecation.warn(
+        "smallaxe.get_spark_session is deprecated and will be removed in smallaxe 1.0. Use "
+        "dataframe.sparkSession or SparkSession.getActiveSession() instead."
     )
     return _config._spark_session
 
@@ -255,7 +255,7 @@ def get_seed() -> Optional[int]:
 
 
 def set_cache_strategy(strategy: str) -> None:
-    """Deprecated: has no effect and will be removed in 1.0.
+    """Deprecated: has no effect and will be removed in smallaxe 1.0.
 
     Caching is decided per ``fit`` call through its ``cache_strategy`` argument
     (``None``, ``'none'``, ``'memory'``, ``'disk'``), because it depends on the
@@ -264,11 +264,11 @@ def set_cache_strategy(strategy: str) -> None:
     Raises:
         ConfigurationError: If strategy is not one of 'auto', 'always', 'never'.
     """
-    warnings.warn(
-        "smallaxe.set_cache_strategy has no effect and will be removed in 1.0. Pass "
-        "cache_strategy= to fit() instead.",
-        DeprecationWarning,
-        stacklevel=2,
+    from smallaxe import _deprecation
+
+    _deprecation.warn(
+        "smallaxe.set_cache_strategy has no effect and will be removed in smallaxe 1.0. "
+        "Pass cache_strategy= to fit() instead."
     )
     if strategy not in VALID_CACHE_STRATEGIES:
         raise ConfigurationError(
@@ -280,10 +280,11 @@ def set_cache_strategy(strategy: str) -> None:
 
 
 def get_cache_strategy() -> str:
-    """Deprecated: returns whatever :func:`set_cache_strategy` stored. Removed in 1.0."""
-    warnings.warn(
-        "smallaxe.get_cache_strategy will be removed in 1.0; caching is set per fit() call.",
-        DeprecationWarning,
-        stacklevel=2,
+    """Deprecated: returns whatever :func:`set_cache_strategy` stored. Removed in smallaxe 1.0."""
+    from smallaxe import _deprecation
+
+    _deprecation.warn(
+        "smallaxe.get_cache_strategy is deprecated and will be removed in smallaxe 1.0. "
+        "Caching is set per fit() call: pass cache_strategy= to fit() instead."
     )
     return _config._cache_strategy

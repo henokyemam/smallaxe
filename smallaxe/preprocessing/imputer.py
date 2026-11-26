@@ -13,7 +13,7 @@ from pyspark.sql.types import (
     StringType,
 )
 
-from smallaxe import _artifact, _fs
+from smallaxe import _artifact, _deprecation, _fs
 from smallaxe.exceptions import (
     ColumnNotFoundError,
     ModelNotFittedError,
@@ -85,13 +85,13 @@ class Imputer:
     Example:
         >>> # Impute only numerical columns
         >>> imputer = Imputer(numerical_strategy='median')
-        >>> imputer.fit(df, numerical_cols=['age', 'income'])
-        >>> transformed_df = imputer.transform(df)
+        >>> imputer.fit(dataframe, numerical_cols=['age', 'income'])
+        >>> transformed_df = imputer.transform(dataframe)
 
         >>> # Impute both numerical and categorical columns
         >>> imputer = Imputer(numerical_strategy='median', categorical_strategy='most_frequent')
-        >>> imputer.fit(df, numerical_cols=['age', 'income'], categorical_cols=['category'])
-        >>> transformed_df = imputer.transform(df)
+        >>> imputer.fit(dataframe, numerical_cols=['age', 'income'], categorical_cols=['category'])
+        >>> transformed_df = imputer.transform(dataframe)
     """
 
     def __init__(
@@ -135,28 +135,29 @@ class Imputer:
 
     def _validate_columns(
         self,
-        df: DataFrame,
+        dataframe: DataFrame,
         numerical_cols: Optional[List[str]],
         categorical_cols: Optional[List[str]],
     ) -> None:
         """Validate that all specified columns exist in the DataFrame."""
-        available_columns = df.columns
+        available_columns = dataframe.columns
         all_cols = (numerical_cols or []) + (categorical_cols or [])
 
         for col in all_cols:
             if col not in available_columns:
                 raise ColumnNotFoundError(column=col, available_columns=available_columns)
 
+    @_deprecation.df_keyword
     def fit(
         self,
-        df: DataFrame,
+        dataframe: DataFrame,
         numerical_cols: Optional[List[str]] = None,
         categorical_cols: Optional[List[str]] = None,
     ) -> "Imputer":
         """Fit the imputer by computing fill values from the DataFrame.
 
         Args:
-            df: PySpark DataFrame to fit on.
+            dataframe: PySpark DataFrame to fit on.
             numerical_cols: List of numerical column names to impute.
             categorical_cols: List of categorical column names to impute.
 
@@ -186,7 +187,7 @@ class Imputer:
                 "Specify a categorical_strategy in the constructor."
             )
 
-        self._validate_columns(df, numerical_cols, categorical_cols)
+        self._validate_columns(dataframe, numerical_cols, categorical_cols)
 
         self._numerical_cols = numerical_cols
         self._categorical_cols = categorical_cols
@@ -196,16 +197,18 @@ class Imputer:
 
         # Compute fill values for numerical columns
         if numerical_cols:
-            self._compute_numerical_fill_values(df, numerical_cols)
+            self._compute_numerical_fill_values(dataframe, numerical_cols)
 
         # Compute fill values for categorical columns
         if categorical_cols:
-            self._compute_categorical_fill_values(df, categorical_cols)
+            self._compute_categorical_fill_values(dataframe, categorical_cols)
 
         self._is_fitted = True
         return self
 
-    def _compute_numerical_fill_values(self, df: DataFrame, numerical_cols: List[str]) -> None:
+    def _compute_numerical_fill_values(
+        self, dataframe: DataFrame, numerical_cols: List[str]
+    ) -> None:
         """Compute fill values for numerical columns based on strategy."""
         if isinstance(self._numerical_strategy, (int, float)):
             # Custom value - use it for all columns
@@ -214,7 +217,7 @@ class Imputer:
         elif self._numerical_strategy == "mean":
             # Compute mean for each column, ignoring NaN as well as null
             agg_exprs = [F.mean(_present(col)).alias(col) for col in numerical_cols]
-            stats = df.select(agg_exprs).first()
+            stats = dataframe.select(agg_exprs).first()
             if stats:
                 for col in numerical_cols:
                     value = stats[col]
@@ -222,7 +225,7 @@ class Imputer:
         elif self._numerical_strategy == "median":
             # Compute median for each column using approx_percentile
             for col in numerical_cols:
-                median_value = df.select(F.percentile_approx(_present(col), 0.5)).first()[0]
+                median_value = dataframe.select(F.percentile_approx(_present(col), 0.5)).first()[0]
                 self._numerical_fill_values[col] = (
                     float(median_value) if median_value is not None else 0.0
                 )
@@ -230,7 +233,7 @@ class Imputer:
             # Compute mode for each column
             for col in numerical_cols:
                 mode_row = (
-                    df.filter(_present(col).isNotNull())
+                    dataframe.filter(_present(col).isNotNull())
                     .groupBy(col)
                     .count()
                     .orderBy(F.col("count").desc())
@@ -241,19 +244,23 @@ class Imputer:
                 else:
                     self._numerical_fill_values[col] = 0.0
 
-    def _compute_categorical_fill_values(self, df: DataFrame, categorical_cols: List[str]) -> None:
+    def _compute_categorical_fill_values(
+        self, dataframe: DataFrame, categorical_cols: List[str]
+    ) -> None:
         """Compute fill values for categorical columns based on strategy.
 
         A fill value is kept as Spark's string form of the value (``cast("string")``), so
         it round-trips through JSON and casts back to the column's type at transform.
         """
-        types = {field.name: field.dataType for field in df.schema.fields}
+        types = {field.name: field.dataType for field in dataframe.schema.fields}
         for col in categorical_cols:
             if self._categorical_strategy == "most_frequent":
                 # Most frequent value; ties go to the smallest value, so the result does
                 # not depend on partitioning.
                 mode_row = (
-                    df.select(_categorical_value(col, types[col]).cast("string").alias("value"))
+                    dataframe.select(
+                        _categorical_value(col, types[col]).cast("string").alias("value")
+                    )
                     .filter(F.col("value").isNotNull())
                     .groupBy("value")
                     .count()
@@ -264,11 +271,13 @@ class Imputer:
             else:
                 # Custom value - use it for all columns
                 fill = str(self._categorical_strategy)
-            self._check_categorical_fill(df, col, types[col], fill)
+            self._check_categorical_fill(dataframe, col, types[col], fill)
             self._categorical_fill_values[col] = fill
 
     @staticmethod
-    def _check_categorical_fill(df: DataFrame, col: str, data_type: DataType, fill: str) -> None:
+    def _check_categorical_fill(
+        dataframe: DataFrame, col: str, data_type: DataType, fill: str
+    ) -> None:
         """Raise ValidationError if ``fill`` cannot be stored exactly in a ``data_type`` column.
 
         The cast must succeed (not null) and, for an integer or decimal column, keep the
@@ -280,7 +289,7 @@ class Imputer:
         exact = isinstance(data_type, (IntegralType, DecimalType))
         try:
             row = (
-                df.sparkSession.range(1)
+                dataframe.sparkSession.range(1)
                 .select(
                     typed.isNotNull().alias("cast_ok"),
                     (
@@ -302,11 +311,12 @@ class Imputer:
                 "of that type, or cast the column to string before imputing."
             )
 
-    def transform(self, df: DataFrame) -> DataFrame:
+    @_deprecation.df_keyword
+    def transform(self, dataframe: DataFrame) -> DataFrame:
         """Transform the DataFrame by imputing missing values.
 
         Args:
-            df: PySpark DataFrame to transform.
+            dataframe: PySpark DataFrame to transform.
 
         Returns:
             DataFrame with missing values imputed.
@@ -320,12 +330,12 @@ class Imputer:
 
         # Validate that all fitted columns exist in the transform DataFrame
         all_cols = self._numerical_cols + self._categorical_cols
-        available_columns = df.columns
+        available_columns = dataframe.columns
         for col in all_cols:
             if col not in available_columns:
                 raise ColumnNotFoundError(column=col, available_columns=available_columns)
 
-        result_df = df
+        result_df = dataframe
 
         # Fill numerical columns
         if self._numerical_fill_values:
@@ -346,24 +356,25 @@ class Imputer:
 
         return result_df
 
+    @_deprecation.df_keyword
     def fit_transform(
         self,
-        df: DataFrame,
+        dataframe: DataFrame,
         numerical_cols: Optional[List[str]] = None,
         categorical_cols: Optional[List[str]] = None,
     ) -> DataFrame:
         """Fit and transform in a single step.
 
         Args:
-            df: PySpark DataFrame to fit and transform.
+            dataframe: PySpark DataFrame to fit and transform.
             numerical_cols: List of numerical column names to impute.
             categorical_cols: List of categorical column names to impute.
 
         Returns:
             DataFrame with missing values imputed.
         """
-        self.fit(df, numerical_cols, categorical_cols)
-        return self.transform(df)
+        self.fit(dataframe, numerical_cols, categorical_cols)
+        return self.transform(dataframe)
 
     @property
     def numerical_fill_values(self) -> Dict[str, float]:

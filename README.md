@@ -13,7 +13,7 @@ PySpark MLlib has a steep learning curve and verbose API. **smallaxe** provides 
 - **Simple API** - Train models with familiar `fit()`/`predict()` patterns
 - **Multiple Algorithms** - Random Forest (native), XGBoost, LightGBM, and CatBoost
 - **Preprocessing Pipeline** - Imputer, Scaler, Encoder with chainable pipelines
-- **Cross-Validation** - Train/test split and k-fold with stratified sampling
+- **Cross-Validation** - Train/test split and k-fold, reproducible from a seed; each class is split in the same proportion
 - **Metrics** - Classification (accuracy, precision, recall, F1, AUC-ROC, AUC-PR, log loss) and regression (MSE, RMSE, MAE, R², MAPE)
 - **Hyperparameter Optimization** - hyperopt-backed search over any model's parameters
 
@@ -42,23 +42,23 @@ pip install smallaxe[all]        # All algorithms
 
 ```python
 import smallaxe
-from smallaxe.training import Regressors
+from smallaxe.training import regressors
 from smallaxe.datasets import load_sample_regression
 
 smallaxe.set_seed(42)  # reproducible splits
 
 # Load sample data
-df = load_sample_regression(spark)
+dataframe = load_sample_regression(spark)
 
 # Train, evaluate, save, load, and predict in a handful of lines.
 # Feature columns are inferred from the numeric columns when not specified.
-model = Regressors.random_forest(n_estimators=100, max_depth=10)
-model.fit(df, label_col="price", validation="train_test")
+model = regressors.random_forest(n_estimators=100, max_depth=10)
+model.fit(dataframe, label_col="price", validation="train_test")
 print(model.validation_scores)        # {'rmse': ..., 'r2': ..., ...}
 
 model.save("/tmp/my_model")
-reloaded = Regressors.load("/tmp/my_model")
-predictions = reloaded.predict(df)     # identical to the original model
+reloaded = regressors.load("/tmp/my_model")
+predictions = reloaded.predict(dataframe)     # identical to the original model
 ```
 
 ## Usage Examples
@@ -66,15 +66,14 @@ predictions = reloaded.predict(df)     # identical to the original model
 ### Training with Cross-Validation
 
 ```python
-from smallaxe.training import Classifiers
+from smallaxe.training import classifiers
 
-model = Classifiers.xgboost(task="binary")
+model = classifiers.xgboost(task="binary")
 model.fit(
-    df,
+    dataframe,
     label_col="churn",
     validation="kfold",
     n_folds=5,
-    stratified=True,
 )
 
 print(model.validation_scores)   # includes mean_/std_ per metric across folds
@@ -93,7 +92,7 @@ Label and prediction columns must be numeric; rows where either is null are igno
 
 Standalone `smallaxe.metrics.precision`, `recall`, and `f1_score` accept
 `average="macro"` or `average="weighted"`; their default remains `average="binary"`
-(class 1). Use `smallaxe.metrics.multiclass_scores(df, label_col, prediction_col)`
+(class 1). Use `smallaxe.metrics.multiclass_scores(dataframe, label_col, prediction_col)`
 to compute accuracy and all macro/weighted scores together.
 
 ### Hyperparameter Optimization
@@ -109,11 +108,11 @@ Multiclass search defaults to `accuracy`. You can select `precision`, `recall`, 
 ```python
 from hyperopt import hp
 from smallaxe.search import optimize
-from smallaxe.training import Regressors
+from smallaxe.training import regressors
 
 result = optimize.run(
-    Regressors.random_forest(seed=42),
-    df,
+    regressors.random_forest(seed=42),
+    dataframe,
     label_col="price",
     param_space={
         "n_estimators": hp.quniform("n_estimators", 40, 200, 20),
@@ -129,7 +128,7 @@ result = optimize.run(
 )
 
 print(result.best_params, result.best_score)
-predictions = result.best_model.predict(df)   # best_model is already fitted
+predictions = result.best_model.predict(dataframe)   # best_model is already fitted
 ```
 
 ### Preprocessing Pipeline
@@ -137,17 +136,17 @@ predictions = result.best_model.predict(df)   # best_model is already fitted
 ```python
 from smallaxe.pipeline import Pipeline
 from smallaxe.preprocessing import Imputer, Scaler, Encoder
-from smallaxe.training import Regressors
+from smallaxe.training import regressors
 
 pipeline = Pipeline([
     ("imputer", Imputer(numerical_strategy="median")),
     ("scaler", Scaler(method="standard")),
     ("encoder", Encoder(method="onehot")),
-    ("model", Regressors.xgboost()),
+    ("model", regressors.xgboost()),
 ])
 
 pipeline.fit(
-    df,
+    dataframe,
     label_col="target",
     numerical_cols=["age", "income"],
     categorical_cols=["city", "category"],
@@ -155,6 +154,25 @@ pipeline.fit(
 
 predictions = pipeline.predict(new_df)
 ```
+
+## Upgrading to 0.11
+
+smallaxe 0.11 renames the spellings that 1.0 removes. The old ones still work and emit
+one `DeprecationWarning` naming the replacement:
+
+| Deprecated | Use instead |
+|------------|-------------|
+| `Regressors.xgboost()`, `Classifiers.random_forest(task=...)`, `Regressors.load(path)` | `regressors.xgboost()`, `classifiers.random_forest(task=...)`, `regressors.load(path)` (`from smallaxe.training import regressors, classifiers`) |
+| `Regressors.list_models()` | `regressors.algorithms()`, `regressors.available_models()` |
+| `model.set_param({"max_depth": 5})` | `model.set_params(max_depth=5)` |
+| `fit(df=...)`, `predict(df=...)`, `metrics.rmse(df=...)`, ... | `dataframe=`, or pass the DataFrame positionally |
+| `fit(..., stratified=True)`, `optimize.run(..., stratified=True)` | nothing: it had no effect |
+| `metrics.log_loss(dataframe, "label", "probability", 1e-6)` | `log_loss(..., eps=1e-6)` |
+| `dataset_info(name)` printing | `info = dataset_info(name, verbose=False)` (a dict) |
+
+Helpers and constants that become private in 1.0 (for example
+`smallaxe.training.BaseModel`, `XGBOOST_AVAILABLE`, `optimize.VALID_METRICS`) warn
+when imported. [CHANGELOG.md](CHANGELOG.md) lists every item.
 
 ## End-to-End Examples
 
@@ -181,7 +199,7 @@ python examples/house_prices_regression.py
 | LightGBM | ✓ | ✓ | `smallaxe[lightgbm]` + SynapseML Spark package |
 | CatBoost | ✓ | ✓ | `smallaxe[catboost]` + `catboost-spark` Spark package |
 
-Use `Regressors.available_models()` / `Classifiers.available_models()` to see which
+Use `regressors.available_models()` / `classifiers.available_models()` to see which
 algorithms are installed in the current environment, with install hints for the rest.
 
 ## Compatibility Matrix

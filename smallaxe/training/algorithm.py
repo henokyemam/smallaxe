@@ -4,7 +4,7 @@ An :class:`Algorithm` is a declarative record describing one learning method
 (Random Forest, XGBoost, LightGBM, CatBoost): its parameter table, the Spark
 estimator and fitted-model classes per task, how column names and task-fixed
 settings reach the estimator, how to read feature importances, and which optional
-dependency it needs. :func:`estimator_kwargs` is the single translation rule that
+dependency it needs. :func:`_estimator_kwargs` is the single translation rule that
 turns a record plus the user's parameter values into an estimator.
 
 The four records live next to their deprecated class aliases in
@@ -29,6 +29,7 @@ from typing import (
     Tuple,
 )
 
+from smallaxe import _deprecation
 from smallaxe.exceptions import DependencyError, ValidationError
 
 REGRESSION_TASKS: FrozenSet[str] = frozenset({"simple_regression"})
@@ -37,7 +38,13 @@ ALL_TASKS: FrozenSet[str] = REGRESSION_TASKS | CLASSIFICATION_TASKS
 
 # Column roles a model hands to the estimator. Regression uses the first three;
 # classification adds probability and raw_prediction.
-COLUMN_ROLES: Tuple[str, ...] = ("features", "label", "prediction", "probability", "raw_prediction")
+_COLUMN_ROLES: Tuple[str, ...] = (
+    "features",
+    "label",
+    "prediction",
+    "probability",
+    "raw_prediction",
+)
 
 # ``importances(spark_model, n_features)`` returns one score per assembled feature, in
 # feature order, or None when the fitted model cannot supply them.
@@ -181,7 +188,7 @@ class Algorithm:
         return getattr(_import_estimator_module(self, module_name), attr)
 
 
-def package_version(record: Algorithm) -> Optional[str]:
+def _package_version(record: Algorithm) -> Optional[str]:
     """The installed version of ``record``'s optional package, for diagnosis.
 
     Read from the package's distribution metadata, or else from the ``__version__`` of
@@ -203,7 +210,7 @@ def package_version(record: Algorithm) -> Optional[str]:
     return None if value is None else str(value)
 
 
-def resolve(path: str) -> Any:
+def _resolve(path: str) -> Any:
     """Import a dotted ``module.Attribute`` path."""
     module_name, _, attr = path.rpartition(".")
     return getattr(importlib.import_module(module_name), attr)
@@ -217,7 +224,7 @@ def _is_missing_module(error: ImportError, module_name: str) -> bool:
     return module_name == missing or module_name.startswith(missing + ".")
 
 
-def estimator_kwargs(
+def _estimator_kwargs(
     algorithm: Algorithm,
     task: str,
     values: Mapping[str, Any],
@@ -233,7 +240,7 @@ def estimator_kwargs(
         algorithm: The algorithm record.
         task: The task being trained.
         values: Current parameter values by smallaxe name; missing names use defaults.
-        columns: Column role -> column name (see :data:`COLUMN_ROLES`). Ignored when
+        columns: Column role -> column name (see :data:`_COLUMN_ROLES`). Ignored when
             ``algorithm.cols`` is ``None``.
 
     Returns:
@@ -319,7 +326,7 @@ def get(name: str) -> Algorithm:
 
 # ``metadata.json`` written by smallaxe <= 0.8.x records the model class name instead
 # of ``algorithm``. The concrete task is read from the ``task`` field either way.
-LEGACY_CLASS_NAMES: Dict[str, Tuple[str, str]] = {
+_LEGACY_CLASS_NAMES: Dict[str, Tuple[str, str]] = {
     "RandomForestRegressor": ("random_forest", "regression"),
     "RandomForestClassifier": ("random_forest", "classification"),
     "XGBoostRegressor": ("xgboost", "regression"),
@@ -331,10 +338,39 @@ LEGACY_CLASS_NAMES: Dict[str, Tuple[str, str]] = {
 }
 
 _LEGACY_BY_ALGORITHM: Dict[Tuple[str, str], str] = {
-    value: key for key, value in LEGACY_CLASS_NAMES.items()
+    value: key for key, value in _LEGACY_CLASS_NAMES.items()
 }
 
 
-def legacy_class_name(name: str, task_type: str) -> str:
+def _legacy_class_name(name: str, task_type: str) -> str:
     """The 0.8.x class name for an algorithm and task type (``"XGBoostRegressor"``)."""
     return _LEGACY_BY_ALGORITHM[(name, task_type)]
+
+
+# Deprecated public names, removed in smallaxe 1.0.
+_MOVED = {
+    "resolve": (
+        "Use get(name).estimator_class(task) or get(name).model_class(task) instead.",
+        lambda: _resolve,
+    ),
+    "estimator_kwargs": (
+        "Build a model with regressors.<algorithm>() / classifiers.<algorithm>() and "
+        "set_params() instead; the translation to estimator arguments is internal.",
+        lambda: _estimator_kwargs,
+    ),
+    "legacy_class_name": (
+        "Use the algorithm name (get(name).name) and the model's task instead.",
+        lambda: _legacy_class_name,
+    ),
+    "package_version": (
+        "Use a fitted model's metadata['algorithm_package_version'] instead.",
+        lambda: _package_version,
+    ),
+    "COLUMN_ROLES": ("Use get(name).cols instead.", lambda: _COLUMN_ROLES),
+    "LEGACY_CLASS_NAMES": (
+        "Use smallaxe.load_model(), which reads artifacts saved by 0.8.x, instead.",
+        lambda: _LEGACY_CLASS_NAMES,
+    ),
+}
+__getattr__ = _deprecation.module_getattr(__name__, _MOVED)
+__dir__ = _deprecation.module_dir(globals(), _MOVED)

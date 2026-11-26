@@ -21,7 +21,7 @@ import smallaxe
 from smallaxe import _artifact
 from smallaxe.exceptions import ValidationError
 from smallaxe.preprocessing import Imputer
-from smallaxe.training import Classifiers, Regressors, algorithm
+from smallaxe.training import algorithm, classifiers, regressors
 from smallaxe.training import catboost as catboost_module
 from smallaxe.training.base import Classifier, Model, Regressor
 from tests.fakes import install_fake_modules
@@ -44,8 +44,8 @@ PAYLOAD_KEYS = {
 LOADERS = {
     "load_model": smallaxe.load_model,
     "Model.load": Model.load,
-    "Regressors.load": Regressors.load,
-    "Classifiers.load": Classifiers.load,
+    "regressors.load": regressors.load,
+    "classifiers.load": classifiers.load,
 }
 
 
@@ -57,7 +57,7 @@ def df(spark_session):
 
 @pytest.fixture
 def saved_regressor(df, tmp_path):
-    model = Regressors.random_forest(n_estimators=3, max_depth=2, seed=1)
+    model = regressors.random_forest(n_estimators=3, max_depth=2, seed=1)
     model.fit(df, label_col="y", feature_cols=["a", "b"])
     path = tmp_path / "model"
     model.save(str(path))
@@ -112,7 +112,7 @@ class TestHeader:
     def test_xgboost_records_its_package_version(self, df, tmp_path):
         if not algorithm.get("xgboost").available():
             pytest.skip("xgboost is not installed")
-        model = Classifiers.xgboost(n_estimators=2, max_depth=2)
+        model = classifiers.xgboost(n_estimators=2, max_depth=2)
         model.fit(df, label_col="label", feature_cols=["a", "b"])
         model.save(str(tmp_path / "m"))
 
@@ -136,19 +136,19 @@ class TestHeader:
         monkeypatch.setitem(sys.modules, "catboost_spark", module)
         monkeypatch.setattr(importlib.metadata, "version", _no_distribution)
 
-        assert algorithm.package_version(algorithm.get("catboost")) == "1.2.3"
+        assert algorithm._package_version(algorithm.get("catboost")) == "1.2.3"
 
     def test_package_version_imports_nothing(self, monkeypatch):
         monkeypatch.delitem(sys.modules, "catboost_spark", raising=False)
         monkeypatch.setattr(importlib.metadata, "version", _no_distribution)
 
-        assert algorithm.package_version(algorithm.get("catboost")) is None
+        assert algorithm._package_version(algorithm.get("catboost")) is None
         assert "catboost_spark" not in sys.modules
 
 
 class TestSaveOrder:
     def test_metadata_is_written_after_the_spark_model(self, monkeypatch, df, tmp_path):
-        model = Regressors.random_forest(n_estimators=2, max_depth=2)
+        model = regressors.random_forest(n_estimators=2, max_depth=2)
         model.fit(df, label_col="y", feature_cols=["a", "b"])
         path = tmp_path / "model"
         seen = []
@@ -167,7 +167,7 @@ class TestSaveOrder:
     def test_overwriting_removes_the_old_metadata_before_writing_the_model(
         self, monkeypatch, df, saved_regressor
     ):
-        model = Regressors.random_forest(n_estimators=2, max_depth=2)
+        model = regressors.random_forest(n_estimators=2, max_depth=2)
         model.fit(df, label_col="y", feature_cols=["a", "b"])
 
         def failing_save(path):
@@ -191,7 +191,7 @@ class TestOverwrite:
         if not algorithm.get("xgboost").available():
             pytest.skip("xgboost is not installed")
         before = _metadata(saved_regressor)
-        model = Classifiers.xgboost(n_estimators=2, max_depth=2)
+        model = classifiers.xgboost(n_estimators=2, max_depth=2)
         model.fit(df, label_col="label", feature_cols=["a", "b"])
 
         model.save(str(saved_regressor))
@@ -260,7 +260,7 @@ class TestLoadRejects:
         record = dataclasses.replace(algorithm.get("catboost"), prepare=None)
         install_fake_modules(monkeypatch, record)
         monkeypatch.setattr(catboost_module, "ALGORITHM", record)
-        model = Regressors.catboost(n_estimators=2)
+        model = regressors.catboost(n_estimators=2)
         model.fit(df, label_col="y", feature_cols=["a", "b"])
         model.save(str(tmp_path / "m"))
         assert "scale_pos_weight" in {p.name for p in record.visible_params("binary")}
@@ -300,19 +300,19 @@ class TestLoadRejects:
             smallaxe.load_model(path)
 
     def test_classifier_through_regressors_load(self, df, tmp_path):
-        model = Classifiers.random_forest(n_estimators=2, max_depth=2)
+        model = classifiers.random_forest(n_estimators=2, max_depth=2)
         model.fit(df, label_col="label", feature_cols=["a", "b"])
         model.save(str(tmp_path / "clf"))
 
         with pytest.raises(ValidationError, match="not a supported regressor"):
-            Regressors.load(str(tmp_path / "clf"))
+            regressors.load(str(tmp_path / "clf"))
         with pytest.raises(ValidationError, match="Model type mismatch"):
             Regressor.load(str(tmp_path / "clf"))
 
 
 class TestLoadModel:
     def test_returns_the_saved_kind(self, df, saved_regressor, tmp_path):
-        clf = Classifiers.random_forest(task="binary", n_estimators=2, max_depth=2)
+        clf = classifiers.random_forest(task="binary", n_estimators=2, max_depth=2)
         clf.fit(df, label_col="label", feature_cols=["a", "b"])
         clf.save(str(tmp_path / "clf"))
 
@@ -332,7 +332,7 @@ class TestLoadModel:
     def test_fake_algorithm_round_trip(self, monkeypatch, df, tmp_path):
         record = algorithm.get("xgboost")
         install_fake_modules(monkeypatch, record)
-        model = Classifiers.xgboost(task="multiclass", n_estimators=4)
+        model = classifiers.xgboost(task="multiclass", n_estimators=4)
         model.fit(df, label_col="label", feature_cols=["a", "b"])
         model.save(str(tmp_path / "m"))
 

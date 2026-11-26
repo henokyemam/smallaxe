@@ -10,7 +10,7 @@ from pyspark.sql.types import DoubleType
 
 import smallaxe
 from smallaxe.exceptions import ColumnNotFoundError
-from smallaxe.training.mixins.validation_mixin import ValidationMixin, split_hash
+from smallaxe.training.mixins.validation_mixin import ValidationMixin, _split_hash
 
 N_ROWS = 2000
 
@@ -89,16 +89,16 @@ def test_global_seed_is_used_when_no_seed_is_given(rows):
 
 def test_split_seed_precedence():
     """The argument, then the global seed, then the caller's fallback, then random."""
-    from smallaxe.training.mixins.validation_mixin import resolve_split_seed
+    from smallaxe.training.mixins.validation_mixin import _resolve_split_seed
 
     smallaxe.set_seed(5)
     try:
-        assert resolve_split_seed(3, fallback=9) == 3
-        assert resolve_split_seed(None, fallback=9) == 5
+        assert _resolve_split_seed(3, fallback=9) == 3
+        assert _resolve_split_seed(None, fallback=9) == 5
     finally:
         smallaxe.set_seed(None)
-    assert resolve_split_seed(None, fallback=9) == 9
-    assert isinstance(resolve_split_seed(None), int)
+    assert _resolve_split_seed(None, fallback=9) == 9
+    assert isinstance(_resolve_split_seed(None), int)
 
 
 def test_unseeded_split_records_the_seed_it_drew(rows):
@@ -133,7 +133,7 @@ def test_vector_columns_are_left_out_of_the_hash(spark_session):
     df = spark_session.createDataFrame(
         [(i, Vectors.dense([float(i)])) for i in range(10)], ["id", "vec"]
     )
-    assert df.select(split_hash(df, 1).alias("h")).count() == 10
+    assert df.select(_split_hash(df, 1).alias("h")).count() == 10
 
 
 def test_stratified_arguments_still_validate(rows):
@@ -144,9 +144,9 @@ def test_stratified_arguments_still_validate(rows):
 
 
 def test_fit_accepts_fold_key(rows):
-    from smallaxe.training import Regressors
+    from smallaxe.training import regressors
 
-    model = Regressors.random_forest(n_estimators=2, seed=1)
+    model = regressors.random_forest(n_estimators=2, seed=1)
     model.fit(
         rows,
         label_col="x",

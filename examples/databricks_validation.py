@@ -20,7 +20,7 @@ from hyperopt import hp
 
 import smallaxe
 from smallaxe.search import optimize
-from smallaxe.training import Classifiers, Regressors
+from smallaxe.training import classifiers, regressors
 
 smallaxe.set_seed(42)
 results = {}  # name -> "PASS" | "SKIP: reason" | "FAIL: reason"
@@ -47,8 +47,8 @@ def run_check(name, fn):
 # COMMAND ----------
 
 print("Spark:", spark.version)
-print("Regressors :", Regressors.available_models())
-print("Classifiers:", Classifiers.available_models())
+print("Regressors :", regressors.available_models())
+print("Classifiers:", classifiers.available_models())
 
 # COMMAND ----------
 
@@ -103,14 +103,14 @@ def check_classifier(make):
     print("   accuracy:", round(m.validation_scores["accuracy"], 4))
 
 
-run_check("RF regressor", lambda: check_regressor(lambda: Regressors.random_forest(n_estimators=50, max_depth=8, seed=42)))
-run_check("RF classifier", lambda: check_classifier(lambda: Classifiers.random_forest(task="binary", n_estimators=50, max_depth=6, seed=42)))
-run_check("XGBoost regressor", lambda: check_regressor(lambda: Regressors.xgboost(n_estimators=80, max_depth=5, seed=42)))
-run_check("XGBoost classifier", lambda: check_classifier(lambda: Classifiers.xgboost(task="binary", n_estimators=80, max_depth=5, seed=42)))
-run_check("LightGBM regressor", lambda: check_regressor(lambda: Regressors.lightgbm(n_estimators=80, max_depth=6, seed=42)))
-run_check("LightGBM classifier", lambda: check_classifier(lambda: Classifiers.lightgbm(task="binary", n_estimators=80, max_depth=6, seed=42)))
-run_check("CatBoost regressor", lambda: check_regressor(lambda: Regressors.catboost(n_estimators=80, max_depth=6, seed=42)))
-run_check("CatBoost classifier", lambda: check_classifier(lambda: Classifiers.catboost(task="binary", n_estimators=80, max_depth=6, seed=42)))
+run_check("RF regressor", lambda: check_regressor(lambda: regressors.random_forest(n_estimators=50, max_depth=8, seed=42)))
+run_check("RF classifier", lambda: check_classifier(lambda: classifiers.random_forest(task="binary", n_estimators=50, max_depth=6, seed=42)))
+run_check("XGBoost regressor", lambda: check_regressor(lambda: regressors.xgboost(n_estimators=80, max_depth=5, seed=42)))
+run_check("XGBoost classifier", lambda: check_classifier(lambda: classifiers.xgboost(task="binary", n_estimators=80, max_depth=5, seed=42)))
+run_check("LightGBM regressor", lambda: check_regressor(lambda: regressors.lightgbm(n_estimators=80, max_depth=6, seed=42)))
+run_check("LightGBM classifier", lambda: check_classifier(lambda: classifiers.lightgbm(task="binary", n_estimators=80, max_depth=6, seed=42)))
+run_check("CatBoost regressor", lambda: check_regressor(lambda: regressors.catboost(n_estimators=80, max_depth=6, seed=42)))
+run_check("CatBoost classifier", lambda: check_classifier(lambda: classifiers.catboost(task="binary", n_estimators=80, max_depth=6, seed=42)))
 
 # COMMAND ----------
 
@@ -119,7 +119,7 @@ run_check("CatBoost classifier", lambda: check_classifier(lambda: Classifiers.ca
 # COMMAND ----------
 
 def search_rf():
-    r = optimize.run(Regressors.random_forest(seed=42), hdf, label_col="price", feature_cols=hfeat,
+    r = optimize.run(regressors.random_forest(seed=42), hdf, label_col="price", feature_cols=hfeat,
                      param_space={"n_estimators": hp.quniform("n_estimators", 40, 120, 20),
                                   "max_depth": hp.quniform("max_depth", 5, 12, 1)},
                      metric="rmse", validation="train_test", max_evals=6, seed=42, verbose=False)
@@ -128,7 +128,7 @@ def search_rf():
 
 
 def search_xgb():
-    r = optimize.run(Classifiers.xgboost(task="binary", seed=42), tdf, label_col="Survived", feature_cols=TFEAT,
+    r = optimize.run(classifiers.xgboost(task="binary", seed=42), tdf, label_col="Survived", feature_cols=TFEAT,
                      param_space={"n_estimators": hp.quniform("n_estimators", 40, 120, 20),
                                   "learning_rate": hp.uniform("learning_rate", 0.03, 0.3)},
                      metric="auc_roc", validation="train_test", max_evals=6, seed=42, verbose=False)

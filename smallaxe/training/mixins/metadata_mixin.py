@@ -40,7 +40,7 @@ class MetadataMixin:
 
     def _capture_metadata(
         self,
-        df: DataFrame,
+        dataframe: DataFrame,
         label_col: str,
         feature_cols: List[str],
         extra_metadata: Optional[Dict[str, Any]] = None,
@@ -49,16 +49,16 @@ class MetadataMixin:
         """Capture metadata from the training process.
 
         Args:
-            df: Training DataFrame.
+            dataframe: Training DataFrame.
             label_col: Name of the label column.
             feature_cols: List of feature column names.
             extra_metadata: Additional metadata to include.
-            n_samples: Row count, if already known; otherwise ``df`` is counted.
+            n_samples: Row count, if already known; otherwise ``dataframe`` is counted.
         """
         # Get Spark version
         spark_version = None
         try:
-            spark = df.sparkSession
+            spark = dataframe.sparkSession
             spark_version = spark.version
         except Exception:
             pass
@@ -70,7 +70,7 @@ class MetadataMixin:
             "smallaxe_version": smallaxe.__version__,
             "label_col": label_col,
             "feature_cols": feature_cols,
-            "n_samples": df.count() if n_samples is None else n_samples,
+            "n_samples": dataframe.count() if n_samples is None else n_samples,
             "n_features": len(feature_cols),
             "seed": smallaxe.get_seed(),
         }
@@ -81,14 +81,14 @@ class MetadataMixin:
 
     def _capture_label_stats(
         self,
-        df: DataFrame,
+        dataframe: DataFrame,
         label_col: str,
         task_type: str,
     ) -> Dict[str, Any]:
         """Capture statistics about the label column.
 
         Args:
-            df: DataFrame containing the label column.
+            dataframe: DataFrame containing the label column.
             label_col: Name of the label column.
             task_type: Type of task ('regression', 'binary', 'multiclass').
 
@@ -101,7 +101,7 @@ class MetadataMixin:
 
         if task_type == "regression":
             # Regression stats
-            label_stats = df.select(
+            label_stats = dataframe.select(
                 F.min(label_col).alias("min"),
                 F.max(label_col).alias("max"),
                 F.mean(label_col).alias("mean"),
@@ -124,7 +124,7 @@ class MetadataMixin:
 
         else:
             # Classification stats
-            class_counts = df.groupBy(label_col).count().collect()
+            class_counts = dataframe.groupBy(label_col).count().collect()
             stats["class_counts"] = {str(row[label_col]): row["count"] for row in class_counts}
             stats["n_classes"] = len(class_counts)
 

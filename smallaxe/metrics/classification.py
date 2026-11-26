@@ -13,6 +13,7 @@ from pyspark.sql import DataFrame
 from pyspark.sql import functions as F
 from pyspark.sql.types import NumericType
 
+from smallaxe import _deprecation
 from smallaxe.exceptions import ValidationError
 from smallaxe.metrics._checks import require_numeric, require_rows
 from smallaxe.metrics._checks import validate_columns as _validate_columns
@@ -24,8 +25,9 @@ MULTICLASS_AVERAGED_METRICS = {
 }
 
 
+@_deprecation.df_keyword
 def accuracy(
-    df: DataFrame, label_col: str = "label", prediction_col: str = "predict_label"
+    dataframe: DataFrame, label_col: str = "label", prediction_col: str = "predict_label"
 ) -> float:
     """Compute classification accuracy.
 
@@ -36,7 +38,7 @@ def accuracy(
     instead ignores such rows.)
 
     Args:
-        df: PySpark DataFrame containing true and predicted labels.
+        dataframe: PySpark DataFrame containing true and predicted labels.
         label_col: Name of the column containing true labels. Default is 'label'.
         prediction_col: Name of the column containing predictions. Default is 'predict_label'.
 
@@ -47,18 +49,19 @@ def accuracy(
         ColumnNotFoundError: If label_col or prediction_col is not in the DataFrame.
         ValidationError: If the DataFrame has no rows.
     """
-    _validate_columns(df, label_col, prediction_col)
+    _validate_columns(dataframe, label_col, prediction_col)
 
-    total_count = df.count()
+    total_count = dataframe.count()
     if total_count == 0:
         raise ValidationError("Cannot compute accuracy: the DataFrame has no rows.")
 
-    correct_count = df.filter(F.col(label_col) == F.col(prediction_col)).count()
+    correct_count = dataframe.filter(F.col(label_col) == F.col(prediction_col)).count()
     return float(correct_count / total_count)
 
 
+@_deprecation.df_keyword
 def precision(
-    df: DataFrame,
+    dataframe: DataFrame,
     label_col: str = "label",
     prediction_col: str = "predict_label",
     *,
@@ -69,7 +72,7 @@ def precision(
     Precision = TP / (TP + FP)
 
     Args:
-        df: PySpark DataFrame containing true and predicted labels.
+        dataframe: PySpark DataFrame containing true and predicted labels.
         label_col: Name of the column containing true labels. Default is 'label'.
         prediction_col: Name of the column containing predictions. Default is 'predict_label'.
         average: 'binary' scores class 1 (default); 'macro' averages all classes
@@ -87,15 +90,17 @@ def precision(
             column is not numeric.
     """
     if average != "binary":
-        return _averaged_score(df, label_col, prediction_col, "precision", average)
-    _validate_columns(df, label_col, prediction_col)
-    require_rows(df, "precision")
+        return _averaged_score(dataframe, label_col, prediction_col, "precision", average)
+    _validate_columns(dataframe, label_col, prediction_col)
+    require_rows(dataframe, "precision")
 
     # Count true positives (predicted positive and actually positive)
-    true_positives = df.filter((F.col(prediction_col) == 1) & (F.col(label_col) == 1)).count()
+    true_positives = dataframe.filter(
+        (F.col(prediction_col) == 1) & (F.col(label_col) == 1)
+    ).count()
 
     # Count all positive predictions
-    predicted_positives = df.filter(F.col(prediction_col) == 1).count()
+    predicted_positives = dataframe.filter(F.col(prediction_col) == 1).count()
 
     if predicted_positives == 0:
         return 0.0
@@ -103,8 +108,9 @@ def precision(
     return float(true_positives / predicted_positives)
 
 
+@_deprecation.df_keyword
 def recall(
-    df: DataFrame,
+    dataframe: DataFrame,
     label_col: str = "label",
     prediction_col: str = "predict_label",
     *,
@@ -115,7 +121,7 @@ def recall(
     Recall = TP / (TP + FN)
 
     Args:
-        df: PySpark DataFrame containing true and predicted labels.
+        dataframe: PySpark DataFrame containing true and predicted labels.
         label_col: Name of the column containing true labels. Default is 'label'.
         prediction_col: Name of the column containing predictions. Default is 'predict_label'.
         average: 'binary' scores class 1 (default); 'macro' averages all classes
@@ -133,15 +139,17 @@ def recall(
             column is not numeric.
     """
     if average != "binary":
-        return _averaged_score(df, label_col, prediction_col, "recall", average)
-    _validate_columns(df, label_col, prediction_col)
-    require_rows(df, "recall")
+        return _averaged_score(dataframe, label_col, prediction_col, "recall", average)
+    _validate_columns(dataframe, label_col, prediction_col)
+    require_rows(dataframe, "recall")
 
     # Count true positives (predicted positive and actually positive)
-    true_positives = df.filter((F.col(prediction_col) == 1) & (F.col(label_col) == 1)).count()
+    true_positives = dataframe.filter(
+        (F.col(prediction_col) == 1) & (F.col(label_col) == 1)
+    ).count()
 
     # Count all actual positives
-    actual_positives = df.filter(F.col(label_col) == 1).count()
+    actual_positives = dataframe.filter(F.col(label_col) == 1).count()
 
     if actual_positives == 0:
         return 0.0
@@ -149,8 +157,9 @@ def recall(
     return float(true_positives / actual_positives)
 
 
+@_deprecation.df_keyword
 def f1_score(
-    df: DataFrame,
+    dataframe: DataFrame,
     label_col: str = "label",
     prediction_col: str = "predict_label",
     *,
@@ -161,7 +170,7 @@ def f1_score(
     F1 = 2 * (precision * recall) / (precision + recall)
 
     Args:
-        df: PySpark DataFrame containing true and predicted labels.
+        dataframe: PySpark DataFrame containing true and predicted labels.
         label_col: Name of the column containing true labels. Default is 'label'.
         prediction_col: Name of the column containing predictions. Default is 'predict_label'.
         average: 'binary' scores class 1 (default); 'macro' averages per-class
@@ -179,12 +188,12 @@ def f1_score(
             column is not numeric.
     """
     if average != "binary":
-        return _averaged_score(df, label_col, prediction_col, "f1_score", average)
-    _validate_columns(df, label_col, prediction_col)
-    require_rows(df, "f1_score")
+        return _averaged_score(dataframe, label_col, prediction_col, "f1_score", average)
+    _validate_columns(dataframe, label_col, prediction_col)
+    require_rows(dataframe, "f1_score")
 
-    prec = precision(df, label_col, prediction_col)
-    rec = recall(df, label_col, prediction_col)
+    prec = precision(dataframe, label_col, prediction_col)
+    rec = recall(dataframe, label_col, prediction_col)
 
     if prec + rec == 0:
         return 0.0
@@ -193,15 +202,16 @@ def f1_score(
 
 
 def _averaged_score(
-    df: DataFrame, label_col: str, prediction_col: str, metric: str, average: str
+    dataframe: DataFrame, label_col: str, prediction_col: str, metric: str, average: str
 ) -> float:
     if average not in {"macro", "weighted"}:
         raise ValidationError("average must be 'binary', 'macro', or 'weighted'.")
-    return _multiclass_scores(df, label_col, prediction_col, metric)[f"{metric}_{average}"]
+    return _multiclass_scores(dataframe, label_col, prediction_col, metric)[f"{metric}_{average}"]
 
 
+@_deprecation.df_keyword
 def multiclass_scores(
-    df: DataFrame, label_col: str = "label", prediction_col: str = "predict_label"
+    dataframe: DataFrame, label_col: str = "label", prediction_col: str = "predict_label"
 ) -> Dict[str, float]:
     """Compute accuracy and macro/weighted precision, recall, and F1 together.
 
@@ -218,7 +228,7 @@ def multiclass_scores(
     precision and recall.
 
     Args:
-        df: PySpark DataFrame containing true and predicted labels.
+        dataframe: PySpark DataFrame containing true and predicted labels.
         label_col: Name of the numeric column containing true labels. Default is 'label'.
         prediction_col: Name of the numeric column containing predictions.
             Default is 'predict_label'.
@@ -232,27 +242,27 @@ def multiclass_scores(
         ValidationError: If label_col or prediction_col is not numeric, or the
             DataFrame has no rows.
     """
-    return _multiclass_scores(df, label_col, prediction_col, "multiclass_scores")
+    return _multiclass_scores(dataframe, label_col, prediction_col, "multiclass_scores")
 
 
 def _multiclass_scores(
-    df: DataFrame, label_col: str, prediction_col: str, metric: str
+    dataframe: DataFrame, label_col: str, prediction_col: str, metric: str
 ) -> Dict[str, float]:
     """:func:`multiclass_scores`, naming ``metric`` in the empty-frame error."""
-    _validate_columns(df, label_col, prediction_col)
+    _validate_columns(dataframe, label_col, prediction_col)
     for col in (label_col, prediction_col):
-        data_type = df.schema[col].dataType
+        data_type = dataframe.schema[col].dataType
         if not isinstance(data_type, NumericType):
             raise ValidationError(
                 f"Column '{col}' must be numeric for multiclass scoring, "
                 f"got {data_type.simpleString()}."
             )
-    require_rows(df, metric)
+    require_rows(dataframe, metric)
     label = F.col(label_col).cast("double")
     prediction = F.col(prediction_col).cast("double")
     # Each input row contributes one actual and one predicted class count.
     # This also retains classes that appear only in predictions or true labels.
-    counts = df.where(label.isNotNull() & prediction.isNotNull()).select(
+    counts = dataframe.where(label.isNotNull() & prediction.isNotNull()).select(
         F.explode(
             F.array(
                 F.struct(
@@ -308,11 +318,14 @@ def _multiclass_scores(
     return scores
 
 
-def auc_roc(df: DataFrame, label_col: str = "label", probability_col: str = "probability") -> float:
+@_deprecation.df_keyword
+def auc_roc(
+    dataframe: DataFrame, label_col: str = "label", probability_col: str = "probability"
+) -> float:
     """Compute Area Under the ROC Curve (AUC-ROC).
 
     Args:
-        df: PySpark DataFrame containing true labels and probability scores.
+        dataframe: PySpark DataFrame containing true labels and probability scores.
         label_col: Name of the column containing true labels (0 or 1). Default is 'label'.
         probability_col: Name of the column containing probability scores. Default is 'probability'.
 
@@ -324,25 +337,28 @@ def auc_roc(df: DataFrame, label_col: str = "label", probability_col: str = "pro
         ColumnNotFoundError: If label_col or probability_col is not in the DataFrame.
         ValidationError: If the DataFrame has no rows.
     """
-    _validate_columns(df, label_col, probability_col)
-    require_rows(df, "auc_roc")
+    _validate_columns(dataframe, label_col, probability_col)
+    require_rows(dataframe, "auc_roc")
 
     label = F.col(label_col)
-    n_classes = df.where(label.isNotNull()).select(label).distinct().limit(2).count()
+    n_classes = dataframe.where(label.isNotNull()).select(label).distinct().limit(2).count()
     if n_classes < 2:
         return float("nan")
 
     evaluator = BinaryClassificationEvaluator(
         labelCol=label_col, rawPredictionCol=probability_col, metricName="areaUnderROC"
     )
-    return float(evaluator.evaluate(df))
+    return float(evaluator.evaluate(dataframe))
 
 
-def auc_pr(df: DataFrame, label_col: str = "label", probability_col: str = "probability") -> float:
+@_deprecation.df_keyword
+def auc_pr(
+    dataframe: DataFrame, label_col: str = "label", probability_col: str = "probability"
+) -> float:
     """Compute Area Under the Precision-Recall Curve (AUC-PR).
 
     Args:
-        df: PySpark DataFrame containing true labels and probability scores.
+        dataframe: PySpark DataFrame containing true labels and probability scores.
         label_col: Name of the column containing true labels (0 or 1). Default is 'label'.
         probability_col: Name of the column containing probability scores. Default is 'probability'.
 
@@ -354,22 +370,25 @@ def auc_pr(df: DataFrame, label_col: str = "label", probability_col: str = "prob
         ColumnNotFoundError: If label_col or probability_col is not in the DataFrame.
         ValidationError: If the DataFrame has no rows.
     """
-    _validate_columns(df, label_col, probability_col)
-    require_rows(df, "auc_pr")
+    _validate_columns(dataframe, label_col, probability_col)
+    require_rows(dataframe, "auc_pr")
 
-    if df.filter(F.col(label_col) == 1).limit(1).count() == 0:
+    if dataframe.filter(F.col(label_col) == 1).limit(1).count() == 0:
         return float("nan")
 
     evaluator = BinaryClassificationEvaluator(
         labelCol=label_col, rawPredictionCol=probability_col, metricName="areaUnderPR"
     )
-    return float(evaluator.evaluate(df))
+    return float(evaluator.evaluate(dataframe))
 
 
+@_deprecation.df_keyword
+@_deprecation.keyword_only("eps")
 def log_loss(
-    df: DataFrame,
+    dataframe: DataFrame,
     label_col: str = "label",
     probability_col: str = "probability",
+    *,
     eps: float = 1e-15,
 ) -> float:
     """Compute logarithmic loss (cross-entropy loss).
@@ -377,10 +396,11 @@ def log_loss(
     Log Loss = -(1/n) * sum(y * log(p) + (1-y) * log(1-p))
 
     Args:
-        df: PySpark DataFrame containing true labels and probability scores.
+        dataframe: PySpark DataFrame containing true labels and probability scores.
         label_col: Name of the column containing true labels (0 or 1). Default is 'label'.
         probability_col: Name of the column containing probability scores. Default is 'probability'.
-        eps: Small value to avoid log(0). Default is 1e-15.
+        eps: Small value to avoid log(0). Default is 1e-15. Keyword-only; passing it
+            positionally is deprecated (it warns, and is removed in smallaxe 1.0).
 
     Returns:
         Log loss as a float. Lower values indicate better predictions. NaN when no
@@ -391,9 +411,9 @@ def log_loss(
         ValidationError: If label_col or probability_col is not numeric, or the
             DataFrame has no rows.
     """
-    _validate_columns(df, label_col, probability_col)
-    require_numeric(df, "log_loss", label_col, probability_col)
-    require_rows(df, "log_loss")
+    _validate_columns(dataframe, label_col, probability_col)
+    require_numeric(dataframe, "log_loss", label_col, probability_col)
+    require_rows(dataframe, "log_loss")
 
     # Clip probabilities to avoid log(0)
     clipped_prob = (
@@ -404,7 +424,7 @@ def log_loss(
 
     # Calculate log loss
     # -[y * log(p) + (1-y) * log(1-p)]
-    result = df.select(
+    result = dataframe.select(
         F.avg(
             -(
                 F.col(label_col) * F.log(clipped_prob)

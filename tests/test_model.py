@@ -16,12 +16,12 @@ from pyspark.sql import functions as F
 
 from smallaxe.exceptions import DependencyError, ModelNotFittedError, ValidationError
 from smallaxe.training import (
-    Classifiers,
     RandomForestClassifier,
-    Regressors,
     XGBoostClassifier,
     XGBoostRegressor,
     algorithm,
+    classifiers,
+    regressors,
 )
 from smallaxe.training import catboost as catboost_module
 from smallaxe.training.algorithm import ALL_TASKS, Algorithm, Param
@@ -112,7 +112,7 @@ class TestFitWiring:
     def test_fit_assembles_features_and_builds_the_estimator(self, monkeypatch, df):
         record = _record()
         install_fake_modules(monkeypatch, record)
-        model = Regressor(record).set_param({"seed": 5})
+        model = Regressor(record).set_params(seed=5)
 
         model._fit_spark_model(df, "y", ["a", "b"])
 
@@ -165,7 +165,7 @@ class TestFitWiring:
 
         record = _record(fit_context=training_context)
         install_fake_modules(monkeypatch, record)
-        model = Regressor(record).set_param({"n_estimators": 3})
+        model = Regressor(record).set_params(n_estimators=3)
 
         model._fit_spark_model(df, "y", ["a", "b"])
         assert model._spark_model.estimator.kwargs["trainDir"] == "/scratch/catboost"
@@ -263,7 +263,7 @@ class TestImportancesWiring:
 
 class TestPersistence:
     def test_metadata_records_algorithm_and_task(self, fake_xgboost, df, tmp_path):
-        model = Classifiers.xgboost(task="multiclass", n_estimators=7)
+        model = classifiers.xgboost(task="multiclass", n_estimators=7)
         model.fit(df, label_col="y", feature_cols=["a", "b"])
         path = str(tmp_path / "model")
 
@@ -277,7 +277,7 @@ class TestPersistence:
         assert model._spark_model.saved_to.endswith("spark_model")
 
     def test_round_trip_through_model_load(self, fake_xgboost, df, tmp_path):
-        model = Classifiers.xgboost(task="multiclass", n_estimators=7)
+        model = classifiers.xgboost(task="multiclass", n_estimators=7)
         model.fit(df, label_col="y", feature_cols=["a", "b"])
         path = str(tmp_path / "model")
         model.save(path)
@@ -300,20 +300,20 @@ class TestPersistence:
         )
         install_fake_modules(monkeypatch, record)
         monkeypatch.setattr(catboost_module, "ALGORITHM", record)
-        model = Regressors.catboost()
+        model = regressors.catboost()
         model.fit(df, label_col="y", feature_cols=["a", "b"])
         path = str(tmp_path / "model")
         model.save(path)
         events.clear()
 
-        Regressors.load(path)
+        regressors.load(path)
 
         assert events == ["prepare"]
 
     def test_legacy_metadata_loads_by_class_name(self, fake_xgboost, tmp_path, spark_session):
         path = _write_legacy_artifact(tmp_path / "legacy")
 
-        loaded = Classifiers.load(path)
+        loaded = classifiers.load(path)
 
         assert type(loaded) is Classifier
         assert loaded.algorithm.name == "xgboost"
@@ -326,7 +326,7 @@ class TestPersistence:
         path = _write_legacy_artifact(tmp_path / "legacy")
 
         with pytest.raises(ValidationError, match="not a supported regressor"):
-            Regressors.load(path)
+            regressors.load(path)
 
     def test_alias_load_checks_kind_and_algorithm(self, fake_xgboost, tmp_path, spark_session):
         path = _write_legacy_artifact(tmp_path / "legacy")
@@ -364,7 +364,7 @@ class TestPipelineEncoderRequirement:
         Pipeline([("model", Regressor(raw))])._check_encoder_requirement(["city"])
 
         with pytest.raises(PreprocessingError):
-            Pipeline([("model", Regressors.random_forest())])._check_encoder_requirement(["city"])
+            Pipeline([("model", regressors.random_forest())])._check_encoder_requirement(["city"])
 
 
 class TestOptimizeUsesClone:
@@ -376,7 +376,7 @@ class TestOptimizeUsesClone:
 
         record = _record(importances=None)
         install_fake_modules(monkeypatch, record)
-        model = Regressor(record).set_param({"seed": 1})
+        model = Regressor(record).set_params(seed=1)
         clones = []
         original_clone = Regressor.clone
 

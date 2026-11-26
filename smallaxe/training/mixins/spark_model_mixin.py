@@ -84,18 +84,18 @@ class SparkModelMixin(ABC):
 
     def _assemble_features(
         self,
-        df: DataFrame,
+        dataframe: DataFrame,
         feature_cols: List[str],
         output_col: Optional[str] = None,
         handle_invalid: Optional[str] = None,
     ) -> DataFrame:
         """Assemble feature columns into a single vector column.
 
-        Always assembles from ``feature_cols``, even when ``df`` already holds a
+        Always assembles from ``feature_cols``, even when ``dataframe`` already holds a
         column with the output name: that is a user column and is never reused.
 
         Args:
-            df: PySpark DataFrame with feature columns.
+            dataframe: PySpark DataFrame with feature columns.
             feature_cols: List of column names to assemble.
             output_col: Name of the output vector column. Default is the
                 model's internal features column.
@@ -107,8 +107,8 @@ class SparkModelMixin(ABC):
         """
         output_col = output_col or self._features_col_name
         handle_invalid = handle_invalid or self._handle_invalid()
-        if output_col in df.columns:
-            df = df.drop(output_col)
+        if output_col in dataframe.columns:
+            dataframe = dataframe.drop(output_col)
 
         assembler = VectorAssembler(
             inputCols=feature_cols,
@@ -116,7 +116,7 @@ class SparkModelMixin(ABC):
             handleInvalid=handle_invalid,
         )
 
-        return assembler.transform(df)
+        return assembler.transform(dataframe)
 
     # --- Shielding user columns from the estimator's output names ---
 
@@ -129,27 +129,27 @@ class SparkModelMixin(ABC):
             self.RAW_PREDICTION_COL,
         ]
 
-    def _shield_user_columns(self, df: DataFrame) -> Tuple[DataFrame, Dict[str, str]]:
+    def _shield_user_columns(self, dataframe: DataFrame) -> Tuple[DataFrame, Dict[str, str]]:
         """Rename user columns that collide with internal names; return the mapping."""
         shielded: Dict[str, str] = {}
         for name in self._internal_cols():
-            if name in df.columns:
+            if name in dataframe.columns:
                 alias = f"__smallaxe_user_{name}__"
-                df = df.withColumnRenamed(name, alias)
+                dataframe = dataframe.withColumnRenamed(name, alias)
                 shielded[alias] = name
-        return df, shielded
+        return dataframe, shielded
 
-    def _unshield_user_columns(self, df: DataFrame, shielded: Dict[str, str]) -> DataFrame:
+    def _unshield_user_columns(self, dataframe: DataFrame, shielded: Dict[str, str]) -> DataFrame:
         """Drop internal columns and give shielded user columns their names back."""
         for name in self._internal_cols():
-            if name in df.columns:
-                df = df.drop(name)
+            if name in dataframe.columns:
+                dataframe = dataframe.drop(name)
         for alias, name in shielded.items():
-            df = df.withColumnRenamed(alias, name)
-        return df
+            dataframe = dataframe.withColumnRenamed(alias, name)
+        return dataframe
 
     def _transform_for_prediction(
-        self, df: DataFrame, feature_cols: List[str]
+        self, dataframe: DataFrame, feature_cols: List[str]
     ) -> Tuple[DataFrame, Dict[str, str]]:
         """Assemble features and run the fitted model, with user columns shielded.
 
@@ -157,13 +157,13 @@ class SparkModelMixin(ABC):
         are still present and shielded user columns still carry their aliases;
         callers finish with :meth:`_unshield_user_columns`.
         """
-        df, shielded = self._shield_user_columns(df)
-        df_with_features = self._assemble_features(df, feature_cols)
+        dataframe, shielded = self._shield_user_columns(dataframe)
+        df_with_features = self._assemble_features(dataframe, feature_cols)
         return self._spark_model.transform(df_with_features), shielded
 
-    def _check_output_col_free(self, df: DataFrame, output_col: str) -> None:
+    def _check_output_col_free(self, dataframe: DataFrame, output_col: str) -> None:
         """Refuse to overwrite a user column with a prediction output."""
-        if output_col in df.columns:
+        if output_col in dataframe.columns:
             raise ValidationError(
                 f"Column '{output_col}' already exists in the DataFrame and would be "
                 f"overwritten. Pass a different output_col, or drop the column first."
@@ -171,14 +171,14 @@ class SparkModelMixin(ABC):
 
     def _fit_spark_model(
         self,
-        df: DataFrame,
+        dataframe: DataFrame,
         label_col: str,
         feature_cols: List[str],
     ) -> Any:
         """Fit a Spark MLlib model.
 
         Args:
-            df: PySpark DataFrame with training data.
+            dataframe: PySpark DataFrame with training data.
             label_col: Name of the label column.
             feature_cols: List of feature column names.
 
@@ -186,8 +186,8 @@ class SparkModelMixin(ABC):
             Fitted Spark MLlib model.
         """
         self._features_col = self.FEATURES_COL
-        df, _ = self._shield_user_columns(df)
-        df_with_features = self._assemble_features(df, feature_cols)
+        dataframe, _ = self._shield_user_columns(dataframe)
+        df_with_features = self._assemble_features(dataframe, feature_cols)
 
         # Create the estimator with column params
         estimator = self._create_spark_estimator(
@@ -213,13 +213,13 @@ class SparkModelMixin(ABC):
 
     def _predict_spark_model(
         self,
-        df: DataFrame,
+        dataframe: DataFrame,
         output_col: str = "predict_label",
     ) -> DataFrame:
         """Generate predictions using the fitted Spark MLlib model.
 
         Args:
-            df: PySpark DataFrame with feature columns.
+            dataframe: PySpark DataFrame with feature columns.
             output_col: Name of the output prediction column.
                 Default is 'predict_label'.
 
@@ -229,13 +229,13 @@ class SparkModelMixin(ABC):
 
         Raises:
             ModelNotFittedError: If the model has not been fitted.
-            ValidationError: If ``output_col`` is already a column of ``df``.
+            ValidationError: If ``output_col`` is already a column of ``dataframe``.
         """
         if not hasattr(self, "_spark_model") or self._spark_model is None:
             raise ModelNotFittedError("Model has not been fitted. Call fit() before predict().")
-        self._check_output_col_free(df, output_col)
+        self._check_output_col_free(dataframe, output_col)
 
-        predictions_df, shielded = self._transform_for_prediction(df, self._feature_cols)
+        predictions_df, shielded = self._transform_for_prediction(dataframe, self._feature_cols)
 
         keep = {self.PREDICTION_COL: output_col}
         # Classifiers also return the probability vector, unless the user owns that name.
@@ -247,32 +247,32 @@ class SparkModelMixin(ABC):
         return self._finish_prediction(predictions_df, shielded, keep)
 
     def _finish_prediction(
-        self, df: DataFrame, shielded: Dict[str, str], keep: Dict[str, str]
+        self, dataframe: DataFrame, shielded: Dict[str, str], keep: Dict[str, str]
     ) -> DataFrame:
         """Drop internal columns, restore user columns, and name the kept outputs.
 
         Args:
-            df: Raw transform output.
+            dataframe: Raw transform output.
             shielded: Mapping from :meth:`_shield_user_columns`.
             keep: Internal output column -> final name. Parked under temporary
                 names first, so an output named like an internal column survives.
         """
         for internal, final in keep.items():
-            df = df.withColumnRenamed(internal, f"__smallaxe_keep_{final}__")
-        df = self._unshield_user_columns(df, shielded)
+            dataframe = dataframe.withColumnRenamed(internal, f"__smallaxe_keep_{final}__")
+        dataframe = self._unshield_user_columns(dataframe, shielded)
         for final in keep.values():
-            df = df.withColumnRenamed(f"__smallaxe_keep_{final}__", final)
-        return df
+            dataframe = dataframe.withColumnRenamed(f"__smallaxe_keep_{final}__", final)
+        return dataframe
 
     def _predict_proba_spark_model(
         self,
-        df: DataFrame,
+        dataframe: DataFrame,
         output_col: str = "probability",
     ) -> DataFrame:
         """Generate probability predictions for classification.
 
         Args:
-            df: PySpark DataFrame with feature columns.
+            dataframe: PySpark DataFrame with feature columns.
             output_col: Name of the output probability column.
                 Default is 'probability'.
 
@@ -281,15 +281,15 @@ class SparkModelMixin(ABC):
 
         Raises:
             ModelNotFittedError: If the model has not been fitted.
-            ValidationError: If ``output_col`` is already a column of ``df``.
+            ValidationError: If ``output_col`` is already a column of ``dataframe``.
         """
         if not hasattr(self, "_spark_model") or self._spark_model is None:
             raise ModelNotFittedError(
                 "Model has not been fitted. Call fit() before predict_proba()."
             )
-        self._check_output_col_free(df, output_col)
+        self._check_output_col_free(dataframe, output_col)
 
-        predictions_df, shielded = self._transform_for_prediction(df, self._feature_cols)
+        predictions_df, shielded = self._transform_for_prediction(dataframe, self._feature_cols)
         keep = {}
         if self.PROBABILITY_COL in predictions_df.columns:
             keep[self.PROBABILITY_COL] = output_col
