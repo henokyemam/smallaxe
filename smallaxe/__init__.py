@@ -10,6 +10,8 @@ optional algorithm package; each subpackage is imported when it is first used:
 - :mod:`smallaxe.pipeline`: ``Pipeline``.
 - :mod:`smallaxe.metrics`: regression and classification metrics.
 - :mod:`smallaxe.search`: hyperparameter search (``optimize.run``).
+- :mod:`smallaxe.auto`: ``AutomatedTraining``, every installed algorithm compared on one split.
+- :mod:`smallaxe.viz`: plotly charts that aggregate in Spark (the ``viz`` extra).
 - :mod:`smallaxe.datasets`: sample datasets.
 - :mod:`smallaxe.exceptions`: the exception hierarchy.
 """
