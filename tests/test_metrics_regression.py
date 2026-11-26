@@ -362,12 +362,22 @@ class TestFailureIsNeverAScore:
             metric_fn(df)
 
     @pytest.mark.parametrize("metric_fn", [mse, rmse, mae, r2], ids=lambda fn: fn.__name__)
-    def test_evaluator_errors_propagate(self, spark_session, metric_fn):
+    def test_a_string_label_is_a_validation_error(self, spark_session, metric_fn):
         """A label Spark's evaluator cannot read is an error, not a perfect 0.0."""
         df = spark_session.createDataFrame([("a", 1.0), ("b", 2.0)], ["label", "predict_label"])
-        with pytest.raises(Exception) as info:
+        with pytest.raises(ValidationError, match=f"{metric_fn.__name__}.*'label' must be numeric"):
             metric_fn(df)
-        assert not isinstance(info.value, ValidationError)
+
+    def test_an_argument_the_evaluator_rejects_is_a_validation_error(self, spark_session):
+        """Spark's own argument errors surface as ValidationError, chained to Spark's."""
+        from pyspark.sql.utils import IllegalArgumentException
+
+        # The evaluator wants a double or float prediction; an int column passes the
+        # numeric check and is rejected by Spark itself.
+        df = spark_session.createDataFrame([(1.0, 1), (2.0, 3)], "label double, predict_label int")
+        with pytest.raises(ValidationError, match="Cannot compute rmse") as info:
+            rmse(df)
+        assert isinstance(info.value.__cause__, IllegalArgumentException)
 
     def test_r2_is_nan_when_the_evaluator_yields_nan(self, spark_session):
         df = spark_session.createDataFrame(

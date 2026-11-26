@@ -5,11 +5,24 @@ from typing import List
 from pyspark.sql import DataFrame
 from pyspark.sql.types import NumericType
 
+from smallaxe._checks import require_dataframe
 from smallaxe.exceptions import ColumnNotFoundError, ValidationError
+
+__all__ = ["validate_columns", "require_numeric", "require_rows"]
 
 
 def validate_columns(dataframe: DataFrame, *cols: str) -> None:
-    """Raise ``ColumnNotFoundError`` if any of ``cols`` is not a column of ``dataframe``."""
+    """Check ``dataframe`` is a DataFrame holding every one of ``cols``.
+
+    Raises:
+        ValidationError: If ``dataframe`` is not a DataFrame or a column name is not a
+            string.
+        ColumnNotFoundError: If any of ``cols`` is not a column of ``dataframe``.
+    """
+    require_dataframe(dataframe)
+    for col in cols:
+        if not isinstance(col, str):
+            raise ValidationError(f"Column names must be strings, got {col!r}.")
     available_columns: List[str] = dataframe.columns
     for col in cols:
         if col not in available_columns:

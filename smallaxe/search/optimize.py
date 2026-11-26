@@ -4,11 +4,7 @@ This module provides :func:`run`, a small, predictable hyperparameter search
 built on `hyperopt <https://github.com/hyperopt/hyperopt>`_. It optimizes the
 hyperparameters of any smallaxe model (Random Forest, XGBoost, LightGBM,
 CatBoost) using the model's own ``fit`` / ``validation_scores`` machinery, so
-the search honors the same validation strategy, stratification, and seed as
-ordinary training.
-
-hyperopt is a required dependency of smallaxe. If it is missing, :func:`run` raises a
-:class:`~smallaxe.exceptions.DependencyError` with an install hint.
+the search honors the same validation strategy, folds, and seed as ordinary training.
 
 Example:
     >>> from hyperopt import hp
@@ -34,35 +30,29 @@ Example:
 """
 
 import math
+import numbers
 from typing import Any, Dict, List, Optional
 
+from hyperopt import STATUS_FAIL, STATUS_OK, Trials, fmin, hp, space_eval, tpe
+from hyperopt.early_stop import no_progress_loss
+from hyperopt.exceptions import AllTrialsFailed
+from hyperopt.pyll import Apply
 from pyspark.sql import DataFrame
 
 import smallaxe
-from smallaxe import _deprecation
-from smallaxe.exceptions import DependencyError, ValidationError
+from smallaxe import _checks
+from smallaxe.exceptions import ValidationError
 from smallaxe.metrics import TASK_METRICS
-from smallaxe.metrics.classification import MULTICLASS_AVERAGED_METRICS
+from smallaxe.metrics.classification import _MULTICLASS_AVERAGED_METRICS
 from smallaxe.training.base import (
+    Model,
     _check_training_data,
     _infer_feature_cols,
     _warn_ignored_cols,
-    _warn_stratified,
 )
 from smallaxe.training.mixins.validation_mixin import _resolve_split_seed
 
-# hyperopt is a required dependency. Guard the import anyway so the module remains
-# importable (and the rest of smallaxe keeps working) in a broken install.
-try:
-    from hyperopt import STATUS_FAIL, STATUS_OK, Trials, fmin, hp, space_eval, tpe
-    from hyperopt.early_stop import no_progress_loss
-    from hyperopt.exceptions import AllTrialsFailed
-
-    _HYPEROPT_AVAILABLE = True
-except ImportError:  # pragma: no cover - exercised in environments without hyperopt
-    _HYPEROPT_AVAILABLE = False
-
-_HYPEROPT_INSTALL_HINT = "pip install hyperopt"
+__all__ = ["SearchResult", "run"]
 
 # Metric direction. Search always minimizes loss internally; for metrics where
 # a higher value is better we minimize the negated score.
@@ -74,7 +64,7 @@ _MAXIMIZE_METRICS = {
     "f1_score",
     "auc_roc",
     "auc_pr",
-} | MULTICLASS_AVERAGED_METRICS
+} | _MULTICLASS_AVERAGED_METRICS
 _MINIMIZE_METRICS = {
     "mse",
     "rmse",
@@ -85,14 +75,19 @@ _MINIMIZE_METRICS = {
 _VALID_METRICS = _MAXIMIZE_METRICS | _MINIMIZE_METRICS
 
 
-def _check_hyperopt_available() -> None:
-    """Raise an actionable error when hyperopt is not installed."""
-    if not _HYPEROPT_AVAILABLE:
-        raise DependencyError(package="hyperopt", install_command=_HYPEROPT_INSTALL_HINT)
-
-
 class SearchResult:
     """Container for the outcome of a hyperparameter search.
+
+    :func:`run` builds it; each argument is kept as the attribute of the same name.
+
+    Args:
+        best_params: The best hyperparameters found.
+        best_score: The validation score of ``best_params``.
+        best_model: The model refitted with ``best_params``, or None.
+        trials_history: One dict per evaluation.
+        metric: The optimized metric name.
+        validation: The validation strategy used during the search.
+        max_evals: The number of evaluations requested.
 
     Attributes:
         best_params: The best hyperparameters found, cast to the model's
@@ -129,12 +124,20 @@ class SearchResult:
 
     @property
     def n_trials(self) -> int:
-        """Number of trials actually evaluated (including failed ones)."""
+        """Number of trials actually evaluated.
+
+        Returns:
+            The trial count, failed trials included.
+        """
         return len(self.trials_history)
 
     @property
     def n_successful_trials(self) -> int:
-        """Number of trials that completed without error."""
+        """Number of trials that completed without error.
+
+        Returns:
+            The count of trials whose status is ``"ok"``.
+        """
         return sum(1 for t in self.trials_history if t.get("status") == "ok")
 
     def __repr__(self) -> str:
@@ -155,12 +158,17 @@ def _default_metric(model: Any) -> str:
     return "accuracy"
 
 
-def _normalize_space(param_space: Dict[str, Any]) -> Dict[str, Any]:
-    """Convert convenience shorthands into hyperopt expressions.
+def _normalize_space(param_space: Dict[str, Any], type_reference: Dict[str, Any]) -> Dict[str, Any]:
+    """Convert convenience shorthands into hyperopt expressions, checking fixed values.
 
     A list/tuple value is treated as a discrete set of choices and converted to
-    ``hp.choice``. Any other value is assumed to already be a hyperopt
-    expression and is passed through unchanged.
+    ``hp.choice``. A hyperopt expression (``hp.quniform(...)``) is passed through
+    unchanged. Any other value is a constant: hyperopt hands it to every trial as is.
+    Each choice and constant must cast to the parameter's type (see :func:`_cast_params`).
+
+    Raises:
+        ValidationError: If ``param_space`` is not a non-empty dict with string keys, a
+            choice list is empty, or a choice or constant does not fit its parameter.
     """
     if not isinstance(param_space, dict) or not param_space:
         raise ValidationError(
@@ -170,11 +178,17 @@ def _normalize_space(param_space: Dict[str, Any]) -> Dict[str, Any]:
 
     normalized: Dict[str, Any] = {}
     for name, spec in param_space.items():
+        if not isinstance(name, str):
+            raise ValidationError(f"param_space keys must be parameter names, got {name!r}.")
         if isinstance(spec, (list, tuple)):
             if len(spec) == 0:
                 raise ValidationError(f"Choice list for parameter '{name}' is empty.")
+            for choice in spec:
+                _cast_params({name: choice}, type_reference)
             normalized[name] = hp.choice(name, list(spec))
         else:
+            if not isinstance(spec, Apply):
+                _cast_params({name: spec}, type_reference)
             normalized[name] = spec
     return normalized
 
@@ -185,6 +199,9 @@ def _cast_params(sampled: Dict[str, Any], type_reference: Dict[str, Any]) -> Dic
     hyperopt's quantized distributions (``hp.quniform``) yield floats even for
     integer-valued parameters, so cast each sampled value to match the type of
     the model's default for that parameter.
+
+    Raises:
+        ValidationError: If a value for an int or float parameter is not a number.
     """
     cast: Dict[str, Any] = {}
     for name, value in sampled.items():
@@ -194,10 +211,13 @@ def _cast_params(sampled: Dict[str, Any], type_reference: Dict[str, Any]) -> Dic
         elif isinstance(default, bool):
             # bool is a subclass of int; handle before int to avoid misfire.
             cast[name] = bool(value)
-        elif isinstance(default, int):
-            cast[name] = int(round(value))
-        elif isinstance(default, float):
-            cast[name] = float(value)
+        elif isinstance(default, (int, float)):
+            if isinstance(value, bool) or not isinstance(value, numbers.Real):
+                raise ValidationError(
+                    f"param_space value {value!r} for '{name}' must be a number, like the "
+                    f"parameter's default {default!r}."
+                )
+            cast[name] = int(round(value)) if isinstance(default, int) else float(value)
         else:
             cast[name] = value
     return cast
@@ -253,7 +273,6 @@ def run(
     test_size: float = 0.2,
     feature_cols: Optional[List[str]] = None,
     exclude_cols: Optional[List[str]] = None,
-    stratified: Optional[bool] = None,
     fold_key: Optional[str] = None,
     seed: Optional[int] = None,
     refit: bool = True,
@@ -295,8 +314,6 @@ def run(
         test_size: Test proportion when ``validation='train_test'``. Default 0.2.
         feature_cols: Feature columns. If None, inferred from numeric columns.
         exclude_cols: Columns to exclude from inferred features.
-        stratified: Deprecated; has no effect and is removed in smallaxe 1.0, as for
-            ``fit``. Passing a value other than None warns once.
         fold_key: Column whose value alone decides a row's fold or split, as in
             ``fit``. Every trial scores on the same folds either way.
         seed: Seed for hyperopt's sampler and for the data splits. Defaults to
@@ -315,29 +332,65 @@ def run(
         SearchResult: best_params, best_score, best_model, and trials_history.
 
     Raises:
-        DependencyError: If hyperopt is not installed.
-        ValidationError: If arguments are invalid (bad metric, a metric the
-            model's task does not produce, empty space, validation='none', etc.).
+        ValidationError: If arguments are invalid: ``model`` is not a smallaxe model,
+            ``dataframe`` is not a DataFrame, a bad metric or one the model's task does
+            not produce, an empty or malformed space (a key that is not a parameter
+            name, a choice or constant that is not a number for a numeric parameter),
+            validation='none', a ``test_size``, ``n_folds`` or ``fold_key`` that ``fit``
+            would reject, a ``max_evals`` or ``early_stopping_rounds`` below 1, a ``seed``
+            that is not an int, a ``refit``, ``verbose`` or ``early_stopping`` that is not
+            a bool, a label that is not numeric, or every trial failed.
+        ColumnNotFoundError: If ``label_col`` or a feature column is missing.
     """
-    _check_hyperopt_available()
-    if stratified is not None:
-        _warn_stratified("optimize.run()")
-
     # --- Validate arguments up front for clear, early failures. ---
-    if not label_col:
-        raise ValidationError("label_col is required.")
+    if not isinstance(model, Model):
+        raise ValidationError(
+            "model must be a smallaxe model (from regressors.<algorithm>() or "
+            f"classifiers.<algorithm>()), got {type(model).__name__}."
+        )
+    _checks.require_dataframe(dataframe)
+    feature_cols = _checks.column_names("feature_cols", feature_cols)
+    exclude_cols = _checks.column_names("exclude_cols", exclude_cols)
+    if not label_col or not isinstance(label_col, str):
+        raise ValidationError(f"label_col must be a non-empty column name, got {label_col!r}.")
 
-    if validation not in {"train_test", "kfold"}:
+    if validation not in ("train_test", "kfold"):
         raise ValidationError(
             f"validation must be 'train_test' or 'kfold' for optimization, got "
-            f"'{validation}'. 'none' produces no score to optimize."
+            f"{validation!r}. 'none' produces no score to optimize."
         )
+    # test_size, n_folds, fold_key and refit are checked as fit checks them, once.
+    model._validate_fit_params(
+        dataframe=dataframe,
+        label_col=label_col,
+        feature_cols=feature_cols,
+        exclude_cols=exclude_cols,
+        validation=validation,
+        cache_strategy=None,
+        test_size=test_size,
+        n_folds=n_folds,
+        fold_key=fold_key,
+        refit=refit,
+    )
+    for name, flag in (("verbose", verbose), ("early_stopping", early_stopping)):
+        if flag is not None and not isinstance(flag, bool):
+            raise ValidationError(f"{name} must be True or False, got {flag!r}.")
 
-    if max_evals < 1:
-        raise ValidationError(f"max_evals must be at least 1, got {max_evals}.")
+    if isinstance(max_evals, bool) or not isinstance(max_evals, int) or max_evals < 1:
+        raise ValidationError(f"max_evals must be an integer of at least 1, got {max_evals!r}.")
+    if (
+        isinstance(early_stopping_rounds, bool)
+        or not isinstance(early_stopping_rounds, int)
+        or early_stopping_rounds < 1
+    ):
+        raise ValidationError(
+            f"early_stopping_rounds must be an integer of at least 1, got {early_stopping_rounds!r}."
+        )
+    if seed is not None and (isinstance(seed, bool) or not isinstance(seed, int)):
+        raise ValidationError(f"seed must be an integer or None, got {type(seed).__name__}.")
 
     metric = metric or _default_metric(model)
-    if metric not in _VALID_METRICS:
+    if not isinstance(metric, str) or metric not in _VALID_METRICS:
         raise ValidationError(
             f"Invalid metric '{metric}'. Supported metrics are: {sorted(_VALID_METRICS)}."
         )
@@ -349,8 +402,14 @@ def run(
             f"Supported metrics for this task are: {sorted(task_metrics)}."
         )
 
-    space = _normalize_space(param_space)
     type_reference = model.default_params
+    space = _normalize_space(param_space, type_reference)
+    unknown = sorted(set(param_space) - set(model.params))
+    if unknown:
+        raise ValidationError(
+            f"param_space names {unknown}, which {model.algorithm.name!r} does not have for "
+            f"task {model.task!r}. Its parameters are: {sorted(model.params)}."
+        )
     maximize = metric in _MAXIMIZE_METRICS
 
     # Infer features once and check the data once, so bad data fails here rather
@@ -499,43 +558,3 @@ def run(
         validation=validation,
         max_evals=max_evals,
     )
-
-
-# Deprecated public names, removed in smallaxe 1.0.
-_METRICS_ADVICE = (
-    "Use smallaxe.metrics.TASK_METRICS for the metrics each task produces; optimize.run "
-    "raises ValidationError for one it cannot optimize."
-)
-_MOVED = {
-    "HYPEROPT_AVAILABLE": (
-        "hyperopt is a required dependency, so the flag is always True; drop the check.",
-        lambda: _HYPEROPT_AVAILABLE,
-    ),
-    "HYPEROPT_INSTALL_HINT": (
-        "hyperopt is a required dependency; install it with 'pip install hyperopt'.",
-        _deprecation.renamed(_HYPEROPT_INSTALL_HINT),
-    ),
-    "MAXIMIZE_METRICS": (_METRICS_ADVICE, _deprecation.renamed(_MAXIMIZE_METRICS)),
-    "MINIMIZE_METRICS": (_METRICS_ADVICE, _deprecation.renamed(_MINIMIZE_METRICS)),
-    "VALID_METRICS": (_METRICS_ADVICE, _deprecation.renamed(_VALID_METRICS)),
-    # Helpers this module imported, and so exposed, in 0.10.
-    "infer_feature_cols": (
-        "Use Model.fit(), which infers feature_cols when none are given, instead.",
-        _deprecation.with_df_keyword(_infer_feature_cols),
-    ),
-    "warn_ignored_cols": (
-        "Use Model.fit(), which warns about the columns it leaves out, instead.",
-        lambda: _warn_ignored_cols,
-    ),
-    "check_training_data": (
-        "Use Model.fit(), which runs this check, instead.",
-        _deprecation.with_df_keyword(_check_training_data),
-    ),
-    "resolve_split_seed": (
-        "Use smallaxe.set_seed() or the model's seed parameter, which decide the split "
-        "seed, instead.",
-        lambda: _resolve_split_seed,
-    ),
-}
-__getattr__ = _deprecation.module_getattr(__name__, _MOVED)
-__dir__ = _deprecation.module_dir(globals(), _MOVED)

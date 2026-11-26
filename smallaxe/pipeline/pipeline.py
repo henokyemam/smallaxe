@@ -23,22 +23,24 @@ from typing import Any, Callable, Dict, List, Optional, Set, Tuple, cast
 
 from pyspark.sql import DataFrame
 
-from smallaxe import _artifact, _deprecation, _fs
+from smallaxe import _artifact, _checks, _fs
 from smallaxe.exceptions import ModelNotFittedError, PreprocessingError, ValidationError
 
-ARTIFACT_KIND = "pipeline"
-STEPS_DIR = "steps"
+__all__ = ["Pipeline"]
 
-IMPUTER = "imputer"
-SCALER = "scaler"
-ENCODER = "encoder"
-MODEL = "model"
-STEP_KINDS = (IMPUTER, SCALER, ENCODER, MODEL)
-PREPROCESSING_KINDS = (IMPUTER, SCALER, ENCODER)
+_ARTIFACT_KIND = "pipeline"
+_STEPS_DIR = "steps"
+
+_IMPUTER = "imputer"
+_SCALER = "scaler"
+_ENCODER = "encoder"
+_MODEL = "model"
+_STEP_KINDS = (_IMPUTER, _SCALER, _ENCODER, _MODEL)
+_PREPROCESSING_KINDS = (_IMPUTER, _SCALER, _ENCODER)
 
 # Model.predict / predict_proba output column defaults.
-DEFAULT_PREDICTION_COL = "predict_label"
-DEFAULT_PROBABILITY_COL = "probability"
+_DEFAULT_PREDICTION_COL = "predict_label"
+_DEFAULT_PROBABILITY_COL = "probability"
 
 # smallaxe 0.10 Pipeline.save recorded the class name of each step in ``step_types``.
 # Its Encoder had no save(), so it was pickled: the one pickle a legacy pipeline may hold.
@@ -47,8 +49,33 @@ _LEGACY_ENCODER_GLOBAL = ("smallaxe.preprocessing.encoder", "Encoder")
 
 _UNSAFE_DIR_CHARS = re.compile(r"[^A-Za-z0-9_.-]")
 
+# The validation options Pipeline.fit hands to the model step, with Model.fit's defaults.
+_MODEL_FIT_DEFAULTS: Dict[str, Any] = {
+    "validation": "none",
+    "test_size": 0.2,
+    "n_folds": 5,
+    "fold_key": None,
+    "refit": True,
+    "cache_strategy": None,
+}
 
-def step_kind(step: Any) -> Optional[str]:
+
+def _given_options(options: Dict[str, Any]) -> Dict[str, Any]:
+    """The validation options that differ from ``Model.fit``'s defaults.
+
+    A value differs unless it is the default's type and equal to it, so ``refit=1`` or
+    ``n_folds=5.0`` counts as given. A default passed explicitly cannot be told from one
+    left out, and counts as not given.
+    """
+    given: Dict[str, Any] = {}
+    for key, value in options.items():
+        default = _MODEL_FIT_DEFAULTS[key]
+        if type(value) is not type(default) or value != default:
+            given[key] = value
+    return given
+
+
+def _step_kind(step: Any) -> Optional[str]:
     """The kind of a step: ``"imputer"``, ``"scaler"``, ``"encoder"``, ``"model"`` or None.
 
     ``"model"`` is a smallaxe :class:`~smallaxe.training.base.Model` (a ``Regressor`` or
@@ -58,13 +85,13 @@ def step_kind(step: Any) -> Optional[str]:
     from smallaxe.training.base import Model
 
     if isinstance(step, Imputer):
-        return IMPUTER
+        return _IMPUTER
     if isinstance(step, Scaler):
-        return SCALER
+        return _SCALER
     if isinstance(step, Encoder):
-        return ENCODER
+        return _ENCODER
     if isinstance(step, Model):
-        return MODEL
+        return _MODEL
     return None
 
 
@@ -79,24 +106,24 @@ def _is_model_step(step: Any) -> bool:
 
 def _is_preprocessing_step(step: Any) -> bool:
     """Whether ``step`` is a preprocessing step: a smallaxe one, or fit + transform, no predict."""
-    if step_kind(step) in PREPROCESSING_KINDS:
+    if _step_kind(step) in _PREPROCESSING_KINDS:
         return True
     return hasattr(step, "fit") and hasattr(step, "transform") and not hasattr(step, "predict")
 
 
 def _step_dir(index: int, name: str) -> str:
     """The step's directory relative to the pipeline artifact: ``steps/<index>_<name>``."""
-    return _fs.join(STEPS_DIR, f"{index}_{_UNSAFE_DIR_CHARS.sub('_', name)}")
+    return _fs.join(_STEPS_DIR, f"{index}_{_UNSAFE_DIR_CHARS.sub('_', name)}")
 
 
 def _skipped_params(kind: str, step: Any) -> Dict[str, Any]:
     """The constructor arguments of a skipped (unfitted) preprocessing step."""
-    if kind == IMPUTER:
+    if kind == _IMPUTER:
         return {
             "numerical_strategy": step._numerical_strategy,
             "categorical_strategy": step._categorical_strategy,
         }
-    if kind == SCALER:
+    if kind == _SCALER:
         return {"method": step.method}
     return {
         "method": step.method,
@@ -110,14 +137,19 @@ def _loaders() -> Dict[str, Callable[[str], Any]]:
     from smallaxe import load_model
     from smallaxe.preprocessing import Encoder, Imputer, Scaler
 
-    return {IMPUTER: Imputer.load, SCALER: Scaler.load, ENCODER: Encoder.load, MODEL: load_model}
+    return {
+        _IMPUTER: Imputer.load,
+        _SCALER: Scaler.load,
+        _ENCODER: Encoder.load,
+        _MODEL: load_model,
+    }
 
 
 def _constructors() -> Dict[str, Callable[..., Any]]:
     """Preprocessing kind -> its class, to rebuild a skipped step."""
     from smallaxe.preprocessing import Encoder, Imputer, Scaler
 
-    return {IMPUTER: Imputer, SCALER: Scaler, ENCODER: Encoder}
+    return {_IMPUTER: Imputer, _SCALER: Scaler, _ENCODER: Encoder}
 
 
 class _LegacyEncoderUnpickler(pickle.Unpickler):
@@ -153,6 +185,14 @@ class Pipeline:
     A smallaxe model whose algorithm does not accept raw categorical columns (every
     algorithm today) needs an ``Encoder`` in the pipeline whenever ``categorical_cols``
     are given; ``fit`` raises ``PreprocessingError`` otherwise.
+
+    ``fit`` takes the model's validation options (``validation``, ``test_size``,
+    ``n_folds``, ``fold_key``, ``refit``, ``cache_strategy``) and hands them to the model
+    step; :attr:`validation_scores` reports the result. The preprocessing steps are fitted
+    on every row first, so their statistics (imputed means, scaling ranges, encoder
+    categories) include the rows validation later holds out. The scores therefore measure
+    the model on data preprocessed with knowledge of the validation rows, which can be
+    slightly optimistic.
 
     Args:
         steps: A list of ``(name, step)`` tuples: preprocessing steps first, then at
@@ -261,45 +301,105 @@ class Pipeline:
         """
         if not categorical_cols:
             return
-        if any(step_kind(step) == ENCODER for _, step in self._steps):
+        if any(_step_kind(step) == _ENCODER for _, step in self._steps):
             return
         for _, step in self._steps:
-            if step_kind(step) == MODEL and not step.algorithm.accepts_raw_categoricals:
+            if _step_kind(step) == _MODEL and not step.algorithm.accepts_raw_categoricals:
                 raise PreprocessingError(algorithm=step.algorithm.name, missing_step="Encoder")
 
     # --- Properties -----------------------------------------------------------------
 
     @property
     def steps(self) -> List[Tuple[str, Any]]:
-        """A copy of the ``(name, step)`` list."""
+        """The pipeline's steps.
+
+        Returns:
+            A copy of the ``(name, step)`` list, in order.
+        """
         return list(self._steps)
 
     @property
     def named_steps(self) -> Dict[str, Any]:
-        """The steps as a dictionary from name to step."""
+        """The steps by name.
+
+        Returns:
+            A dictionary from step name to step.
+        """
         return {name: step for name, step in self._steps}
 
     @property
     def feature_cols(self) -> Optional[List[str]]:
-        """The columns the model was fitted on, or None before fit or without a model."""
+        """The columns the model was fitted on.
+
+        Returns:
+            The model's feature columns, or None before fit or without a model.
+        """
         return list(self._feature_cols) if self._feature_cols is not None else None
 
     @property
     def skipped_steps(self) -> List[str]:
-        """Names of the steps the last fit skipped because they received no columns."""
+        """The steps the last fit skipped because they received no columns.
+
+        Returns:
+            Their names, in pipeline order.
+        """
         return list(self._skipped)
+
+    @property
+    def validation_scores(self) -> Optional[Dict[str, Any]]:
+        """The model step's ``validation_scores``, or None for a pipeline without a model.
+
+        See :meth:`fit` for what they measure: the preprocessing steps were fitted on
+        every row, validation rows included.
+
+        Returns:
+            The model's validation scores (None when it was fitted with
+            ``validation='none'``), or None without a model step.
+
+        Raises:
+            ModelNotFittedError: If the pipeline has a smallaxe model and has not been
+                fitted.
+        """
+        model = self._model_step()
+        if model is None:
+            return None
+        from smallaxe.training.base import BaseModel
+
+        if isinstance(model, BaseModel):
+            return model.validation_scores
+        return cast(Optional[Dict[str, Any]], getattr(model, "validation_scores", None))
+
+    def _model_step(self) -> Any:
+        """The model step, or None."""
+        for _, step in self._steps:
+            if _is_model_step(step):
+                return step
+        return None
 
     # --- Fit and apply --------------------------------------------------------------
 
-    @_deprecation.df_keyword
     def fit(
         self,
         dataframe: DataFrame,
         label_col: Optional[str] = None,
         numerical_cols: Optional[List[str]] = None,
         categorical_cols: Optional[List[str]] = None,
+        *,
+        validation: str = "none",
+        test_size: float = 0.2,
+        n_folds: int = 5,
+        fold_key: Optional[str] = None,
+        refit: bool = True,
+        cache_strategy: Optional[str] = None,
     ) -> "Pipeline":
         """Fit every step in order, each on the output of the steps before it.
+
+        The validation options are the model's (see :meth:`Model.fit
+        <smallaxe.training.Model.fit>`) and reach only the model step, which validates
+        on the preprocessed frame; read the result from :attr:`validation_scores`. The
+        preprocessing steps are fitted on all rows of ``dataframe`` before that, so their
+        statistics see the validation rows: the scores are those of the model on data
+        preprocessed with the validation rows included.
 
         Args:
             dataframe: The PySpark DataFrame to fit on.
@@ -307,18 +407,50 @@ class Pipeline:
             numerical_cols: Numerical columns: imputed, scaled, and model features.
             categorical_cols: Categorical columns: imputed, encoded, and (encoded)
                 model features.
+            validation: The model's validation strategy: 'none' (default),
+                'train_test' or 'kfold'.
+            test_size: Test proportion when validation='train_test'. Default 0.2.
+            n_folds: Number of folds when validation='kfold'. Default 5.
+            fold_key: Column whose value alone decides a row's split or fold. It must
+                survive preprocessing (it is a column of the frame the model sees).
+            refit: Whether the kept model is refitted on all rows after validation.
+                Default True.
+            cache_strategy: Caching of the preprocessed frame for the model's fit: None
+                (default), 'none', 'memory' or 'disk'.
 
         Returns:
             self, for method chaining.
 
         Raises:
             ValidationError: If ``label_col`` is missing when the pipeline has a model,
-                or is listed in ``numerical_cols`` / ``categorical_cols``.
+                or is listed in ``numerical_cols`` / ``categorical_cols``; a column list
+                is not a list of names; or a validation option is given to a pipeline
+                without a model (a value equal to its default and of the default's type
+                counts as not given).
             PreprocessingError: If ``categorical_cols`` are given and the model needs
                 an Encoder the pipeline does not have.
 
-        Any error a step's own ``fit`` raises propagates unchanged.
+        Any error a step's own ``fit`` raises propagates unchanged; the model step raises
+        ``ValidationError`` for invalid validation options.
         """
+        _checks.require_dataframe(dataframe)
+        numerical_cols = _checks.column_names("numerical_cols", numerical_cols)
+        categorical_cols = _checks.column_names("categorical_cols", categorical_cols)
+        options = {
+            "validation": validation,
+            "test_size": test_size,
+            "n_folds": n_folds,
+            "fold_key": fold_key,
+            "refit": refit,
+            "cache_strategy": cache_strategy,
+        }
+        given = _given_options(options)
+        if given and not self._has_model:
+            raise ValidationError(
+                f"Validation options {sorted(given)} need a model step, and this pipeline has "
+                "none. Add a model, or leave them out."
+            )
+
         self._is_fitted = False
         numerical = list(numerical_cols or [])
         categorical = list(categorical_cols or [])
@@ -342,8 +474,8 @@ class Pipeline:
             if _is_model_step(step):
                 model = step
                 break
-            kind = step_kind(step)
-            if kind == IMPUTER:
+            kind = _step_kind(step)
+            if kind == _IMPUTER:
                 if not numerical and not categorical:
                     skipped.append(name)
                     continue
@@ -352,12 +484,12 @@ class Pipeline:
                     numerical_cols=numerical or None,
                     categorical_cols=categorical or None,
                 )
-            elif kind == SCALER:
+            elif kind == _SCALER:
                 if not numerical:
                     skipped.append(name)
                     continue
                 step.fit(current, numerical_cols=numerical)
-            elif kind == ENCODER:
+            elif kind == _ENCODER:
                 if not categorical:
                     skipped.append(name)
                     continue
@@ -372,7 +504,7 @@ class Pipeline:
             if numerical or categorical:
                 encoded = encoder_outputs if encoder_outputs is not None else categorical
                 feature_cols = numerical + list(encoded)
-            feature_cols = self._fit_model(model, current, str(label_col), feature_cols)
+            feature_cols = self._fit_model(model, current, str(label_col), feature_cols, options)
 
         self._numerical_cols = list(numerical_cols) if numerical_cols is not None else None
         self._categorical_cols = list(categorical_cols) if categorical_cols is not None else None
@@ -384,25 +516,32 @@ class Pipeline:
 
     @staticmethod
     def _fit_model(
-        model: Any, dataframe: DataFrame, label_col: str, feature_cols: Optional[List[str]]
+        model: Any,
+        dataframe: DataFrame,
+        label_col: str,
+        feature_cols: Optional[List[str]],
+        options: Dict[str, Any],
     ) -> List[str]:
         """Fit the model step and return the feature columns it was fitted on.
 
         With ``feature_cols`` None, a smallaxe model infers its features in its own
-        ``fit``; a duck-typed model gets the columns the same inference picks.
+        ``fit``; a duck-typed model gets the columns the same inference picks. A smallaxe
+        model gets every validation option; a duck-typed one only those not at their
+        default, so a model that knows none of them still works without validation.
         """
         from smallaxe.training.base import BaseModel, _infer_feature_cols, _warn_ignored_cols
 
         if isinstance(model, BaseModel):
-            model.fit(dataframe, label_col=label_col, feature_cols=feature_cols)
+            model.fit(dataframe, label_col=label_col, feature_cols=feature_cols, **options)
             return list(model._feature_cols)
         if feature_cols is None:
             feature_cols, ignored = _infer_feature_cols(dataframe, label_col, [])
             _warn_ignored_cols(feature_cols, ignored)
-        model.fit(dataframe, label_col=label_col, feature_cols=feature_cols)
+        model.fit(
+            dataframe, label_col=label_col, feature_cols=feature_cols, **_given_options(options)
+        )
         return list(feature_cols)
 
-    @_deprecation.df_keyword
     def transform(self, dataframe: DataFrame) -> DataFrame:
         """Apply every fitted preprocessing step in order; skipped steps pass data through.
 
@@ -417,6 +556,7 @@ class Pipeline:
         """
         if not self._is_fitted:
             raise ModelNotFittedError("Pipeline has not been fitted. Call fit() first.")
+        _checks.require_dataframe(dataframe)
 
         current = dataframe
         for name, step in self._steps:
@@ -427,30 +567,52 @@ class Pipeline:
             current = step.transform(current)
         return current
 
-    @_deprecation.df_keyword
     def fit_transform(
         self,
         dataframe: DataFrame,
         label_col: Optional[str] = None,
         numerical_cols: Optional[List[str]] = None,
         categorical_cols: Optional[List[str]] = None,
+        *,
+        validation: str = "none",
+        test_size: float = 0.2,
+        n_folds: int = 5,
+        fold_key: Optional[str] = None,
+        refit: bool = True,
+        cache_strategy: Optional[str] = None,
     ) -> DataFrame:
-        """Fit the pipeline, then transform ``dataframe`` with it.
+        """Fit the pipeline, then transform ``dataframe`` with its preprocessing steps.
 
         Args:
             dataframe: The PySpark DataFrame to fit on and transform.
             label_col: The label column; required when the pipeline has a model.
             numerical_cols: Numerical columns (see :meth:`fit`).
             categorical_cols: Categorical columns (see :meth:`fit`).
+            validation: The model's validation strategy (see :meth:`fit`).
+            test_size: Test proportion for 'train_test' (see :meth:`fit`).
+            n_folds: Number of folds for 'kfold' (see :meth:`fit`).
+            fold_key: Column deciding a row's split or fold (see :meth:`fit`).
+            refit: Whether the model is refitted on all rows (see :meth:`fit`).
+            cache_strategy: Caching for the model's fit (see :meth:`fit`).
 
         Returns:
-            The transformed DataFrame.
+            The transformed DataFrame (the preprocessing output, without predictions).
+
+        Raises:
+            ValidationError: As :meth:`fit`.
+            PreprocessingError: As :meth:`fit`.
         """
         self.fit(
             dataframe,
             label_col=label_col,
             numerical_cols=numerical_cols,
             categorical_cols=categorical_cols,
+            validation=validation,
+            test_size=test_size,
+            n_folds=n_folds,
+            fold_key=fold_key,
+            refit=refit,
+            cache_strategy=cache_strategy,
         )
         return self.transform(dataframe)
 
@@ -473,8 +635,7 @@ class Pipeline:
             )
         )
 
-    @_deprecation.df_keyword
-    def predict(self, dataframe: DataFrame, output_col: str = DEFAULT_PREDICTION_COL) -> DataFrame:
+    def predict(self, dataframe: DataFrame, output_col: str = _DEFAULT_PREDICTION_COL) -> DataFrame:
         """Apply the preprocessing steps, then predict with the model.
 
         Args:
@@ -495,13 +656,12 @@ class Pipeline:
 
         model = self._fitted_model("predict")
         current = self.transform(dataframe)
-        if isinstance(model, BaseModel) or output_col != DEFAULT_PREDICTION_COL:
+        if isinstance(model, BaseModel) or output_col != _DEFAULT_PREDICTION_COL:
             return cast(DataFrame, model.predict(current, output_col=output_col))
         return cast(DataFrame, model.predict(current))
 
-    @_deprecation.df_keyword
     def predict_proba(
-        self, dataframe: DataFrame, output_col: str = DEFAULT_PROBABILITY_COL
+        self, dataframe: DataFrame, output_col: str = _DEFAULT_PROBABILITY_COL
     ) -> DataFrame:
         """Apply the preprocessing steps, then predict class probabilities with the model.
 
@@ -533,11 +693,10 @@ class Pipeline:
         elif not hasattr(model, "predict_proba"):
             raise ValidationError(message="predict_proba() needs a model with predict_proba.")
         current = self.transform(dataframe)
-        if isinstance(model, BaseModel) or output_col != DEFAULT_PROBABILITY_COL:
+        if isinstance(model, BaseModel) or output_col != _DEFAULT_PROBABILITY_COL:
             return cast(DataFrame, model.predict_proba(current, output_col=output_col))
         return cast(DataFrame, model.predict_proba(current))
 
-    @_deprecation.df_keyword
     def evaluate(self, dataframe: DataFrame, label_col: Optional[str] = None) -> Dict[str, Any]:
         """Apply the preprocessing steps, then score the model as ``Model.evaluate`` does.
 
@@ -586,12 +745,11 @@ class Pipeline:
         """
         if not self._is_fitted:
             raise ModelNotFittedError("Pipeline has not been fitted. Call fit() before saving.")
-        if not path:
-            raise ValidationError("Path cannot be empty.")
+        _artifact.check_path(path)
 
         entries: List[Dict[str, Any]] = []
         for index, (name, step) in enumerate(self._steps):
-            kind = step_kind(step)
+            kind = _step_kind(step)
             if kind is None:
                 raise ValidationError(
                     f"Cannot save pipeline: step '{name}' ({type(step).__name__}) is not an "
@@ -614,7 +772,7 @@ class Pipeline:
                 step.save(_fs.join(path, entry["path"]))
         _artifact.write_metadata(
             path,
-            ARTIFACT_KIND,
+            _ARTIFACT_KIND,
             {
                 "steps": entries,
                 "numerical_cols": self._numerical_cols,
@@ -648,7 +806,7 @@ class Pipeline:
                         step_path = _fs.join(path, f"step_{index}_{name}")
                         legacy.extend([step_path, step_path + ".pkl"])
         _fs.delete(metadata_path)
-        _fs.delete(_fs.join(path, STEPS_DIR), recursive=True)
+        _fs.delete(_fs.join(path, _STEPS_DIR), recursive=True)
         for legacy_path in legacy:
             _fs.delete(legacy_path, recursive=True)
 
@@ -677,7 +835,7 @@ class Pipeline:
                 Imputer, Scaler or Encoder.
             DependencyError: If the model step's algorithm is not installed.
         """
-        metadata = _artifact.read_metadata(path, ARTIFACT_KIND, allow_unversioned=True)
+        metadata = _artifact.read_metadata(path, _ARTIFACT_KIND, allow_unversioned=True)
         if _artifact.is_unversioned(metadata):
             return cls._load_legacy(path, metadata)
         return cls._load_current(path, metadata)
@@ -733,7 +891,7 @@ class Pipeline:
             feature_cols=_optional_columns(path, metadata, "feature_cols"),
         )
         for _, step in pipeline._steps:
-            if step_kind(step) == MODEL and list(step._feature_cols) != pipeline._feature_cols:
+            if _step_kind(step) == _MODEL and list(step._feature_cols) != pipeline._feature_cols:
                 raise ValidationError(
                     f"Cannot load pipeline: 'feature_cols' at {path!r} "
                     f"({pipeline._feature_cols!r}) differ from the model's "
@@ -867,12 +1025,14 @@ class Pipeline:
             The step object.
 
         Raises:
-            KeyError: If the step name is not found.
+            ValidationError: If no step has that name.
         """
         for name, step in self._steps:
             if name == key:
                 return step
-        raise KeyError(f"Step '{key}' not found in pipeline")
+        raise ValidationError(
+            f"Step {key!r} not found in pipeline. Steps are: {[name for name, _ in self._steps]}"
+        )
 
 
 def _read_entry(path: str, entry: Any) -> Tuple[str, str, str, bool]:
@@ -898,12 +1058,12 @@ def _read_entry(path: str, entry: Any) -> Tuple[str, str, str, bool]:
             f"Cannot load pipeline: a step at {path!r} has no name ({entry!r}); the artifact "
             "is corrupted."
         )
-    if not isinstance(kind, str) or kind not in STEP_KINDS:
+    if not isinstance(kind, str) or kind not in _STEP_KINDS:
         raise ValidationError(
             f"Cannot load pipeline: step '{name}' at {path!r} has kind {kind!r}; this smallaxe "
-            f"knows {list(STEP_KINDS)}. It may have been written by a newer smallaxe."
+            f"knows {list(_STEP_KINDS)}. It may have been written by a newer smallaxe."
         )
-    if not isinstance(skipped, bool) or (skipped and kind == MODEL):
+    if not isinstance(skipped, bool) or (skipped and kind == _MODEL):
         raise ValidationError(
             f"Cannot load pipeline: step '{name}' at {path!r} has an invalid 'skipped' "
             f"({skipped!r}); the artifact is corrupted."
@@ -912,12 +1072,12 @@ def _read_entry(path: str, entry: Any) -> Tuple[str, str, str, bool]:
     if (
         not isinstance(step_dir, str)
         or len(parts) != 2
-        or parts[0] != STEPS_DIR
+        or parts[0] != _STEPS_DIR
         or parts[1] in ("", ".", "..")
     ):
         raise ValidationError(
             f"Cannot load pipeline: step '{name}' at {path!r} has the directory {step_dir!r}, "
-            f"which is not inside {STEPS_DIR}/; the artifact is corrupted."
+            f"which is not inside {_STEPS_DIR}/; the artifact is corrupted."
         )
     return name, kind, step_dir, skipped
 

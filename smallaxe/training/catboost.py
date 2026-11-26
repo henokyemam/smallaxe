@@ -13,24 +13,14 @@ import tempfile
 from contextlib import contextmanager
 from typing import Any, Callable, Dict, Iterator, List, Optional, Tuple
 
-from smallaxe import _deprecation
 from smallaxe.training.algorithm import CLASSIFICATION_TASKS, Algorithm, Dependency, Param
-from smallaxe.training.base import Classifier, Regressor, _warn_deprecated_alias
+
+__all__ = ["ALGORITHM"]
 
 _INSTALL_HINT = (
     "pip install smallaxe[catboost] and configure Spark with "
     "ai.catboost:catboost-spark_3.5_2.12:1.2.10"
 )
-
-
-def _catboost_install_hint() -> str:
-    """Return the install and Spark package hint for CatBoost support."""
-    return _INSTALL_HINT
-
-
-def _is_catboost_available() -> bool:
-    """Return whether CatBoost Spark support is currently importable."""
-    return ALGORITHM.available()
 
 
 # Param value types that catboost_spark converts itself, through the ``_py2java`` it installs
@@ -212,44 +202,3 @@ ALGORITHM = Algorithm(
     prepare=_ensure_synapseml_compat,
     fit_context=_training_dir,
 )
-
-
-# Deprecated public names, removed in smallaxe 1.0. ``CATBOOST_AVAILABLE`` is probed on every
-# read, so importing this module imports no optional package.
-_MOVED = {
-    "CATBOOST_AVAILABLE": (
-        "Use smallaxe.training.algorithm.get('catboost').available() or "
-        "regressors.available_models() instead.",
-        lambda: ALGORITHM.available(),
-    ),
-    "is_catboost_available": (
-        "Use smallaxe.training.algorithm.get('catboost').available() instead.",
-        lambda: _is_catboost_available,
-    ),
-    "catboost_install_hint": (
-        "Use smallaxe.training.algorithm.get('catboost').dependency.install_hint instead.",
-        lambda: _catboost_install_hint,
-    ),
-}
-__getattr__ = _deprecation.module_getattr(__name__, _MOVED)
-__dir__ = _deprecation.module_dir(globals(), _MOVED)
-
-
-class CatBoostRegressor(Regressor):
-    """Deprecated alias; use ``regressors.catboost()``."""
-
-    _alias_algorithm = "catboost"
-
-    def __init__(self, task: str = "simple_regression") -> None:
-        _warn_deprecated_alias("CatBoostRegressor", "regressors.catboost()")
-        super().__init__(ALGORITHM, task)
-
-
-class CatBoostClassifier(Classifier):
-    """Deprecated alias; use ``classifiers.catboost()``."""
-
-    _alias_algorithm = "catboost"
-
-    def __init__(self, task: str = "binary") -> None:
-        _warn_deprecated_alias("CatBoostClassifier", "classifiers.catboost()")
-        super().__init__(ALGORITHM, task)

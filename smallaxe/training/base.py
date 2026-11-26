@@ -1,23 +1,31 @@
-"""Base classes for training models."""
+"""The model classes: :class:`Model` and its two kinds, :class:`Regressor` and :class:`Classifier`.
+
+:class:`BaseModel` composes the five mixins into the fit / validate / predict / evaluate
+/ save machinery, written once for every algorithm; :class:`BaseRegressor` and
+:class:`BaseClassifier` restrict it to one kind of task. :class:`Model` binds it to one
+:class:`~smallaxe.training.algorithm.Algorithm` record, and :class:`Regressor` /
+:class:`Classifier` are what the factory functions return. The ``Base*`` classes are
+implementation classes: use ``Model``, ``Regressor`` and ``Classifier``.
+"""
 
 import math
 import warnings
 from contextlib import nullcontext
-from typing import Any, Dict, List, Literal, Mapping, Optional, Tuple, Union
+from typing import Any, Dict, List, Literal, Mapping, Optional, Tuple, Type, TypeVar, Union, cast
 
 from pyspark.sql import DataFrame
 from pyspark.sql import functions as F
 from pyspark.sql.types import BooleanType, DoubleType, FloatType, NumericType
 
 import smallaxe
-from smallaxe import _deprecation
+from smallaxe import _checks, _warn
 from smallaxe.exceptions import (
     ColumnNotFoundError,
     ModelNotFittedError,
     ValidationError,
 )
 from smallaxe.training import algorithm as _algorithm
-from smallaxe.training.algorithm import Algorithm
+from smallaxe.training.algorithm import ALL_TASKS, CLASSIFICATION_TASKS, REGRESSION_TASKS, Algorithm
 from smallaxe.training.mixins import (
     MetadataMixin,
     ParamMixin,
@@ -25,7 +33,18 @@ from smallaxe.training.mixins import (
     SparkModelMixin,
     ValidationMixin,
 )
+from smallaxe.training.mixins.spark_model_mixin import _check_feature_types
 from smallaxe.training.mixins.validation_mixin import _resolve_split_seed
+
+__all__ = ["BaseModel", "BaseRegressor", "BaseClassifier", "Model", "Regressor", "Classifier"]
+
+# The type of the model a method is called on, so ``regressor.fit(...)`` is a Regressor.
+_ModelT = TypeVar("_ModelT", bound="BaseModel")
+
+# fit's validation strategies and cache strategies; None caches only when fit reads the
+# data more than once.
+_VALIDATIONS = ("none", "train_test", "kfold")
+_CACHE_STRATEGIES = (None, "none", "memory", "disk")
 
 
 def _infer_feature_cols(
@@ -50,6 +69,21 @@ def _infer_feature_cols(
     return feature_cols, ignored
 
 
+def _require_numeric_label(dataframe: DataFrame, label_col: str) -> None:
+    """Reject a label column that is not numeric: every estimator and metric needs one.
+
+    Raises:
+        ValidationError: If the label column's type is not numeric (a string or boolean).
+    """
+    data_type = dataframe.schema[label_col].dataType
+    if not isinstance(data_type, NumericType):
+        raise ValidationError(
+            f"Label column '{label_col}' has type {data_type.simpleString()}; the label "
+            "must be numeric. Encode class labels as 0, 1, ... first, for example with "
+            "pyspark.ml.feature.StringIndexer or a cast."
+        )
+
+
 def _warn_ignored_cols(
     feature_cols: List[str], ignored: Dict[str, str], stacklevel: Optional[int] = None
 ) -> None:
@@ -68,7 +102,7 @@ def _warn_ignored_cols(
         f"Feature inference used {feature_cols} and ignored non-numeric columns: {listed}. "
         "Encode them, or list them in exclude_cols to silence this warning.",
         UserWarning,
-        stacklevel=_deprecation.caller_stacklevel() if stacklevel is None else stacklevel,
+        stacklevel=_warn.caller_stacklevel() if stacklevel is None else stacklevel,
     )
 
 
@@ -148,37 +182,18 @@ class BaseModel(
     MetadataMixin,
     SparkModelMixin,
 ):
-    """Base class for all training models.
+    """Implementation class behind every model: fit, validation, predict, evaluate, save.
 
-    This class combines functionality from all mixins to provide a complete
-    model interface with parameter management, persistence, validation,
-    metadata tracking, and Spark MLlib integration.
+    Combines the parameter, persistence, validation, metadata and Spark mixins. It is
+    abstract: :class:`Model` supplies the parameter table and the Spark estimator from
+    an algorithm record. Use :class:`Regressor` / :class:`Classifier`.
 
     Args:
-        task: The task type for this model. Options depend on the model type:
-            - Regression: 'simple_regression'
-            - Classification: 'binary', 'multiclass'
+        task: The task: 'simple_regression', 'binary' or 'multiclass'.
 
-    Attributes:
-        task: The task type string.
-        task_type: The general task type ('regression' or 'classification').
-
-    Example:
-        >>> model = SomeModel(task='simple_regression')
-        >>> model.fit(dataframe, label_col='target', feature_cols=['f1', 'f2'])
-        >>> predictions = model.predict(dataframe)
+    Raises:
+        ValidationError: If ``task`` is not one of those.
     """
-
-    # Valid task types for each task category
-    REGRESSION_TASKS = {"simple_regression"}
-    CLASSIFICATION_TASKS = {"binary", "multiclass"}
-    VALID_TASKS = REGRESSION_TASKS | CLASSIFICATION_TASKS
-
-    # Valid validation strategies
-    VALID_VALIDATION = {"none", "train_test", "kfold"}
-
-    # Valid cache strategies; None means "cache when fit reads the data more than once"
-    VALID_CACHE_STRATEGIES = {None, "none", "memory", "disk"}
 
     # Split seed used when neither the model's ``seed`` nor the global seed is set.
     # ``optimize.run`` sets it on every trial so all trials score on one split; it
@@ -194,10 +209,8 @@ class BaseModel(
         Raises:
             ValidationError: If task is not a valid task type.
         """
-        if task not in self.VALID_TASKS:
-            raise ValidationError(
-                f"Invalid task '{task}'. Valid tasks are: {sorted(self.VALID_TASKS)}"
-            )
+        if not isinstance(task, str) or task not in ALL_TASKS:
+            raise ValidationError(f"Invalid task {task!r}. Valid tasks are: {sorted(ALL_TASKS)}")
         self._task = task
         self._params: Dict[str, Any] = {}
         self._spark_model = None
@@ -223,7 +236,7 @@ class BaseModel(
         Returns:
             'regression' for regression tasks, 'classification' for classification tasks.
         """
-        if self._task in self.REGRESSION_TASKS:
+        if self._task in REGRESSION_TASKS:
             return "regression"
         return "classification"
 
@@ -241,9 +254,8 @@ class BaseModel(
             raise ModelNotFittedError("No validation scores available. Model has not been fitted.")
         return self._validation_scores
 
-    @_deprecation.df_keyword
     def fit(
-        self,
+        self: _ModelT,
         dataframe: DataFrame,
         label_col: str,
         feature_cols: Optional[List[str]] = None,
@@ -251,12 +263,17 @@ class BaseModel(
         validation: str = "none",
         test_size: float = 0.2,
         n_folds: int = 5,
-        stratified: Optional[bool] = None,
         cache_strategy: Optional[str] = None,
         fold_key: Optional[str] = None,
         refit: bool = True,
-    ) -> "BaseModel":
+    ) -> _ModelT:
         """Fit the model to training data.
+
+        Every split hashes the row content (or ``fold_key``) with the seed, which is
+        independent of the label, so each class is split in the same proportion in
+        expectation. The seed is the model's ``seed`` parameter, else the global
+        ``smallaxe.set_seed`` value, else a random one (recorded in
+        ``metadata["split_seed"]``).
 
         Args:
             dataframe: PySpark DataFrame containing training data.
@@ -273,10 +290,6 @@ class BaseModel(
             test_size: Proportion for test set when validation='train_test'.
                 Default is 0.2.
             n_folds: Number of folds when validation='kfold'. Default is 5.
-            stratified: Deprecated; has no effect and is removed in smallaxe 1.0.
-                Every split hashes the row content (or ``fold_key``), which is
-                independent of the label, so each class is split in the same proportion
-                in expectation whatever this says. Passing a value other than None warns.
             cache_strategy: DataFrame caching for the duration of fit. Options:
                 - None (default): persist with MEMORY_AND_DISK when fit reads the
                   data more than once (k-fold, or train_test with refit) and the
@@ -294,14 +307,19 @@ class BaseModel(
                 fold for 'kfold'. Use False to save a training pass in a search.
 
         Returns:
-            self: The fitted model instance.
+            The fitted model itself, for chaining.
 
         Raises:
-            ValidationError: If validation strategy is invalid.
-            ValidationError: If cache_strategy is invalid.
-            ValidationError: If a feature has missing values the algorithm cannot
-                accept, or the label has nulls.
-            ColumnNotFoundError: If label_col or feature_cols are not found.
+            ValidationError: If ``label_col`` is empty, ``validation``, ``cache_strategy``,
+                ``test_size`` or ``n_folds`` is invalid, no feature column is given or
+                inferred, the label is not numeric or has nulls, a feature is not
+                numeric, boolean or an ML vector or has missing values the algorithm
+                cannot accept, a validation split or fold is empty, or Spark's estimator
+                rejects a parameter value (``max_depth=-3`` for Random Forest; XGBoost
+                checks its parameters inside the training job instead, and its error
+                propagates unchanged).
+            ColumnNotFoundError: If ``label_col``, a feature column or ``fold_key`` is not
+                in ``dataframe``.
         """
         # Validate parameters
         self._validate_fit_params(
@@ -311,6 +329,10 @@ class BaseModel(
             exclude_cols=exclude_cols,
             validation=validation,
             cache_strategy=cache_strategy,
+            test_size=test_size,
+            n_folds=n_folds,
+            fold_key=fold_key,
+            refit=refit,
         )
 
         # Store exclude_cols
@@ -328,12 +350,6 @@ class BaseModel(
 
         # Store label column
         self._label_col = label_col
-
-        # Determine stratification
-        if stratified is None:
-            stratified = self.task_type == "classification"
-        else:
-            _warn_stratified("fit()")
 
         # Seeds: the model's seed parameter, then the global seed, then the search's
         # shared split seed, then random.
@@ -369,7 +385,6 @@ class BaseModel(
                     label_col,
                     feature_cols,
                     test_size,
-                    stratified,
                     fold_key,
                     split_seed,
                     refit,
@@ -381,7 +396,6 @@ class BaseModel(
                     label_col,
                     feature_cols,
                     n_folds,
-                    stratified,
                     fold_key,
                     split_seed,
                     refit,
@@ -417,8 +431,12 @@ class BaseModel(
         exclude_cols: Optional[List[str]],
         validation: str,
         cache_strategy: Optional[str],
+        test_size: float = 0.2,
+        n_folds: int = 5,
+        fold_key: Optional[str] = None,
+        refit: bool = True,
     ) -> None:
-        """Validate fit parameters.
+        """Validate fit parameters before any Spark job runs.
 
         Args:
             dataframe: Training DataFrame.
@@ -427,37 +445,45 @@ class BaseModel(
             exclude_cols: List of columns to exclude.
             validation: Validation strategy.
             cache_strategy: Caching strategy.
+            test_size: Test proportion, checked for 'train_test'.
+            n_folds: Number of folds, checked for 'kfold'.
+            fold_key: Column to hash instead of the whole row.
+            refit: Whether to refit on all rows.
 
         Raises:
             ValidationError: If any parameter is invalid.
         """
-        if not label_col:
-            raise ValidationError("label_col is required.")
+        _checks.require_dataframe(dataframe)
+        if not label_col or not isinstance(label_col, str):
+            raise ValidationError(f"label_col must be a non-empty column name, got {label_col!r}.")
+        _checks.column_names("feature_cols", feature_cols)
+        _checks.column_names("exclude_cols", exclude_cols)
+        if fold_key is not None and not isinstance(fold_key, str):
+            raise ValidationError(f"fold_key must be a column name or None, got {fold_key!r}.")
+        if not isinstance(refit, bool):
+            raise ValidationError(f"refit must be True or False, got {refit!r}.")
+        if validation == "train_test" and (
+            isinstance(test_size, bool)
+            or not isinstance(test_size, (int, float))
+            or not 0 < test_size < 1
+        ):
+            raise ValidationError(f"test_size must be between 0 and 1, got {test_size!r}.")
+        if validation == "kfold" and (
+            isinstance(n_folds, bool) or not isinstance(n_folds, int) or n_folds < 2
+        ):
+            raise ValidationError(f"n_folds must be an integer of at least 2, got {n_folds!r}.")
 
-        if validation not in self.VALID_VALIDATION:
+        if validation not in _VALIDATIONS:
             raise ValidationError(
-                f"Invalid validation strategy '{validation}'. "
-                f"Valid options are: {sorted(self.VALID_VALIDATION)}"
+                f"Invalid validation strategy {validation!r}. "
+                f"Valid options are: {sorted(_VALIDATIONS)}"
             )
 
-        if cache_strategy not in self.VALID_CACHE_STRATEGIES:
+        if cache_strategy not in _CACHE_STRATEGIES:
             raise ValidationError(
                 f"Invalid cache_strategy '{cache_strategy}'. "
                 "Valid options are: None, 'disk', 'memory', 'none'"
             )
-
-    def _infer_feature_cols(
-        self,
-        dataframe: DataFrame,
-        label_col: str,
-        exclude_cols: List[str],
-    ) -> List[str]:
-        """Infer feature columns from DataFrame schema.
-
-        Numeric and boolean columns are features. See :func:`_infer_feature_cols`
-        for the columns left out.
-        """
-        return _infer_feature_cols(dataframe, label_col, exclude_cols)[0]
 
     def _validate_columns(
         self,
@@ -496,6 +522,8 @@ class BaseModel(
                     column=col,
                     available_columns=list(available),
                 )
+        _require_numeric_label(dataframe, label_col)
+        _check_feature_types(dataframe, feature_cols)
 
     def _accepts_missing(self) -> bool:
         """Whether the estimator treats NaN features as missing values."""
@@ -505,9 +533,6 @@ class BaseModel(
         """The seed the estimator trains with: the model's parameter, else the global seed."""
         seed = self._seed_param()
         return smallaxe.get_seed() if seed is None else seed
-
-    def _handle_invalid(self) -> str:
-        return "keep" if self._accepts_missing() else "error"
 
     def _apply_cache_strategy(
         self,
@@ -557,7 +582,7 @@ class BaseModel(
                 f"Could not cache the training DataFrame ({type(exc).__name__}: {exc}). "
                 "Continuing without a cache.",
                 UserWarning,
-                stacklevel=_deprecation.caller_stacklevel(),
+                stacklevel=_warn.caller_stacklevel(),
             )
             return dataframe, False
 
@@ -583,7 +608,6 @@ class BaseModel(
         label_col: str,
         feature_cols: List[str],
         test_size: float,
-        stratified: bool,
         fold_key: Optional[str] = None,
         seed: Optional[int] = None,
         refit: bool = True,
@@ -596,7 +620,6 @@ class BaseModel(
             label_col: Label column name.
             feature_cols: Feature column names.
             test_size: Proportion for test set.
-            stratified: Whether to use stratified split.
             fold_key: Column to hash instead of the whole row.
             seed: Seed for the split.
             refit: Train the kept model on all rows after scoring.
@@ -604,12 +627,7 @@ class BaseModel(
         """
         # Split data
         train_df, test_df = self._train_test_split(
-            dataframe,
-            test_size=test_size,
-            stratified=stratified,
-            label_col=label_col if stratified else None,
-            seed=seed,
-            fold_key=fold_key,
+            dataframe, test_size=test_size, seed=seed, fold_key=fold_key
         )
 
         # Fit on training data
@@ -645,7 +663,6 @@ class BaseModel(
         label_col: str,
         feature_cols: List[str],
         n_folds: int,
-        stratified: bool,
         fold_key: Optional[str] = None,
         seed: Optional[int] = None,
         refit: bool = True,
@@ -658,7 +675,6 @@ class BaseModel(
             label_col: Label column name.
             feature_cols: Feature column names.
             n_folds: Number of folds.
-            stratified: Whether to use stratified split.
             fold_key: Column to hash instead of the whole row.
             seed: Seed for the fold assignment.
             refit: Train the kept model on all rows after scoring.
@@ -669,14 +685,7 @@ class BaseModel(
 
         # Iterate through folds
         for fold_idx, (train_df, val_df) in enumerate(
-            self._kfold_split(
-                dataframe,
-                n_folds=n_folds,
-                stratified=stratified,
-                label_col=label_col if stratified else None,
-                seed=seed,
-                fold_key=fold_key,
-            )
+            self._kfold_split(dataframe, n_folds=n_folds, seed=seed, fold_key=fold_key)
         ):
             # Fit on this fold's training data
             self._fit_spark_model(train_df, label_col, feature_cols)
@@ -749,7 +758,7 @@ class BaseModel(
                 "example AUC on a fold with one class. Their means use the remaining folds; "
                 "a metric undefined on every fold has mean None.",
                 UserWarning,
-                stacklevel=_deprecation.caller_stacklevel(),
+                stacklevel=_warn.caller_stacklevel(),
             )
 
         return result
@@ -919,26 +928,31 @@ class BaseModel(
         if self._exclude_cols:
             self._update_metadata("exclude_cols", self._exclude_cols)
 
-    @_deprecation.df_keyword
     def predict(self, dataframe: DataFrame, output_col: str = "predict_label") -> DataFrame:
         """Generate predictions for input data.
 
         Args:
-            dataframe: PySpark DataFrame with feature columns.
+            dataframe: PySpark DataFrame with the feature columns the model was fitted on.
             output_col: Name for the prediction column. Default is 'predict_label'.
 
         Returns:
-            DataFrame with predictions added.
+            The input columns, unchanged, plus ``output_col``; a classifier also adds
+            its ``probability`` vector column unless ``dataframe`` already has one.
 
         Raises:
             ModelNotFittedError: If the model has not been fitted.
+            ColumnNotFoundError: If a feature column is not in ``dataframe``.
+            ValidationError: If ``dataframe`` is not a DataFrame, ``output_col`` is not a
+                non-empty string or is already a column of ``dataframe``, or a feature
+                column is not numeric, boolean or an ML vector.
         """
         if not self._is_fitted:
             raise ModelNotFittedError("Model has not been fitted. Call fit() before predict().")
+        _checks.require_dataframe(dataframe)
+        _checks.output_column("output_col", output_col)
 
         return self._predict_spark_model(dataframe, output_col=output_col)
 
-    @_deprecation.df_keyword
     def evaluate(self, dataframe: DataFrame, label_col: Optional[str] = None) -> Dict[str, Any]:
         """Score the fitted model on ``dataframe`` with the metrics validation computes.
 
@@ -960,24 +974,25 @@ class BaseModel(
         Raises:
             ModelNotFittedError: If the model has not been fitted.
             ColumnNotFoundError: If the label or a feature column is not in ``dataframe``.
+            ValidationError: If ``dataframe`` is not a DataFrame, ``label_col`` is not a
+                string, the label is not numeric, or a feature column is not numeric,
+                boolean or an ML vector.
         """
         if not self._is_fitted:
             raise ModelNotFittedError("Model has not been fitted. Call fit() before evaluate().")
+        _checks.require_dataframe(dataframe)
+        if label_col is not None and not isinstance(label_col, str):
+            raise ValidationError(f"label_col must be a column name or None, got {label_col!r}.")
         label = label_col or self._label_col or ""
         available = list(dataframe.columns)
         for col in [label] + list(self._feature_cols):
             if col not in available:
                 raise ColumnNotFoundError(column=col, available_columns=available)
+        _require_numeric_label(dataframe, label)
         # Score only the columns the model needs, so a column of dataframe that shares a name
         # with one the model writes (``prediction``, ``probability``) cannot collide.
         needed = [label] + [col for col in self._feature_cols if col != label]
         return _undefined_to_none(self._evaluate(dataframe.select(*needed), label))
-
-    def clone(self) -> "BaseModel":
-        """Return an unfitted copy with the same task and parameter values."""
-        clone = type(self)(task=self._task)
-        clone._params = dict(self._params)
-        return clone
 
     # --- PersistenceMixin abstract methods ---
 
@@ -1028,29 +1043,15 @@ class BaseModel(
         if self._spark_model is not None:
             self._save_spark_model(path)
 
-    def _load_artifacts(self, path: str) -> None:
-        """Load additional model artifacts.
-
-        Args:
-            path: Directory path where artifacts are stored.
-        """
-        # Subclasses must implement this to load the specific Spark model type
-        pass
-
 
 class BaseRegressor(BaseModel):
-    """Base class for regression models.
-
-    This class provides a foundation for regression models with task type
-    validation and regression-specific defaults.
+    """Implementation class for regression models: accepts only regression tasks.
 
     Args:
-        task: The regression task type. Default is 'simple_regression'.
+        task: The regression task. Default is 'simple_regression'.
 
-    Example:
-        >>> model = SomeRegressor(task='simple_regression')
-        >>> model.fit(dataframe, label_col='target', feature_cols=['f1', 'f2'])
-        >>> predictions = model.predict(dataframe)
+    Raises:
+        ValidationError: If ``task`` is not a regression task.
     """
 
     def __init__(self, task: str = "simple_regression") -> None:
@@ -1062,28 +1063,21 @@ class BaseRegressor(BaseModel):
         Raises:
             ValidationError: If task is not a valid regression task.
         """
-        if task not in self.REGRESSION_TASKS:
+        if not isinstance(task, str) or task not in REGRESSION_TASKS:
             raise ValidationError(
-                f"Invalid regression task '{task}'. "
-                f"Valid tasks are: {sorted(self.REGRESSION_TASKS)}"
+                f"Invalid regression task {task!r}. Valid tasks are: {sorted(REGRESSION_TASKS)}"
             )
         super().__init__(task)
 
 
 class BaseClassifier(BaseModel):
-    """Base class for classification models.
-
-    This class provides a foundation for classification models with task type
-    validation, classification-specific defaults, and probability prediction.
+    """Implementation class for classification models: classification tasks and probabilities.
 
     Args:
-        task: The classification task type. Default is 'binary'.
+        task: The classification task. Default is 'binary'.
 
-    Example:
-        >>> model = SomeClassifier(task='binary')
-        >>> model.fit(dataframe, label_col='label', feature_cols=['f1', 'f2'])
-        >>> predictions = model.predict(dataframe)
-        >>> probabilities = model.predict_proba(dataframe)
+    Raises:
+        ValidationError: If ``task`` is not 'binary' or 'multiclass'.
     """
 
     def __init__(self, task: str = "binary") -> None:
@@ -1095,35 +1089,41 @@ class BaseClassifier(BaseModel):
         Raises:
             ValidationError: If task is not a valid classification task.
         """
-        if task not in self.CLASSIFICATION_TASKS:
+        if not isinstance(task, str) or task not in CLASSIFICATION_TASKS:
             raise ValidationError(
-                f"Invalid classification task '{task}'. "
-                f"Valid tasks are: {sorted(self.CLASSIFICATION_TASKS)}"
+                f"Invalid classification task {task!r}. "
+                f"Valid tasks are: {sorted(CLASSIFICATION_TASKS)}"
             )
         super().__init__(task)
 
-    @_deprecation.df_keyword
     def predict_proba(
         self,
         dataframe: DataFrame,
         output_col: str = "probability",
     ) -> DataFrame:
-        """Generate probability predictions for input data.
+        """Generate class probabilities for input data.
 
         Args:
-            dataframe: PySpark DataFrame with feature columns.
-            output_col: Name for the probability column. Default is 'probability'.
+            dataframe: PySpark DataFrame with the feature columns the model was fitted on.
+            output_col: Name for the probability vector column. Default is 'probability'.
 
         Returns:
-            DataFrame with probability predictions added.
+            The input columns, unchanged, plus ``output_col``: a vector with one
+            probability per class, in class-index order.
 
         Raises:
             ModelNotFittedError: If the model has not been fitted.
+            ColumnNotFoundError: If a feature column is not in ``dataframe``.
+            ValidationError: If ``dataframe`` is not a DataFrame, ``output_col`` is not a
+                non-empty string or is already a column of ``dataframe``, or a feature
+                column is not numeric, boolean or an ML vector.
         """
         if not self._is_fitted:
             raise ModelNotFittedError(
                 "Model has not been fitted. Call fit() before predict_proba()."
             )
+        _checks.require_dataframe(dataframe)
+        _checks.output_column("output_col", output_col)
 
         return self._predict_proba_spark_model(dataframe, output_col=output_col)
 
@@ -1134,8 +1134,9 @@ class Model(BaseModel):
     Everything algorithm-specific (parameter table, estimator and model classes,
     column wiring, task-fixed settings, importances, dependency, session setup) is
     read from the algorithm record, so fit, predict, save, load, and clone are
-    written once here. Use :class:`Regressor` or :class:`Classifier`, or the
-    ``regressors.<algorithm>()`` / ``classifiers.<algorithm>()`` functions.
+    written once here. Use its two kinds, :class:`Regressor` and :class:`Classifier`,
+    usually through the ``regressors.<algorithm>()`` / ``classifiers.<algorithm>()``
+    functions.
 
     Args:
         algorithm: Algorithm name (``"xgboost"``) or record.
@@ -1143,11 +1144,24 @@ class Model(BaseModel):
 
     Raises:
         DependencyError: If the algorithm's optional package is not installed.
-        ValidationError: If the task is invalid or unsupported by the algorithm.
+        ValidationError: If ``algorithm`` is unknown or not a name or record, or the
+            task is invalid or unsupported by the algorithm.
+
+    Example:
+        >>> model = Regressor("random_forest").set_params(n_estimators=50)
+        >>> model.fit(dataframe, label_col="target").validation_scores
     """
 
     def __init__(self, algorithm: Union[str, Algorithm], task: str) -> None:
-        self._algorithm = _algorithm.get(algorithm) if isinstance(algorithm, str) else algorithm
+        if isinstance(algorithm, str):
+            self._algorithm = _algorithm.get(algorithm)
+        elif isinstance(algorithm, Algorithm):
+            self._algorithm = algorithm
+        else:
+            raise ValidationError(
+                "algorithm must be an algorithm name or an Algorithm record, got "
+                f"{type(algorithm).__name__}. Known algorithms are: {_algorithm.names()}"
+            )
         self._algorithm.require()
         super().__init__(task)
         if task not in self._algorithm.tasks:
@@ -1158,22 +1172,38 @@ class Model(BaseModel):
 
     @property
     def algorithm(self) -> Algorithm:
-        """The algorithm record this model is bound to."""
+        """The algorithm record this model is bound to.
+
+        Returns:
+            The :class:`~smallaxe.training.algorithm.Algorithm` record.
+        """
         return self._algorithm
 
     def _accepts_missing(self) -> bool:
         return self._algorithm.accepts_missing
 
+    def _handle_invalid(self) -> str:
+        """Hand nulls to an estimator that treats NaN as missing; reject them otherwise."""
+        return "keep" if self._accepts_missing() else "error"
+
     # --- ParamMixin ---
 
     @property
     def params(self) -> Dict[str, str]:
-        """Parameter descriptions for this algorithm and task."""
+        """The parameters this algorithm has for this task, with their descriptions.
+
+        Returns:
+            Parameter name -> description, in the algorithm's table order.
+        """
         return {p.name: p.description for p in self._algorithm.visible_params(self._task)}
 
     @property
     def default_params(self) -> Dict[str, Any]:
-        """Default parameter values for this algorithm and task."""
+        """The default value of each parameter this algorithm has for this task.
+
+        Returns:
+            Parameter name -> default value (None lets the estimator decide).
+        """
         return {p.name: p.default for p in self._algorithm.visible_params(self._task)}
 
     # --- SparkModelMixin ---
@@ -1209,14 +1239,6 @@ class Model(BaseModel):
             estimator.setPredictionCol(self.PREDICTION_COL)
         return estimator
 
-    def _create_spark_estimator(
-        self,
-        features_col: Optional[str] = None,
-        label_col: Optional[str] = None,
-        prediction_col: Optional[str] = None,
-    ) -> Any:
-        return self._build_estimator(label_col or "label", {})
-
     def _fit_spark_model(
         self, dataframe: DataFrame, label_col: str, feature_cols: List[str]
     ) -> Any:
@@ -1231,7 +1253,9 @@ class Model(BaseModel):
             if algorithm.fit_context is not None
             else nullcontext({})
         )
-        with context as extra:
+        with context as extra, _checks.spark_argument_errors(
+            f"Cannot fit {algorithm.name!r} with parameters {self.get_params()}"
+        ):
             estimator = self._build_estimator(label_col, extra)
             self._feature_cols = feature_cols
             self._label_col = label_col
@@ -1247,12 +1271,17 @@ class Model(BaseModel):
             return None
         return self._algorithm.importances(self._spark_model, len(self._feature_cols))
 
-    def clone(self) -> "Model":
-        """Return an unfitted copy with the same algorithm, task, and parameter values."""
-        kind = Classifier if self.task_type == "classification" else Regressor
-        clone = kind(self._algorithm, self._task)
-        clone._params = dict(self._params)
-        return clone
+    def clone(self: _ModelT) -> _ModelT:
+        """Return an unfitted copy with the same algorithm, task, and parameter values.
+
+        Returns:
+            A new, unfitted model of the same class.
+        """
+        model = cast(Model, self)
+        kind = Classifier if model.task_type == "classification" else Regressor
+        clone = kind(model._algorithm, model._task)
+        clone._params = dict(model._params)
+        return cast(_ModelT, clone)
 
     # --- PersistenceMixin ---
 
@@ -1309,14 +1338,14 @@ class Model(BaseModel):
         ``classifiers.load`` all come here. ``metadata.json`` is checked before anything
         is built: an artifact with the header must be a ``"model"`` one in a format this
         smallaxe reads; an artifact without it (smallaxe 0.10 and earlier) is accepted.
-        ``algorithm`` names the algorithm; artifacts written by smallaxe 0.8.x record the
-        old class name instead, mapped through
-        :data:`~smallaxe.training.algorithm._LEGACY_CLASS_NAMES`. ``task`` is required and
-        every saved parameter must be in the algorithm's table for that task; parameters
-        the artifact leaves out take their defaults.
+        ``algorithm`` names the algorithm; artifacts written by smallaxe 0.8.x record
+        their class name instead, which is mapped to the algorithm. ``task`` is required
+        and every saved parameter must be in the algorithm's table for that task;
+        parameters the artifact leaves out take their defaults. ``Regressor.load`` and
+        ``Classifier.load`` also check the kind.
 
         Args:
-            path: The artifact directory.
+            path: The artifact directory (local, ``dbfs:/``, ``s3://``, ``hdfs://``, ...).
 
         Returns:
             The fitted model.
@@ -1325,7 +1354,7 @@ class Model(BaseModel):
             ValidationError: If the path or its ``metadata.json`` does not exist, it holds
                 another kind of artifact or was written by a newer smallaxe, its
                 ``algorithm``, ``task`` or ``params`` are missing or unknown, or the saved
-                model is not the kind (or algorithm) this class expects.
+                model is not the kind this class loads.
             DependencyError: If the saved model's algorithm is not installed.
         """
         state = cls._read_saved_state(path)
@@ -1339,33 +1368,23 @@ class Model(BaseModel):
                     "Model metadata does not contain 'algorithm'. "
                     "This may be an older model format or corrupted metadata."
                 )
-            name = _algorithm._LEGACY_CLASS_NAMES[saved_class][0]
+            name = _algorithm._LEGACY_CLASS_NAMES[saved_class]
         algorithm = _algorithm.get(name)
         task = _saved_task(path, state, algorithm)
         state["params"] = _saved_params(path, state, algorithm, task)
 
-        if task in BaseModel.CLASSIFICATION_TASKS:
-            kind, task_type = Classifier, "classification"
-        else:
-            kind, task_type = Regressor, "regression"
-        saved_name = _algorithm._legacy_class_name(name, task_type)
-        expected_kind = None
-        if issubclass(cls, Regressor):
-            expected_kind = Regressor
-        elif issubclass(cls, Classifier):
-            expected_kind = Classifier
-        if expected_kind is not None and expected_kind is not kind:
-            raise ValidationError(
-                f"Model type mismatch: expected {cls.__name__}, got {saved_name}."
-            )
-        alias_algorithm = getattr(cls, "_alias_algorithm", None)
-        if alias_algorithm is not None and alias_algorithm != name:
-            raise ValidationError(
-                f"Model type mismatch: expected {cls.__name__}, got {saved_name}."
-            )
+        kind: Type[Model] = Classifier if task in CLASSIFICATION_TASKS else Regressor
+        for expected in (Regressor, Classifier):
+            if issubclass(cls, expected) and kind is not expected:
+                saved = "classifier" if kind is Classifier else "regressor"
+                raise ValidationError(
+                    f"Cannot load model: {cls.__name__}.load expects a "
+                    f"{expected.__name__.lower()}, but {path!r} holds a {name!r} {saved} "
+                    f"(task {task!r}). Use smallaxe.load_model(), which loads either."
+                )
         algorithm.require()
 
-        instance = kind.__new__(kind)
+        instance: Model = kind.__new__(kind)
         instance._algorithm = algorithm
         instance._spark_model = None
         instance._set_persistence_state(state)
@@ -1427,14 +1446,40 @@ def _saved_params(
 
 
 class Regressor(Model, BaseRegressor):
-    """A regression model for any algorithm. Prefer ``regressors.<algorithm>()``."""
+    """A regression model for any algorithm. Prefer ``regressors.<algorithm>()``.
+
+    Args:
+        algorithm: Algorithm name (``"xgboost"``) or record.
+        task: The regression task. Default is 'simple_regression'.
+
+    Raises:
+        DependencyError: If the algorithm's optional package is not installed.
+        ValidationError: If ``algorithm`` is unknown, or ``task`` is not a regression
+            task.
+
+    Example:
+        >>> model = Regressor("xgboost").set_params(max_depth=4)
+    """
 
     def __init__(self, algorithm: Union[str, Algorithm], task: str = "simple_regression") -> None:
         super().__init__(algorithm, task)
 
 
 class Classifier(Model, BaseClassifier):
-    """A classification model for any algorithm. Prefer ``classifiers.<algorithm>()``."""
+    """A classification model for any algorithm. Prefer ``classifiers.<algorithm>()``.
+
+    Args:
+        algorithm: Algorithm name (``"xgboost"``) or record.
+        task: The classification task: 'binary' (default) or 'multiclass'.
+
+    Raises:
+        DependencyError: If the algorithm's optional package is not installed.
+        ValidationError: If ``algorithm`` is unknown, or ``task`` is not 'binary' or
+            'multiclass'.
+
+    Example:
+        >>> model = Classifier("random_forest", task="multiclass")
+    """
 
     def __init__(self, algorithm: Union[str, Algorithm], task: str = "binary") -> None:
         super().__init__(algorithm, task)
@@ -1463,49 +1508,5 @@ def _warn_if_class1_scores(validation_scores: Dict[str, Any]) -> None:
         "precision, recall, and f1_score for class 1 only (one-vs-rest), not as macro "
         "averages. Refit it to get macro and weighted scores.",
         UserWarning,
-        stacklevel=_deprecation.caller_stacklevel(),
+        stacklevel=_warn.caller_stacklevel(),
     )
-
-
-def _warn_stratified(where: str) -> None:
-    """Emit the deprecation warning for an explicit ``stratified`` argument."""
-    _deprecation.warn(
-        f"The stratified argument of {where} has no effect and will be removed in smallaxe "
-        "1.0. Splits hash each row's content (or fold_key), which is independent of the "
-        "label, so every class is split in the same proportion in expectation. Remove the "
-        "argument."
-    )
-
-
-def _warn_deprecated_alias(name: str, factory: str) -> None:
-    """Emit the deprecation warning for a 0.8.x model class alias."""
-    _deprecation.warn(
-        f"{name} is deprecated and will be removed in smallaxe 1.0. Use {factory} instead."
-    )
-
-
-# Deprecated public names, removed in smallaxe 1.0. The two that take a DataFrame still
-# accept df= under their old names.
-_FIT_ADVICE = "Use Model.fit(), which {}, instead."
-_MOVED = {
-    "infer_feature_cols": (
-        _FIT_ADVICE.format("infers feature_cols when none are given"),
-        _deprecation.with_df_keyword(_infer_feature_cols),
-    ),
-    "warn_ignored_cols": (
-        _FIT_ADVICE.format("warns about the columns it leaves out"),
-        lambda: _warn_ignored_cols,
-    ),
-    "check_training_data": (
-        _FIT_ADVICE.format("runs this check"),
-        _deprecation.with_df_keyword(_check_training_data),
-    ),
-    # Imported, and so exposed, here in 0.10.
-    "resolve_split_seed": (
-        "Use smallaxe.set_seed() or the model's seed parameter, which decide the split "
-        "seed, instead.",
-        lambda: _resolve_split_seed,
-    ),
-}
-__getattr__ = _deprecation.module_getattr(__name__, _MOVED)
-__dir__ = _deprecation.module_dir(globals(), _MOVED)

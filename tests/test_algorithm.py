@@ -120,6 +120,14 @@ class TestAlgorithmRecord:
         install_fake_modules(monkeypatch, record)
         assert record.estimator_class("binary") is FakeEstimator
 
+    @pytest.mark.parametrize("task", ["ranking", ["binary"], None])
+    def test_classes_for_an_unknown_task_raise_validation_error(self, task):
+        record = _record()
+        with pytest.raises(ValidationError, match="has no task"):
+            record.estimator_class(task)
+        with pytest.raises(ValidationError, match="has no task"):
+            record.model_class(task)
+
 
 class TestRegistry:
     def test_names_in_factory_order(self):
@@ -129,6 +137,11 @@ class TestRegistry:
         with pytest.raises(ValidationError, match="Unknown algorithm 'nope'"):
             algorithm.get("nope")
 
+    @pytest.mark.parametrize("name", [3, None, ["xgboost"]])
+    def test_get_non_string_raises(self, name):
+        with pytest.raises(ValidationError, match="Algorithm name must be a string"):
+            algorithm.get(name)
+
     @pytest.mark.parametrize("name", algorithm.names())
     def test_every_record_covers_every_task(self, name):
         record = algorithm.get(name)
@@ -137,10 +150,11 @@ class TestRegistry:
         assert set(record.models) == ALL_TASKS
 
     @pytest.mark.parametrize("name", algorithm.names())
-    @pytest.mark.parametrize("task_type", ["regression", "classification"])
-    def test_legacy_names_round_trip(self, name, task_type):
-        legacy = algorithm._legacy_class_name(name, task_type)
-        assert algorithm._LEGACY_CLASS_NAMES[legacy] == (name, task_type)
+    def test_legacy_map_names_each_algorithm_twice(self, name):
+        """The map that reads 0.8.x artifacts has a regressor and a classifier name each."""
+        legacy = [key for key, value in algorithm._LEGACY_CLASS_NAMES.items() if value == name]
+        assert len(legacy) == 2
+        assert {key.endswith("Regressor") for key in legacy} == {True, False}
 
     def test_legacy_map_covers_all_eight_classes(self):
         assert len(algorithm._LEGACY_CLASS_NAMES) == 2 * len(algorithm.names())
@@ -183,7 +197,7 @@ class TestRecordTranslation:
         kind = Classifier if task in CLASSIFICATION_TASKS else Regressor
         model = kind(record, task)
         model.set_params(n_estimators=3, seed=11)
-        estimator = model._create_spark_estimator(label_col="y")
+        estimator = model._build_estimator("y", {})
 
         assert isinstance(estimator, FakeEstimator)
         ctor, setters = _estimator_kwargs(
@@ -207,12 +221,12 @@ class TestXGBoost:
         """xgboost.spark reads the round count from n_estimators; num_round is ignored."""
         kind = Classifier if task in CLASSIFICATION_TASKS else Regressor
         model = kind("xgboost", task).set_params(n_estimators=7)
-        estimator = model._create_spark_estimator(label_col="y")
+        estimator = model._build_estimator("y", {})
         assert estimator.kwargs["n_estimators"] == 7
         assert "num_round" not in estimator.kwargs
 
     def test_seed_is_forwarded_as_seed(self):
-        estimator = Regressor("xgboost").set_params(seed=3)._create_spark_estimator("y")
+        estimator = Regressor("xgboost").set_params(seed=3)._build_estimator("y", {})
         assert estimator.kwargs["seed"] == 3
 
 
@@ -226,15 +240,15 @@ class TestLightGBM:
     )
     def test_classifier_objective_matches_task(self, task, objective):
         """SynapseML defaults to 'binary', so multiclass must be requested explicitly."""
-        estimator = Classifier("lightgbm", task)._create_spark_estimator(label_col="y")
+        estimator = Classifier("lightgbm", task)._build_estimator("y", {})
         assert estimator.kwargs["objective"] == objective
 
     def test_regressor_sets_no_objective(self):
-        estimator = Regressor("lightgbm")._create_spark_estimator(label_col="y")
+        estimator = Regressor("lightgbm")._build_estimator("y", {})
         assert "objective" not in estimator.kwargs
 
     def test_seed_goes_through_setter(self):
-        estimator = Regressor("lightgbm").set_params(seed=3)._create_spark_estimator("y")
+        estimator = Regressor("lightgbm").set_params(seed=3)._build_estimator("y", {})
         assert ("setSeed", 3) in estimator.calls
         assert "seed" not in estimator.kwargs
 
@@ -250,7 +264,7 @@ class TestCatBoost:
     )
     def test_loss_function_follows_task(self, task, loss):
         kind = Classifier if task in CLASSIFICATION_TASKS else Regressor
-        estimator = kind("catboost", task)._create_spark_estimator(label_col="y")
+        estimator = kind("catboost", task)._build_estimator("y", {})
         assert estimator.kwargs["lossFunction"] == loss
 
     def test_scale_pos_weight_only_for_classification(self):
@@ -260,7 +274,7 @@ class TestCatBoost:
             Regressor("catboost").set_params(scale_pos_weight=2.0)
 
     def test_optional_params_are_not_forwarded_when_unset(self):
-        estimator = Regressor("catboost")._create_spark_estimator(label_col="y")
+        estimator = Regressor("catboost")._build_estimator("y", {})
         for key in ("subsample", "oneHotMaxSize", "randomSeed", "trainDir"):
             assert key not in estimator.kwargs
         assert estimator.kwargs["allowWritingFiles"] is False
@@ -352,27 +366,3 @@ class TestModelConstruction:
         assert issubclass(Regressor, (Model, BaseRegressor, BaseModel))
         assert issubclass(Classifier, (Model, BaseClassifier, BaseModel))
         assert not hasattr(Regressor("random_forest"), "predict_proba")
-
-
-class TestDeprecatedAliases:
-    @pytest.mark.parametrize(
-        "legacy, factory",
-        [
-            (name, "regressors" if kind == "regression" else "classifiers")
-            for name, (_, kind) in algorithm._LEGACY_CLASS_NAMES.items()
-        ],
-    )
-    def test_alias_warns_and_binds_its_algorithm(self, monkeypatch, legacy, factory):
-        from smallaxe import training
-
-        algorithm_name, task_type = algorithm._LEGACY_CLASS_NAMES[legacy]
-        install_fake_modules(monkeypatch, algorithm.get(algorithm_name))
-        alias = getattr(training, legacy)
-
-        with pytest.warns(DeprecationWarning, match=f"{legacy} is deprecated.*{factory}"):
-            model = alias()
-
-        expected_kind = Regressor if task_type == "regression" else Classifier
-        assert isinstance(model, expected_kind)
-        assert model.algorithm.name == algorithm_name
-        assert type(model.clone()) is expected_kind

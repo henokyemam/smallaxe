@@ -1,21 +1,22 @@
-"""Training module - model classes, algorithm records, and factories.
+"""Training: models, the algorithm records, and the factory modules.
 
-Importing it imports no optional package. The algorithm modules below hold only
-declarative records; xgboost.spark, synapse.ml.lightgbm, and catboost_spark are
-imported when an algorithm is first checked or used, and the two JVM packages,
-which both patch pyspark.ml.wrapper process-wide, always in the order
-``algorithm._PATCHES_PYSPARK`` fixes.
+Get a model from a factory module: ``regressors.<algorithm>()`` returns a
+:class:`Regressor`, ``classifiers.<algorithm>(task=...)`` a :class:`Classifier`, both
+:class:`Model` bound to one record of :mod:`smallaxe.training.algorithm`.
+
+Importing it imports no optional package. The algorithm modules hold only declarative
+records; xgboost.spark, synapse.ml.lightgbm, and catboost_spark are imported when an
+algorithm is first checked or used, and the two JVM packages, which both patch
+pyspark.ml.wrapper process-wide, always in the order ``algorithm._PATCHES_PYSPARK``
+fixes.
+
+Example:
+    >>> from smallaxe.training import classifiers
+    >>> model = classifiers.xgboost(task="binary", n_estimators=200)
 """
 
-from smallaxe import _deprecation
-from smallaxe.training import algorithm, base, classifiers, regressors
+from smallaxe.training import algorithm, classifiers, regressors
 from smallaxe.training.base import Classifier, Model, Regressor
-from smallaxe.training.catboost import CatBoostClassifier, CatBoostRegressor
-from smallaxe.training.classifiers import Classifiers
-from smallaxe.training.lightgbm import LightGBMClassifier, LightGBMRegressor
-from smallaxe.training.random_forest import RandomForestClassifier, RandomForestRegressor
-from smallaxe.training.regressors import Regressors
-from smallaxe.training.xgboost import XGBoostClassifier, XGBoostRegressor
 
 __all__ = [
     "algorithm",
@@ -24,26 +25,4 @@ __all__ = [
     "Classifier",
     "regressors",
     "classifiers",
-    # Deprecated factory classes, removed in smallaxe 1.0: use the regressors / classifiers functions.
-    "Regressors",
-    "Classifiers",
-    # Deprecated 0.8.x class aliases, removed in smallaxe 1.0.
-    "RandomForestRegressor",
-    "RandomForestClassifier",
-    "XGBoostRegressor",
-    "XGBoostClassifier",
-    "LightGBMRegressor",
-    "LightGBMClassifier",
-    "CatBoostRegressor",
-    "CatBoostClassifier",
 ]
-
-
-# Deprecated exports, removed in smallaxe 1.0. The classes stay in smallaxe.training.base.
-_MOVED = {
-    "BaseModel": ("Use smallaxe.training.Model instead.", lambda: base.BaseModel),
-    "BaseRegressor": ("Use smallaxe.training.Regressor instead.", lambda: base.BaseRegressor),
-    "BaseClassifier": ("Use smallaxe.training.Classifier instead.", lambda: base.BaseClassifier),
-}
-__getattr__ = _deprecation.module_getattr(__name__, _MOVED)
-__dir__ = _deprecation.module_dir(globals(), _MOVED)

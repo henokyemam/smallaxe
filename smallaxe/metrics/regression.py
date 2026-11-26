@@ -1,7 +1,8 @@
 """Regression metrics for evaluating model predictions.
 
-Every metric raises ``ValidationError`` on an empty DataFrame and lets Spark's own
-errors propagate. A metric that is mathematically undefined on the rows given is
+Every metric raises ``ValidationError`` on an empty DataFrame or a non-numeric label or
+prediction column; an argument Spark's evaluator rejects is also a ``ValidationError``.
+A metric that is mathematically undefined on the rows given is
 ``float("nan")``, never 0.0, which would read as a perfect error score.
 """
 
@@ -11,9 +12,11 @@ from pyspark.ml.evaluation import RegressionEvaluator
 from pyspark.sql import DataFrame
 from pyspark.sql import functions as F
 
-from smallaxe import _deprecation
+from smallaxe import _checks
 from smallaxe.metrics._checks import require_numeric, require_rows
 from smallaxe.metrics._checks import validate_columns as _validate_columns
+
+__all__ = ["mse", "rmse", "mae", "r2", "mape"]
 
 
 def _evaluate(
@@ -25,10 +28,10 @@ def _evaluate(
     evaluator = RegressionEvaluator(
         labelCol=label_col, predictionCol=prediction_col, metricName=metric
     )
-    return float(evaluator.evaluate(dataframe))
+    with _checks.spark_argument_errors(f"Cannot compute {metric}"):
+        return float(evaluator.evaluate(dataframe))
 
 
-@_deprecation.df_keyword
 def mse(
     dataframe: DataFrame, label_col: str = "label", prediction_col: str = "predict_label"
 ) -> float:
@@ -46,14 +49,15 @@ def mse(
 
     Raises:
         ColumnNotFoundError: If label_col or prediction_col is not in the DataFrame.
-        ValidationError: If the DataFrame has no rows.
+        ValidationError: If label_col or prediction_col is not numeric, or the DataFrame
+            has no rows.
     """
     _validate_columns(dataframe, label_col, prediction_col)
+    require_numeric(dataframe, "mse", label_col, prediction_col)
     require_rows(dataframe, "mse")
     return _evaluate(dataframe, label_col, prediction_col, "mse")
 
 
-@_deprecation.df_keyword
 def rmse(
     dataframe: DataFrame, label_col: str = "label", prediction_col: str = "predict_label"
 ) -> float:
@@ -72,14 +76,15 @@ def rmse(
 
     Raises:
         ColumnNotFoundError: If label_col or prediction_col is not in the DataFrame.
-        ValidationError: If the DataFrame has no rows.
+        ValidationError: If label_col or prediction_col is not numeric, or the DataFrame
+            has no rows.
     """
     _validate_columns(dataframe, label_col, prediction_col)
+    require_numeric(dataframe, "rmse", label_col, prediction_col)
     require_rows(dataframe, "rmse")
     return _evaluate(dataframe, label_col, prediction_col, "rmse")
 
 
-@_deprecation.df_keyword
 def mae(
     dataframe: DataFrame, label_col: str = "label", prediction_col: str = "predict_label"
 ) -> float:
@@ -97,14 +102,15 @@ def mae(
 
     Raises:
         ColumnNotFoundError: If label_col or prediction_col is not in the DataFrame.
-        ValidationError: If the DataFrame has no rows.
+        ValidationError: If label_col or prediction_col is not numeric, or the DataFrame
+            has no rows.
     """
     _validate_columns(dataframe, label_col, prediction_col)
+    require_numeric(dataframe, "mae", label_col, prediction_col)
     require_rows(dataframe, "mae")
     return _evaluate(dataframe, label_col, prediction_col, "mae")
 
 
-@_deprecation.df_keyword
 def r2(
     dataframe: DataFrame, label_col: str = "label", prediction_col: str = "predict_label"
 ) -> float:
@@ -128,9 +134,11 @@ def r2(
 
     Raises:
         ColumnNotFoundError: If label_col or prediction_col is not in the DataFrame.
-        ValidationError: If the DataFrame has no rows.
+        ValidationError: If label_col or prediction_col is not numeric, or the DataFrame
+            has no rows.
     """
     _validate_columns(dataframe, label_col, prediction_col)
+    require_numeric(dataframe, "r2", label_col, prediction_col)
     require_rows(dataframe, "r2")
 
     label = F.col(label_col)
@@ -149,7 +157,6 @@ def r2(
     return _evaluate(dataframe, label_col, prediction_col, "r2")
 
 
-@_deprecation.df_keyword
 def mape(
     dataframe: DataFrame, label_col: str = "label", prediction_col: str = "predict_label"
 ) -> float:

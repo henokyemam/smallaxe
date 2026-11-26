@@ -496,10 +496,10 @@ class TestPipelineProperties:
         assert pipeline["imputer"] is imputer
 
     def test_getitem_missing_key_raises_error(self):
-        """Test that accessing missing step raises KeyError."""
+        """Accessing a missing step raises ValidationError naming the steps."""
         pipeline = Pipeline([("imputer", Imputer())])
 
-        with pytest.raises(KeyError, match="nonexistent"):
+        with pytest.raises(ValidationError, match="nonexistent"):
             _ = pipeline["nonexistent"]
 
     def test_len(self):
@@ -906,3 +906,201 @@ class TestPredictionApi:
 
         with pytest.raises(ModelNotFittedError):
             getattr(pipeline, method)(df_clean)
+
+
+# --- Validation through the pipeline --------------------------------------------------
+
+
+@pytest.fixture
+def churn(spark_session):
+    rows = [
+        (
+            i,
+            float(18 + i % 50),
+            (None if i % 11 == 0 else float(1000 + 37 * i)),
+            ["a", "b", "c"][i % 3],
+            int((i % 7) < 3),
+        )
+        for i in range(120)
+    ]
+    return spark_session.createDataFrame(rows, ["id", "age", "income", "city", "label"])
+
+
+def _validated_pipeline(model):
+    return Pipeline(
+        [
+            ("imputer", Imputer(numerical_strategy="mean", categorical_strategy="most_frequent")),
+            ("scaler", Scaler()),
+            ("encoder", Encoder()),
+            ("model", model),
+        ]
+    )
+
+
+_COLUMNS = {"numerical_cols": ["age", "income"], "categorical_cols": ["city"]}
+
+
+class TestPipelineValidation:
+    @pytest.mark.parametrize(
+        "options",
+        [
+            {"validation": "train_test", "test_size": 0.3},
+            {"validation": "kfold", "n_folds": 3},
+            {"validation": "kfold", "n_folds": 3, "refit": False},
+            {"validation": "train_test", "fold_key": "id", "cache_strategy": "none"},
+        ],
+        ids=["train_test", "kfold", "kfold-no-refit", "fold_key"],
+    )
+    def test_scores_equal_the_model_fitted_on_the_preprocessed_frame(self, churn, options):
+        pipeline = _validated_pipeline(classifiers.random_forest(n_estimators=5, seed=7))
+        pipeline.fit(churn, label_col="label", **_COLUMNS, **options)
+
+        direct = classifiers.random_forest(n_estimators=5, seed=7)
+        direct.fit(
+            pipeline.transform(churn),
+            label_col="label",
+            feature_cols=pipeline.feature_cols,
+            **options,
+        )
+
+        assert pipeline.validation_scores is not None
+        assert pipeline.validation_scores == direct.validation_scores
+        assert pipeline.validation_scores["validation_type"] == options["validation"]
+        model = pipeline.named_steps["model"]
+        assert model.metadata["split_seed"] == direct.metadata["split_seed"] == 7
+        assert model.metadata["kept_model"] == direct.metadata["kept_model"]
+
+    def test_global_seed_gives_the_same_split(self, churn):
+        import smallaxe
+
+        smallaxe.set_seed(11)
+        try:
+            pipeline = _validated_pipeline(classifiers.random_forest(n_estimators=5))
+            pipeline.fit(churn, label_col="label", **_COLUMNS, validation="train_test")
+            direct = classifiers.random_forest(n_estimators=5)
+            direct.fit(
+                pipeline.transform(churn),
+                label_col="label",
+                feature_cols=pipeline.feature_cols,
+                validation="train_test",
+            )
+        finally:
+            smallaxe.set_seed(None)
+        assert pipeline.validation_scores == direct.validation_scores
+
+    def test_fit_transform_passes_the_options(self, churn):
+        pipeline = _validated_pipeline(classifiers.random_forest(n_estimators=5, seed=7))
+        transformed = pipeline.fit_transform(
+            churn, label_col="label", **_COLUMNS, validation="kfold", n_folds=2
+        )
+
+        assert pipeline.validation_scores["n_folds"] == 2
+        assert "predict_label" not in transformed.columns
+
+    def test_default_is_no_validation(self, churn):
+        pipeline = _validated_pipeline(classifiers.random_forest(n_estimators=5, seed=7))
+        pipeline.fit(churn, label_col="label", **_COLUMNS)
+
+        assert pipeline.validation_scores is None
+
+    def test_validation_options_are_keyword_only(self, churn):
+        pipeline = _validated_pipeline(classifiers.random_forest(n_estimators=5, seed=7))
+        with pytest.raises(TypeError):
+            pipeline.fit(churn, "label", ["age"], ["city"], "train_test")
+
+    def test_invalid_option_is_the_models_validation_error(self, churn):
+        pipeline = _validated_pipeline(classifiers.random_forest(n_estimators=5, seed=7))
+        with pytest.raises(ValidationError, match="Invalid validation strategy"):
+            pipeline.fit(churn, label_col="label", **_COLUMNS, validation="loo")
+        assert not pipeline._is_fitted
+
+    @pytest.mark.parametrize(
+        "option",
+        [
+            {"validation": "train_test"},
+            {"validation": "kfold"},
+            {"test_size": 0.3},
+            {"n_folds": 3},
+            {"fold_key": "id"},
+            {"refit": False},
+            {"cache_strategy": "memory"},
+            # Equal to the default but of another type: still an option given.
+            {"refit": 1},
+            {"n_folds": 5.0},
+            {"validation": None},
+        ],
+        ids=lambda option: f"{next(iter(option))}={next(iter(option.values()))!r}",
+    )
+    def test_options_without_a_model_raise(self, churn, option):
+        pipeline = Pipeline([("scaler", Scaler())])
+        with pytest.raises(ValidationError, match="need a model step"):
+            pipeline.fit(churn, numerical_cols=["age"], **option)
+        with pytest.raises(ValidationError, match="need a model step"):
+            pipeline.fit_transform(churn, numerical_cols=["age"], **option)
+
+    def test_default_values_passed_explicitly_without_a_model_are_accepted(self, churn):
+        """A default passed explicitly cannot be told from one left out: both are allowed."""
+        pipeline = Pipeline([("scaler", Scaler())])
+        pipeline.fit(
+            churn,
+            numerical_cols=["age"],
+            validation="none",
+            test_size=0.2,
+            n_folds=5,
+            fold_key=None,
+            refit=True,
+            cache_strategy=None,
+        )
+        assert pipeline.validation_scores is None
+
+    def test_validation_scores_without_a_model_is_none(self, churn):
+        pipeline = Pipeline([("scaler", Scaler())]).fit(churn, numerical_cols=["age"])
+        assert pipeline.validation_scores is None
+        assert Pipeline([("scaler", Scaler())]).validation_scores is None
+
+    def test_validation_scores_before_fit_raises(self):
+        pipeline = _validated_pipeline(classifiers.random_forest())
+        with pytest.raises(ModelNotFittedError):
+            _ = pipeline.validation_scores
+
+    def test_scores_survive_save_and_load(self, churn, tmp_path):
+        pipeline = _validated_pipeline(classifiers.random_forest(n_estimators=5, seed=7))
+        pipeline.fit(churn, label_col="label", **_COLUMNS, validation="train_test")
+        pipeline.save(str(tmp_path / "p"))
+
+        assert Pipeline.load(str(tmp_path / "p")).validation_scores == pipeline.validation_scores
+
+    def test_duck_typed_model_gets_only_the_options_given(self, churn):
+        class Recording(MockModel):
+            def fit(self, df, label_col, feature_cols, **options):
+                self.options = options
+                self.validation_scores = {"seen": sorted(options)}
+                return super().fit(df, label_col, feature_cols)
+
+        model = Recording()
+        pipeline = Pipeline([("scaler", Scaler()), ("model", model)])
+        pipeline.fit(churn, label_col="label", numerical_cols=["age"])
+        assert model.options == {}
+
+        pipeline.fit(churn, label_col="label", numerical_cols=["age"], validation="kfold")
+        assert model.options == {"validation": "kfold"}
+        assert pipeline.validation_scores == {"seen": ["validation"]}
+
+    def test_duck_typed_model_without_scores_reports_none(self, churn):
+        pipeline = Pipeline([("scaler", Scaler()), ("model", MockModel())])
+        pipeline.fit(churn, label_col="label", numerical_cols=["age"])
+        assert pipeline.validation_scores is None
+
+
+class TestPipelineArguments:
+    @pytest.mark.parametrize("value", ["age", [1, 2], {"age": 1}])
+    def test_column_lists_must_be_lists_of_names(self, churn, value):
+        pipeline = Pipeline([("scaler", Scaler())])
+        with pytest.raises(ValidationError, match="must be a list of column names"):
+            pipeline.fit(churn, numerical_cols=value)
+        with pytest.raises(ValidationError, match="must be a list of column names"):
+            pipeline.fit(churn, categorical_cols=value)
+
+    def test_dataframe_must_be_a_dataframe(self):
+        with pytest.raises(ValidationError, match="must be a PySpark DataFrame"):
+            Pipeline([("scaler", Scaler())]).fit({"age": [1]}, numerical_cols=["age"])

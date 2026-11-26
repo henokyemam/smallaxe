@@ -623,12 +623,18 @@ class TestEdgeCases:
         df = spark_session.createDataFrame([(None, 0.4)], "label: int, probability: double")
         assert math.isnan(log_loss(df))
 
-    def test_evaluator_errors_propagate(self, spark_session):
+    def test_a_string_label_is_a_validation_error(self, spark_session):
         """A label column the evaluator cannot read is an error, not a score."""
         df = spark_session.createDataFrame([("a", 0.9), ("b", 0.1)], ["label", "probability"])
-        with pytest.raises(Exception) as info:
+        with pytest.raises(ValidationError, match="auc_roc.*'label' must be numeric"):
             auc_roc(df)
-        assert not isinstance(info.value, ValidationError)
+        with pytest.raises(ValidationError, match="auc_pr.*'label' must be numeric"):
+            auc_pr(df)
+
+    def test_a_string_probability_is_a_validation_error(self, spark_session):
+        df = spark_session.createDataFrame([(1, "a"), (0, "b")], ["label", "probability"])
+        with pytest.raises(ValidationError, match="'probability' must be a probability"):
+            auc_roc(df)
 
     def test_probability_edge_values(self, spark_session):
         """Test log loss with probability values at 0 and 1."""

@@ -1,5 +1,236 @@
 # Changelog
 
+## 1.0.0 (unreleased)
+
+1.0 freezes the API. It removes every spelling that warned in 0.11 or earlier and states
+the public surface explicitly: the names in each module's `__all__`, their documented
+arguments, and the artifact formats. From 1.0 smallaxe follows semantic versioning; see
+"Stability and versioning" in the README.
+
+### Upgrading from 0.x
+
+Run your code on 0.11 first: each item below warned there (unless marked "not
+deprecated in 0.11"), naming its replacement. In 1.0 a removed name raises
+`ImportError` / `AttributeError`, and a removed argument `TypeError`.
+
+- `RandomForestRegressor()`, `XGBoostRegressor()`, `LightGBMRegressor()`,
+  `CatBoostRegressor()` (from `smallaxe.training` or their algorithm modules): use
+  `regressors.random_forest()`, `regressors.xgboost()`, `regressors.lightgbm()`,
+  `regressors.catboost()` after `from smallaxe.training import regressors`.
+- `RandomForestClassifier()`, `XGBoostClassifier()`, `LightGBMClassifier()`,
+  `CatBoostClassifier()`: use `classifiers.random_forest(task=...)`,
+  `classifiers.xgboost(task=...)`, `classifiers.lightgbm(task=...)`,
+  `classifiers.catboost(task=...)`. Their `.load(path)`: use `regressors.load(path)`,
+  `classifiers.load(path)` or `smallaxe.load_model(path)`. Models they saved still load.
+- `Regressors.<algorithm>(...)`, `Classifiers.<algorithm>(...)`, `Regressors.load`,
+  `Classifiers.load`, `Regressors.available_models()`, `Classifiers.available_models()`:
+  use the same functions of the `regressors` / `classifiers` modules.
+- `Regressors.list_models()` / `Classifiers.list_models()`: use
+  `regressors.algorithms()` (every algorithm) and `regressors.available_models()` (which
+  are installed). The `"class_name"` entry of `available_models()`: use the entry's key,
+  the algorithm name.
+- `smallaxe.set_cache_strategy()` / `get_cache_strategy()`: pass
+  `cache_strategy=` to `fit`.
+- `smallaxe.set_spark_session()` / `get_spark_session()`: use
+  `dataframe.sparkSession` or `SparkSession.getActiveSession()`.
+- `model.set_param({...})`: use `model.set_params(**params)`.
+- `df=` on `Model.fit` / `predict` / `evaluate`, `Classifier.predict_proba`, every
+  `Pipeline`, `Imputer`, `Scaler` and `Encoder` method, and every `smallaxe.metrics`
+  function: use `dataframe=`, or pass the DataFrame positionally.
+- `stratified=` in `Model.fit` and `optimize.run`: delete it; it had no effect.
+- `dataset_info(name)` printing by default: it only returns the dict now; pass
+  `verbose=True` to also print. `except ValueError` around it: use
+  `except ValidationError`.
+- `metrics.log_loss(dataframe, label_col, probability_col, eps)`: pass `eps=` by keyword.
+- `smallaxe.training.BaseModel` / `BaseRegressor` / `BaseClassifier`: use
+  `smallaxe.training.Model` / `Regressor` / `Classifier`. The `Base*` classes remain in
+  `smallaxe.training.base`.
+- `smallaxe.training.base.infer_feature_cols`, `warn_ignored_cols`,
+  `check_training_data` and `smallaxe.search.optimize.infer_feature_cols`,
+  `warn_ignored_cols`, `check_training_data`: `Model.fit` does each of these.
+- `smallaxe.training.mixins.validation_mixin.hashable_columns`, `split_hash`: use
+  `fit(validation=..., fold_key=...)`. `resolve_split_seed` (in `validation_mixin`,
+  `base` and `optimize`): use `smallaxe.set_seed()` or the model's `seed`.
+- `smallaxe.training.algorithm.resolve`: use `get(name).estimator_class(task)` /
+  `get(name).model_class(task)`. `estimator_kwargs`: build the model with a factory and
+  `set_params()`. `legacy_class_name`: use the algorithm name and the model's task.
+  `package_version`: read `metadata["algorithm_package_version"]` of a fitted model.
+  `COLUMN_ROLES`: use `get(name).cols`. `LEGACY_CLASS_NAMES`: use
+  `smallaxe.load_model()`, which reads 0.8.x artifacts.
+- `HYPEROPT_AVAILABLE` (in `smallaxe.search` and `smallaxe.search.optimize`),
+  `optimize.HYPEROPT_INSTALL_HINT`: hyperopt is a required dependency; drop the check.
+- `optimize.MAXIMIZE_METRICS`, `MINIMIZE_METRICS`, `VALID_METRICS`: use
+  `smallaxe.metrics.TASK_METRICS`.
+- `XGBOOST_AVAILABLE`, `LIGHTGBM_AVAILABLE`, `CATBOOST_AVAILABLE`,
+  `smallaxe.training.catboost.is_catboost_available()`: use
+  `smallaxe.training.algorithm.get(name).available()` or
+  `regressors.available_models()`. `catboost_install_hint()`: use
+  `algorithm.get("catboost").dependency.install_hint`.
+- `smallaxe.preprocessing.encoder.VALID_METHODS` / `VALID_HANDLE_RARE`,
+  `smallaxe.preprocessing.scaler.VALID_METHODS`: the values are listed in the class
+  docstrings; an invalid one raises `ValidationError`.
+- `smallaxe.warnings` (the standard library module, re-exported): `import warnings`.
+- Not deprecated in 0.11: `smallaxe.preprocessing.imputer.VALID_NUMERICAL_STRATEGIES` /
+  `VALID_CATEGORICAL_STRATEGIES` (listed in the `Imputer` docstring);
+  `smallaxe.metrics.classification.MULTICLASS_AVERAGED_METRICS` (use
+  `TASK_METRICS["multiclass"]`); `smallaxe.preprocessing.encoder.OTHER` / `UNKNOWN` (the
+  strings `"__OTHER__"` / `"__UNKNOWN__"`); `smallaxe.pipeline.pipeline.step_kind`; the
+  `REGRESSION_TASKS`, `CLASSIFICATION_TASKS`, `VALID_TASKS`, `VALID_VALIDATION` and
+  `VALID_CACHE_STRATEGIES` attributes of the model classes (use
+  `smallaxe.training.algorithm.REGRESSION_TASKS`, `CLASSIFICATION_TASKS`,
+  `ALL_TASKS`); and the artifact layout constants (`ARTIFACT_KIND`,
+  `LEGACY_METADATA_FILE`, `SPARK_MODEL_DIR`, `STEPS_DIR`, `STEP_KINDS`, `IMPUTER`,
+  `SCALER`, `ENCODER`, `MODEL`, `PREPROCESSING_KINDS`, `DEFAULT_PREDICTION_COL`,
+  `DEFAULT_PROBABILITY_COL`) of the preprocessing, pipeline and persistence modules.
+- `pipeline["name"]` for a missing step: catch `ValidationError` instead of `KeyError`.
+- Positional `fit` arguments after `n_folds`: removing `stratified` moved
+  `cache_strategy`, `fold_key` and `refit` one place left; pass them by keyword.
+
+### Removed
+
+- Everything in the list above, with the `smallaxe._deprecation` module (the `df=` and
+  positional-`eps` wrappers and the module `__getattr__` shims) and the global
+  cache-strategy and Spark-session state in `smallaxe._config`.
+- `Model.load` no longer checks a class alias's algorithm (the aliases are gone); it
+  checks the kind for `Regressor.load` / `Classifier.load`, as before. Artifacts saved
+  by the eight 0.8.x classes still load: the map from their class names to algorithms
+  is a private detail of loading, used nowhere else.
+- The `DependencyError` path for a missing hyperopt: `smallaxe.search` imports hyperopt
+  normally, so a broken install fails with hyperopt's `ImportError` on
+  `import smallaxe.search`.
+- Dead code the removals left behind, all private: `SparkModelMixin`'s
+  `_create_spark_estimator`, `_uses_constructor_col_params` and its generic
+  `_fit_spark_model` / `_get_feature_importance` (both are now abstract, and `Model`
+  implements them), `Model._create_spark_estimator`, `BaseModel._infer_feature_cols`,
+  `BaseModel._load_artifacts`, `BaseModel.clone` (`Model.clone` is the one clone), and
+  the `stratified` / `label_col` parameters of `ValidationMixin._train_test_split` /
+  `_kfold_split` with the `_stratified_train_test_split`, `_simple_kfold_split` and
+  `_stratified_kfold_split` shims. A class built directly on `BaseModel` must implement
+  `_fit_spark_model` and `_get_feature_importance`.
+
+### Changed
+
+- **The public surface is stated explicitly.** Every module defines `__all__`, and every
+  module-level name outside it starts with `_`. `smallaxe.training` exports `algorithm`,
+  `Model`, `Regressor`, `Classifier` and the factory modules `regressors` and
+  `classifiers`. The task names are defined once, in `smallaxe.training.algorithm`
+  (`REGRESSION_TASKS`, `CLASSIFICATION_TASKS`, `ALL_TASKS`).
+  `tests/test_public_api.py` pins every public module's `__all__` and the parameters of
+  every public function, method and class, including those implemented in a private
+  module and exported by a public one (the `smallaxe.datasets` functions). The
+  implementation classes `BaseModel`, `BaseRegressor`, `BaseClassifier` and the mixins
+  of `smallaxe.training.mixins` stay in their modules' `__all__`, but the README's
+  stability policy leaves them out of the public API: their members are public as
+  members of `Model`, `Regressor` and `Classifier`.
+- **`fit`, `set_params` and `clone` return the model's own type.** They were typed as
+  the base class; now `regressors.xgboost().fit(...)` is typed as a `Regressor`, so
+  chained calls type-check. Runtime behaviour is unchanged.
+- **Public methods raise smallaxe exceptions for user errors.** Each of these raised a
+  raw Python or Spark error before:
+  - Any public method given something that is not a DataFrame where it expects one
+    (`Model`, `Pipeline`, `Imputer`, `Scaler`, `Encoder`, every metric, `optimize.run`)
+    raises `ValidationError` (was `AttributeError`). Spark Connect DataFrames are
+    accepted.
+  - A column list given as a string or with non-string entries (`feature_cols`,
+    `exclude_cols`, `numerical_cols`, `categorical_cols`) raises `ValidationError`; a
+    string used to be split into one-letter column names.
+  - `fit` with an explicit feature column that is not numeric, boolean or an ML vector
+    raises `ValidationError` naming it (was Spark's `IllegalArgumentException`).
+    `test_size`, `n_folds`, `fold_key` and `refit` are checked before any Spark job:
+    a non-numeric `test_size` or a non-integer `n_folds` raises `ValidationError` (was
+    `TypeError`), and so do a non-string `fold_key` and a non-bool `refit`.
+  - `predict`, `predict_proba` and `Pipeline.predict` on a frame missing a feature column
+    raise `ColumnNotFoundError` (was Spark's `AnalysisException`).
+  - `Regressor(...)` / `Classifier(...)` / `Model(...)` with an algorithm that is
+    neither a name nor an `Algorithm` raise `ValidationError`.
+  - Saving or loading with a path that is not a string (including a `pathlib.Path`:
+    pass `str(path)`) raises `ValidationError`.
+  - `optimize.run` raises `ValidationError` for a `model` that is not a smallaxe model,
+    a `param_space` naming a parameter the model does not have (before any trial runs;
+    it used to fail every trial), and a non-integer `max_evals`, `seed` or
+    `early_stopping_rounds`.
+  - `optimize.run` also checks before any trial: a `param_space` key that is not a
+    string (was hyperopt's `TypeError`), a choice or constant that is not a number for a
+    numeric parameter (`{"max_depth": ["a", "b"]}` or `{"max_depth": "ab"}`, was
+    `TypeError` mid-search), a `validation` that is not one of its strings (`[]` was a
+    `TypeError`), a `verbose`, `early_stopping` or `refit` that is not a bool (`refit="y"`
+    used to be accepted; `verbose="y"` was a `TypeError` from hyperopt), and `test_size`,
+    `n_folds` and `fold_key` as `fit` checks them (they used to fail every trial). All
+    raise `ValidationError`.
+  - A task that is not a string (`Classifier("random_forest", task=["binary"])`,
+    `classifiers.random_forest(task=[...])`, `Model(..., task={})`) raises
+    `ValidationError` (was `TypeError: unhashable type`).
+  - A label column that is not numeric (a string or boolean) in `fit`, `evaluate` or
+    `optimize.run` raises `ValidationError` naming it (was Spark's
+    `IllegalArgumentException`, or an `AnalysisException` for XGBoost).
+  - `predict` / `predict_proba` with an `output_col` that is not a non-empty string
+    raises `ValidationError` (was a `Py4JError`), and so does a feature column of the
+    wrong type in the frame to predict (was Spark's `IllegalArgumentException`).
+  - A parameter value the Spark estimator rejects when `fit` runs (Random Forest
+    `max_depth=-3`, `subsampling_rate=5.0`, `feature_subset_strategy="bogus"`) raises
+    `ValidationError` with Spark's message, chained to Spark's
+    `IllegalArgumentException`. `set_params` still checks only types, not ranges.
+    XGBoost checks its parameters inside the training job, so a bad XGBoost value still
+    fails with Spark's `Py4JJavaError`.
+  - `metrics.mse`, `rmse`, `mae` and `r2` raise `ValidationError` for a non-numeric label
+    or prediction column, and `auc_roc` / `auc_pr` for a non-numeric label or a
+    probability column that is neither a number nor a vector (all were Spark's
+    `IllegalArgumentException`). Any other argument Spark's evaluator rejects is a
+    `ValidationError` too.
+  - `Algorithm.estimator_class(task)` and `model_class(task)` for a task the algorithm
+    does not have raise `ValidationError` (was `KeyError`). `algorithm.get()` with a
+    name that is not a string raises `ValidationError` saying so (was a `TypeError` for
+    an unhashable value, and "Unknown algorithm" for any other).
+  - Metric functions raise `ValidationError` for a column name that is not a string.
+  - `pipeline["name"]` for a missing step raises `ValidationError` (was `KeyError`).
+  - `dataset_info` raises only `ValidationError` for an unknown name; in 0.11 the error
+    was also a `ValueError`.
+- **`set_params` checks every value before setting any.** A bool is rejected for an int
+  or float parameter (`n_estimators=True`), and `seed` must be an int or None. Earlier a
+  failing value left the parameters before it set.
+- **`set_seed` rejects a bool** with `ConfigurationError`; `set_seed(True)` used to be
+  accepted, since a bool is an int to Python.
+- **`ConfigurationError` builds its message for every value given, falsy ones
+  included.** `set_verbosity("")`, `set_verbosity(0)` and `set_verbosity(None)` now say
+  `Invalid value '' for setting 'verbosity'. Allowed values: [...]` instead of the
+  generic default message; the value is shown with `repr`.
+- **The verbosity levels are documented as they behave.** `'quiet'` hides
+  `optimize.run`'s progress bar; `'normal'` (default) and `'verbose'` show it and do
+  nothing else differently today. The docstrings no longer promise detailed logging.
+- Load errors no longer name the 0.8.x classes: `regressors.load` on a classifier says
+  `Cannot load a regressor: '...' holds a 'xgboost' classifier (task 'binary')`, and
+  `Regressor.load` / `Classifier.load` on the other kind say
+  `Cannot load model: Regressor.load expects a regressor, but ...`.
+- `dataset_info(name, *, verbose=False)`: `verbose` is a keyword-only bool and the
+  default prints nothing. The printed text's usage lines no longer pass `spark`.
+- Every factory function's docstring lists all of its algorithm's parameters with their
+  descriptions and defaults, taken from the algorithm's parameter table (a test keeps
+  them equal). Every public class, method and function has an Args / Returns / Raises
+  docstring.
+- The package classifier is `Development Status :: 5 - Production/Stable`.
+
+### Added
+
+- **`Pipeline.fit` and `Pipeline.fit_transform` take the model's validation options**
+  as keyword-only arguments: `validation`, `test_size`, `n_folds`, `fold_key`, `refit`
+  and `cache_strategy`, with `Model.fit`'s defaults. They reach the model step, which
+  validates on the preprocessed frame. The preprocessing steps are fitted on all rows
+  first, so their statistics (imputed values, scaling ranges, encoder categories) see
+  the validation rows; the docstring says so. On a pipeline without a model, any of them
+  given raises `ValidationError`; a value counts as given unless it equals its default
+  and has the default's type, so `refit=1` and `n_folds=5.0` raise while an explicit
+  `refit=True` does not (it cannot be told from leaving it out). A duck-typed model
+  receives only the options given in that sense.
+- **`Pipeline.validation_scores`**: the model step's `validation_scores`, or None for a
+  pipeline without a model. It survives `save` / `load`.
+- **`load_sample_regression()` / `load_sample_classification()` default to the active
+  SparkSession**: `spark` is optional, and with no active session they raise
+  `ValidationError`. A non-positive or non-integer `n_rows`, or a non-integer `seed`,
+  raises `ValidationError`.
+- A "Stability and versioning" section in the README: what is public, how long
+  artifacts keep loading, how deprecations work, and the supported Python / Spark
+  matrix.
+
 ## 0.11.0 (2026-11-25)
 
 ### Changed

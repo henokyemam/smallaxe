@@ -15,14 +15,7 @@ import pytest
 from pyspark.sql import functions as F
 
 from smallaxe.exceptions import DependencyError, ModelNotFittedError, ValidationError
-from smallaxe.training import (
-    RandomForestClassifier,
-    XGBoostClassifier,
-    XGBoostRegressor,
-    algorithm,
-    classifiers,
-    regressors,
-)
+from smallaxe.training import algorithm, classifiers, regressors
 from smallaxe.training import catboost as catboost_module
 from smallaxe.training.algorithm import ALL_TASKS, Algorithm, Param
 from smallaxe.training.base import Classifier, Model, Regressor
@@ -325,17 +318,20 @@ class TestPersistence:
     def test_legacy_metadata_keeps_the_kind(self, fake_xgboost, tmp_path, spark_session):
         path = _write_legacy_artifact(tmp_path / "legacy")
 
-        with pytest.raises(ValidationError, match="not a supported regressor"):
+        with pytest.raises(ValidationError, match="Cannot load a regressor") as excinfo:
             regressors.load(path)
+        assert "'xgboost' classifier" in str(excinfo.value)
+        assert "XGBoost" not in str(excinfo.value)
 
-    def test_alias_load_checks_kind_and_algorithm(self, fake_xgboost, tmp_path, spark_session):
+    def test_kind_load_checks_the_kind(self, fake_xgboost, tmp_path, spark_session):
         path = _write_legacy_artifact(tmp_path / "legacy")
 
-        with pytest.raises(ValidationError, match="Model type mismatch"):
-            XGBoostRegressor.load(path)
-        with pytest.raises(ValidationError, match="Model type mismatch"):
-            RandomForestClassifier.load(path)
-        assert type(XGBoostClassifier.load(path)) is Classifier
+        with pytest.raises(ValidationError, match="Regressor.load expects a regressor") as excinfo:
+            Regressor.load(path)
+        assert "'xgboost' classifier" in str(excinfo.value)
+        assert "XGBoost" not in str(excinfo.value)
+        assert type(Classifier.load(path)) is Classifier
+        assert type(Model.load(path)) is Classifier
 
     def test_unknown_metadata_raises(self, tmp_path, spark_session):
         path = _write_legacy_artifact(

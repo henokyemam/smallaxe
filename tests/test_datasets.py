@@ -338,3 +338,60 @@ class TestDatasetInfo:
         assert info["columns"]["churn"]["type"] == "int"
         info["label"] = "changed"
         assert dataset_info("classification", verbose=False)["label"] == "churn"
+
+
+class TestActiveSession:
+    """``spark`` is optional: the loaders default to the active SparkSession."""
+
+    @pytest.mark.parametrize("loader", [load_sample_regression, load_sample_classification])
+    def test_spark_defaults_to_the_active_session(self, spark_session, loader):
+        from pyspark.sql import SparkSession
+
+        assert SparkSession.getActiveSession() is spark_session
+        implicit = loader(n_rows=20, seed=3)
+        explicit = loader(spark_session, n_rows=20, seed=3)
+
+        assert implicit.sparkSession is spark_session
+        assert implicit.collect() == explicit.collect()
+
+    @pytest.mark.parametrize("loader", [load_sample_regression, load_sample_classification])
+    def test_no_active_session_is_a_validation_error(self, monkeypatch, loader):
+        from pyspark.sql import SparkSession
+
+        monkeypatch.setattr(SparkSession, "getActiveSession", classmethod(lambda cls: None))
+        with pytest.raises(ValidationError, match="no active SparkSession"):
+            loader(n_rows=5)
+
+    @pytest.mark.parametrize("loader", [load_sample_regression, load_sample_classification])
+    def test_spark_must_be_a_session(self, loader):
+        with pytest.raises(ValidationError, match="SparkSession"):
+            loader("not a session", n_rows=5)
+
+    @pytest.mark.parametrize("loader", [load_sample_regression, load_sample_classification])
+    @pytest.mark.parametrize("n_rows", [0, -1, 2.5, True, "10"])
+    def test_n_rows_must_be_a_positive_int(self, spark_session, loader, n_rows):
+        with pytest.raises(ValidationError, match="n_rows"):
+            loader(spark_session, n_rows=n_rows)
+
+    @pytest.mark.parametrize("loader", [load_sample_regression, load_sample_classification])
+    @pytest.mark.parametrize("seed", [1.5, True, "1", None])
+    def test_seed_must_be_an_int(self, spark_session, loader, seed):
+        with pytest.raises(ValidationError, match="seed"):
+            loader(spark_session, n_rows=5, seed=seed)
+
+
+class TestDatasetInfoContract:
+    def test_default_returns_the_dict_without_printing(self, capsys):
+        info = dataset_info("regression")
+
+        assert info["label"] == "price"
+        assert capsys.readouterr().out == ""
+
+    def test_verbose_is_keyword_only(self):
+        with pytest.raises(TypeError):
+            dataset_info("regression", True)
+
+    @pytest.mark.parametrize("name", [None, 3, ["regression"]])
+    def test_non_string_name_is_a_validation_error(self, name):
+        with pytest.raises(ValidationError, match="Unknown dataset"):
+            dataset_info(name)

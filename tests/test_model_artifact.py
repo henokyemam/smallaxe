@@ -304,9 +304,9 @@ class TestLoadRejects:
         model.fit(df, label_col="label", feature_cols=["a", "b"])
         model.save(str(tmp_path / "clf"))
 
-        with pytest.raises(ValidationError, match="not a supported regressor"):
+        with pytest.raises(ValidationError, match="Cannot load a regressor"):
             regressors.load(str(tmp_path / "clf"))
-        with pytest.raises(ValidationError, match="Model type mismatch"):
+        with pytest.raises(ValidationError, match="Regressor.load expects a regressor"):
             Regressor.load(str(tmp_path / "clf"))
 
 

@@ -2,7 +2,7 @@
 
 import pytest
 
-from smallaxe.exceptions import DependencyError, ValidationError
+from smallaxe.exceptions import ValidationError
 from smallaxe.metrics import TASK_METRICS
 from smallaxe.search import optimize
 from smallaxe.search.optimize import SearchResult
@@ -86,25 +86,52 @@ def test_multiclass_search_uses_averaged_scores(spark_session, seeded, metric, v
         assert trial["loss"] == -trial["score"]
 
 
-class TestOptimizeDependencyGating:
-    """Tests for hyperopt dependency handling."""
-
-    def test_run_raises_dependency_error_without_hyperopt(self, monkeypatch, regression_df):
-        """run() raises DependencyError with an install hint when hyperopt is absent."""
-        monkeypatch.setattr(optimize, "_HYPEROPT_AVAILABLE", False)
-        model = regressors.random_forest(seed=42)
-        with pytest.raises(DependencyError, match="hyperopt"):
-            optimize.run(
-                model,
-                regression_df,
-                label_col="target",
-                param_space={"max_depth": [3, 5]},
-                max_evals=2,
-            )
-
-
 class TestOptimizeArgumentValidation:
     """Tests for argument validation in run()."""
+
+    @pytest.mark.parametrize("model", [None, "random_forest", object()])
+    def test_model_must_be_a_smallaxe_model(self, regression_df, model):
+        with pytest.raises(ValidationError, match="model must be a smallaxe model"):
+            optimize.run(model, regression_df, "target", {"max_depth": [3]})
+
+    def test_dataframe_must_be_a_dataframe(self):
+        with pytest.raises(ValidationError, match="must be a PySpark DataFrame"):
+            optimize.run(regressors.random_forest(), [1, 2], "target", {"max_depth": [3]})
+
+    def test_unknown_parameter_in_space_raises_before_any_trial(self, regression_df):
+        with pytest.raises(ValidationError, match=r"param_space names \['nope'\]"):
+            optimize.run(
+                regressors.random_forest(), regression_df, "target", {"nope": [1], "max_depth": [3]}
+            )
+
+    @pytest.mark.parametrize("max_evals", [0, 2.5, "3", True])
+    def test_max_evals_must_be_a_positive_int(self, regression_df, max_evals):
+        with pytest.raises(ValidationError, match="max_evals"):
+            optimize.run(
+                regressors.random_forest(),
+                regression_df,
+                "target",
+                {"max_depth": [3]},
+                max_evals=max_evals,
+            )
+
+    @pytest.mark.parametrize("seed", [1.5, "1", True])
+    def test_seed_must_be_an_int(self, regression_df, seed):
+        with pytest.raises(ValidationError, match="seed must be an integer"):
+            optimize.run(
+                regressors.random_forest(), regression_df, "target", {"max_depth": [3]}, seed=seed
+            )
+
+    def test_early_stopping_rounds_must_be_a_positive_int(self, regression_df):
+        with pytest.raises(ValidationError, match="early_stopping_rounds"):
+            optimize.run(
+                regressors.random_forest(),
+                regression_df,
+                "target",
+                {"max_depth": [3]},
+                early_stopping=True,
+                early_stopping_rounds=0,
+            )
 
     def test_invalid_metric_raises(self, regression_df):
         model = regressors.random_forest(seed=42)
@@ -183,14 +210,14 @@ class TestOptimizeArgumentValidation:
             )
 
     def test_all_failed_trials_raises(self, regression_df):
-        """A param_space referencing an invalid parameter fails every trial."""
+        """Values the parameter rejects fail every trial."""
         model = regressors.random_forest(seed=42)
         with pytest.raises(ValidationError, match="All trials failed"):
             optimize.run(
                 model,
                 regression_df,
                 label_col="target",
-                param_space={"not_a_real_param": [1, 2]},
+                param_space={"feature_subset_strategy": [1, 2]},
                 max_evals=3,
                 verbose=False,
             )

@@ -1,31 +1,42 @@
 """Classification metrics for evaluating model predictions.
 
-Every metric raises ``ValidationError`` on an empty DataFrame and lets Spark's own
-errors propagate. AUC-ROC, AUC-PR, and log loss are ``float("nan")`` when they are
+Every metric raises ``ValidationError`` on an empty DataFrame; the AUC metrics and log
+loss also on a label or probability column of the wrong type. AUC-ROC, AUC-PR, and log loss are ``float("nan")`` when they are
 mathematically undefined on the rows given, never 0.0. Per-class precision, recall,
 and F1 with a zero denominator are 0.0, as in scikit-learn's ``zero_division=0``.
 """
 
-from typing import Dict
+from typing import Dict, Literal
 
 from pyspark.ml.evaluation import BinaryClassificationEvaluator
+from pyspark.ml.linalg import VectorUDT
 from pyspark.sql import DataFrame
 from pyspark.sql import functions as F
 from pyspark.sql.types import NumericType
 
-from smallaxe import _deprecation
+from smallaxe import _checks
 from smallaxe.exceptions import ValidationError
 from smallaxe.metrics._checks import require_numeric, require_rows
 from smallaxe.metrics._checks import validate_columns as _validate_columns
 
-MULTICLASS_AVERAGED_METRICS = {
+__all__ = [
+    "accuracy",
+    "precision",
+    "recall",
+    "f1_score",
+    "multiclass_scores",
+    "auc_roc",
+    "auc_pr",
+    "log_loss",
+]
+
+_MULTICLASS_AVERAGED_METRICS = {
     f"{metric}_{average}"
     for metric in ("precision", "recall", "f1_score")
     for average in ("macro", "weighted")
 }
 
 
-@_deprecation.df_keyword
 def accuracy(
     dataframe: DataFrame, label_col: str = "label", prediction_col: str = "predict_label"
 ) -> float:
@@ -59,7 +70,6 @@ def accuracy(
     return float(correct_count / total_count)
 
 
-@_deprecation.df_keyword
 def precision(
     dataframe: DataFrame,
     label_col: str = "label",
@@ -108,7 +118,6 @@ def precision(
     return float(true_positives / predicted_positives)
 
 
-@_deprecation.df_keyword
 def recall(
     dataframe: DataFrame,
     label_col: str = "label",
@@ -157,7 +166,6 @@ def recall(
     return float(true_positives / actual_positives)
 
 
-@_deprecation.df_keyword
 def f1_score(
     dataframe: DataFrame,
     label_col: str = "label",
@@ -209,7 +217,6 @@ def _averaged_score(
     return _multiclass_scores(dataframe, label_col, prediction_col, metric)[f"{metric}_{average}"]
 
 
-@_deprecation.df_keyword
 def multiclass_scores(
     dataframe: DataFrame, label_col: str = "label", prediction_col: str = "predict_label"
 ) -> Dict[str, float]:
@@ -318,7 +325,37 @@ def _multiclass_scores(
     return scores
 
 
-@_deprecation.df_keyword
+def _check_auc_columns(
+    dataframe: DataFrame, label_col: str, probability_col: str, metric: str
+) -> None:
+    """Check the AUC inputs: a numeric label, a numeric or vector probability column.
+
+    Raises:
+        ValidationError: If either column has another type.
+    """
+    require_numeric(dataframe, metric, label_col)
+    data_type = dataframe.schema[probability_col].dataType
+    if not isinstance(data_type, (NumericType, VectorUDT)):
+        raise ValidationError(
+            f"Cannot compute {metric}: column '{probability_col}' must be a probability "
+            f"(a number or a probability vector), got {data_type.simpleString()}."
+        )
+
+
+def _binary_evaluate(
+    dataframe: DataFrame,
+    label_col: str,
+    probability_col: str,
+    metric_name: Literal["areaUnderROC", "areaUnderPR"],
+) -> float:
+    """Spark's ``BinaryClassificationEvaluator``, its argument errors as ValidationError."""
+    evaluator = BinaryClassificationEvaluator(
+        labelCol=label_col, rawPredictionCol=probability_col, metricName=metric_name
+    )
+    with _checks.spark_argument_errors(f"Cannot compute {metric_name}"):
+        return float(evaluator.evaluate(dataframe))
+
+
 def auc_roc(
     dataframe: DataFrame, label_col: str = "label", probability_col: str = "probability"
 ) -> float:
@@ -335,9 +372,11 @@ def auc_roc(
 
     Raises:
         ColumnNotFoundError: If label_col or probability_col is not in the DataFrame.
-        ValidationError: If the DataFrame has no rows.
+        ValidationError: If label_col is not numeric, probability_col is neither numeric
+            nor a vector, or the DataFrame has no rows.
     """
     _validate_columns(dataframe, label_col, probability_col)
+    _check_auc_columns(dataframe, label_col, probability_col, "auc_roc")
     require_rows(dataframe, "auc_roc")
 
     label = F.col(label_col)
@@ -345,13 +384,9 @@ def auc_roc(
     if n_classes < 2:
         return float("nan")
 
-    evaluator = BinaryClassificationEvaluator(
-        labelCol=label_col, rawPredictionCol=probability_col, metricName="areaUnderROC"
-    )
-    return float(evaluator.evaluate(dataframe))
+    return _binary_evaluate(dataframe, label_col, probability_col, "areaUnderROC")
 
 
-@_deprecation.df_keyword
 def auc_pr(
     dataframe: DataFrame, label_col: str = "label", probability_col: str = "probability"
 ) -> float:
@@ -368,22 +403,19 @@ def auc_pr(
 
     Raises:
         ColumnNotFoundError: If label_col or probability_col is not in the DataFrame.
-        ValidationError: If the DataFrame has no rows.
+        ValidationError: If label_col is not numeric, probability_col is neither numeric
+            nor a vector, or the DataFrame has no rows.
     """
     _validate_columns(dataframe, label_col, probability_col)
+    _check_auc_columns(dataframe, label_col, probability_col, "auc_pr")
     require_rows(dataframe, "auc_pr")
 
     if dataframe.filter(F.col(label_col) == 1).limit(1).count() == 0:
         return float("nan")
 
-    evaluator = BinaryClassificationEvaluator(
-        labelCol=label_col, rawPredictionCol=probability_col, metricName="areaUnderPR"
-    )
-    return float(evaluator.evaluate(dataframe))
+    return _binary_evaluate(dataframe, label_col, probability_col, "areaUnderPR")
 
 
-@_deprecation.df_keyword
-@_deprecation.keyword_only("eps")
 def log_loss(
     dataframe: DataFrame,
     label_col: str = "label",
@@ -399,8 +431,8 @@ def log_loss(
         dataframe: PySpark DataFrame containing true labels and probability scores.
         label_col: Name of the column containing true labels (0 or 1). Default is 'label'.
         probability_col: Name of the column containing probability scores. Default is 'probability'.
-        eps: Small value to avoid log(0). Default is 1e-15. Keyword-only; passing it
-            positionally is deprecated (it warns, and is removed in smallaxe 1.0).
+        eps: Small value to avoid log(0); probabilities are clipped to
+            ``[eps, 1 - eps]``. Default is 1e-15. Keyword-only.
 
     Returns:
         Log loss as a float. Lower values indicate better predictions. NaN when no

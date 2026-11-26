@@ -1,5 +1,9 @@
 """Classification models: one constructor function per algorithm, plus load.
 
+Each function returns a :class:`~smallaxe.training.Classifier` bound to one algorithm,
+so no algorithm-specific class needs to be imported. These functions are the only
+factories.
+
 Example:
     >>> from smallaxe.training import classifiers
     >>>
@@ -7,15 +11,10 @@ Example:
     >>> model.fit(dataframe, label_col='label', feature_cols=['f1', 'f2'])
     >>> model.save('/path/to/model')
     >>> loaded_model = classifiers.load('/path/to/model')
-
-Each function returns a :class:`~smallaxe.training.base.Classifier` bound to one
-algorithm, so no algorithm-specific class needs to be imported. The ``Classifiers``
-class is the deprecated 0.x spelling of these functions and is removed in smallaxe 1.0.
 """
 
 from typing import Any, Dict, List
 
-from smallaxe import _deprecation
 from smallaxe.exceptions import ValidationError
 from smallaxe.training import algorithm
 from smallaxe.training.base import Classifier, Model
@@ -30,168 +29,191 @@ __all__ = [
     "available_models",
 ]
 
-_TASK_TYPE = "classification"
-
 
 def _create(name: str, task: str, params: Dict[str, Any]) -> Classifier:
-    model = Classifier(name, task=task)
-    if params:
-        model.set_params(**params)
-    return model
+    """A classifier for algorithm ``name`` and ``task`` with ``params`` set."""
+    return Classifier(name, task=task).set_params(**params)
 
 
 def random_forest(task: str = "binary", **params: Any) -> Classifier:
-    """Create a Random Forest classifier.
+    """Create an unfitted Random Forest classifier.
+
+    Random Forest is PySpark MLlib's own estimator and needs no optional package.
 
     Args:
-        task: The classification task: 'binary' (default) or 'multiclass'.
-        **params: Parameters to pass to the model. Common parameters include:
+        task: The classification task: ``'binary'`` (default) or ``'multiclass'``.
+        **params: Parameter values by name; every parameter left out keeps its default.
+            ``model.params`` describes them and ``model.default_params`` lists the
+            defaults. The parameters are:
+
             - n_estimators: Number of trees in the forest (default: 20)
-            - max_depth: Maximum depth of each tree (default: 5)
-            - max_bins: Maximum number of bins for discretizing features (default: 32)
-            - min_instances_per_node: Minimum instances per node (default: 1)
+            - max_depth: Maximum depth of each tree (0 = a single leaf node; at most 30)
+              (default: 5)
+            - max_bins: Maximum number of bins for discretizing continuous features (default: 32)
+            - min_instances_per_node: Minimum number of instances per node (default: 1)
             - min_info_gain: Minimum information gain for a split (default: 0.0)
-            - subsampling_rate: Fraction of data for training each tree (default: 1.0)
-            - feature_subset_strategy: Strategy for selecting features (default: 'auto')
+            - subsampling_rate: Fraction of data used for training each tree (default: 1.0)
+            - feature_subset_strategy: Strategy for selecting features: 'auto', 'all', 'sqrt',
+              'log2', 'onethird' (default: 'auto')
             - seed: Random seed for reproducibility (default: None)
 
     Returns:
-        A configured Random Forest classifier.
+        A :class:`~smallaxe.training.Classifier` bound to the ``random_forest`` algorithm.
 
     Raises:
-        ValidationError: If the task is invalid, or a parameter is unknown or has the
-            wrong type.
+        ValidationError: If ``task`` is not 'binary' or 'multiclass', or a parameter is
+            unknown or its value has the wrong type.
 
     Example:
         >>> model = classifiers.random_forest(n_estimators=100, max_depth=10)
-        >>> model.fit(dataframe, label_col='label', feature_cols=['f1', 'f2'])
+        >>> model.fit(dataframe, label_col='label')
     """
     return _create("random_forest", task, params)
 
 
 def xgboost(task: str = "binary", **params: Any) -> Classifier:
-    """Create an XGBoost classifier.
+    """Create an unfitted XGBoost classifier.
 
-    Note:
-        This requires the xgboost package to be installed.
-        Install with: pip install smallaxe[xgboost]
+    Needs the xgboost package: ``pip install smallaxe[xgboost]``.
 
     Args:
-        task: The classification task: 'binary' (default) or 'multiclass'.
-        **params: Parameters to pass to the model. Common parameters include:
+        task: The classification task: ``'binary'`` (default) or ``'multiclass'``.
+        **params: Parameter values by name; every parameter left out keeps its default.
+            ``model.params`` describes them and ``model.default_params`` lists the
+            defaults. The parameters are:
+
             - n_estimators: Number of boosting rounds (default: 100)
             - max_depth: Maximum depth of each tree (default: 6)
-            - learning_rate: Step size shrinkage (default: 0.3)
-            - subsample: Fraction of samples for training each tree (default: 1.0)
-            - colsample_bytree: Fraction of features for training each tree (default: 1.0)
-            - min_child_weight: Minimum sum of instance weight in a child (default: 1)
-            - reg_alpha: L1 regularization term (default: 0.0)
-            - reg_lambda: L2 regularization term (default: 1.0)
-            - gamma: Minimum loss reduction for a split (default: 0.0)
+            - learning_rate: Step size shrinkage used in update to prevent overfitting
+              (default: 0.3)
+            - subsample: Fraction of samples used for training each tree (default: 1.0)
+            - colsample_bytree: Fraction of features used for training each tree (default: 1.0)
+            - min_child_weight: Minimum sum of instance weight needed in a child (default: 1)
+            - reg_alpha: L1 regularization term on weights (default: 0.0)
+            - reg_lambda: L2 regularization term on weights (default: 1.0)
+            - gamma: Minimum loss reduction required to make a further partition (default: 0.0)
             - seed: Random seed for reproducibility (default: None)
 
     Returns:
-        A configured XGBoost classifier.
+        A :class:`~smallaxe.training.Classifier` bound to the ``xgboost`` algorithm.
 
     Raises:
-        DependencyError: If xgboost is not installed.
-        ValidationError: If the task is invalid, or a parameter is unknown or has the
-            wrong type.
+        DependencyError: If xgboost is not installed or cannot be imported.
+        ValidationError: If ``task`` is not 'binary' or 'multiclass', or a parameter is
+            unknown or its value has the wrong type.
 
     Example:
-        >>> model = classifiers.xgboost(n_estimators=100, max_depth=6)
-        >>> model.fit(dataframe, label_col='label', feature_cols=['f1', 'f2'])
+        >>> model = classifiers.xgboost(n_estimators=200, learning_rate=0.1)
+        >>> model.fit(dataframe, label_col='label')
     """
     return _create("xgboost", task, params)
 
 
 def lightgbm(task: str = "binary", **params: Any) -> Classifier:
-    """Create a LightGBM classifier.
+    """Create an unfitted LightGBM classifier.
 
-    Note:
-        This requires SynapseML LightGBM support to be installed and
-        configured for the active Spark session.
-        Install with: pip install smallaxe[lightgbm]
+    Needs SynapseML's LightGBM: ``pip install smallaxe[lightgbm]`` and the SynapseML Spark
+    package on the session's classpath.
 
     Args:
-        task: The classification task: 'binary' (default) or 'multiclass'.
-        **params: Parameters to pass to the model. Common parameters include:
+        task: The classification task: ``'binary'`` (default) or ``'multiclass'``.
+        **params: Parameter values by name; every parameter left out keeps its default.
+            ``model.params`` describes them and ``model.default_params`` lists the
+            defaults. The parameters are:
+
             - n_estimators: Number of boosting iterations (default: 100)
-            - max_depth: Maximum depth of each tree (default: -1)
+            - max_depth: Maximum depth of each tree (-1 for no limit) (default: -1)
             - learning_rate: Boosting learning rate (default: 0.1)
             - num_leaves: Maximum number of leaves in one tree (default: 31)
+            - min_data_in_leaf: Minimum number of data points in a leaf (default: 20)
+            - feature_fraction: Fraction of features used for training each tree (default: 1.0)
+            - bagging_fraction: Fraction of data used for training each tree (default: 1.0)
+            - bagging_freq: Frequency for bagging (0 means disable bagging) (default: 0)
+            - lambda_l1: L1 regularization term on weights (default: 0.0)
+            - lambda_l2: L2 regularization term on weights (default: 0.0)
             - seed: Random seed for reproducibility (default: None)
 
     Returns:
-        A configured LightGBM classifier.
+        A :class:`~smallaxe.training.Classifier` bound to the ``lightgbm`` algorithm.
 
     Raises:
-        DependencyError: If SynapseML LightGBM support is not installed.
-        ValidationError: If the task is invalid, or a parameter is unknown or has the
-            wrong type.
+        DependencyError: If synapseml is not installed or cannot be imported.
+        ValidationError: If ``task`` is not 'binary' or 'multiclass', or a parameter is
+            unknown or its value has the wrong type.
+
+    Example:
+        >>> model = classifiers.lightgbm(n_estimators=200, num_leaves=63)
+        >>> model.fit(dataframe, label_col='label')
     """
     return _create("lightgbm", task, params)
 
 
 def catboost(task: str = "binary", **params: Any) -> Classifier:
-    """Create a CatBoost classifier.
+    """Create an unfitted CatBoost classifier.
 
-    Note:
-        This requires CatBoost Spark support to be installed and configured
-        for the active Spark session.
-        Install with: pip install smallaxe[catboost]
+    Needs catboost-spark: ``pip install smallaxe[catboost]`` and the catboost-spark Spark
+    package on the session's classpath.
 
     Args:
-        task: The classification task: 'binary' (default) or 'multiclass'.
-        **params: Parameters to pass to the model. Common parameters include:
+        task: The classification task: ``'binary'`` (default) or ``'multiclass'``.
+        **params: Parameter values by name; every parameter left out keeps its default.
+            ``model.params`` describes them and ``model.default_params`` lists the
+            defaults. The parameters are:
+
             - n_estimators: Number of boosting iterations (default: 100)
             - max_depth: Maximum tree depth (default: 6)
             - learning_rate: Boosting learning rate (default: 0.03)
+            - subsample: Sample rate for bagging (default: None)
+            - l2_leaf_reg: L2 regularization coefficient (default: 3.0)
+            - random_strength: Amount of randomness used when scoring splits (default: 1.0)
+            - one_hot_max_size: Maximum categorical cardinality for one-hot encoding (default: None)
+            - scale_pos_weight: Class 1 weight multiplier for binary classification (default: None)
+            - allow_writing_files: Whether CatBoost may write training artifacts (default: False)
+            - train_dir: Directory for CatBoost training artifacts (default: None)
             - seed: Random seed for reproducibility (default: None)
 
     Returns:
-        A configured CatBoost classifier.
+        A :class:`~smallaxe.training.Classifier` bound to the ``catboost`` algorithm.
 
     Raises:
-        DependencyError: If CatBoost Spark support is not installed.
-        ValidationError: If the task is invalid, or a parameter is unknown or has the
-            wrong type.
+        DependencyError: If catboost_spark is not installed or cannot be imported.
+        ValidationError: If ``task`` is not 'binary' or 'multiclass', or a parameter is
+            unknown or its value has the wrong type.
+
+    Example:
+        >>> model = classifiers.catboost(n_estimators=200, max_depth=8)
+        >>> model.fit(dataframe, label_col='label')
     """
     return _create("catboost", task, params)
 
 
 def load(path: str) -> Classifier:
-    """Load a classifier from disk.
+    """Load a saved classifier.
 
-    The algorithm is read from the saved metadata, so any classifier saved by
-    smallaxe (including 0.8.x artifacts) loads through this one function.
+    The algorithm is read from the saved metadata, so every classifier saved by smallaxe
+    (0.8.1 onward) loads through this one function.
 
     Args:
-        path: Directory path where the model was saved.
+        path: The artifact directory (local, ``dbfs:/``, ``s3://``, ``hdfs://``, ...).
 
     Returns:
-        The loaded classifier.
+        The fitted classifier.
 
     Raises:
         ValidationError: If the path or its ``metadata.json`` does not exist, the
-            artifact is invalid (see :meth:`~smallaxe.training.base.Model.load`), or the
-            saved model is not a classifier.
+            artifact is invalid (see :meth:`~smallaxe.training.Model.load`), or it holds
+            a regressor.
         DependencyError: If the saved model's algorithm is not installed.
 
     Example:
-        >>> model = classifiers.random_forest(n_estimators=100)
-        >>> model.fit(dataframe, label_col='label', feature_cols=['f1', 'f2'])
-        >>> model.save('/path/to/model')
-        >>>
-        >>> loaded_model = classifiers.load('/path/to/model')
-        >>> predictions = loaded_model.predict(dataframe)
+        >>> model = classifiers.load('/path/to/model')
+        >>> predictions = model.predict(dataframe)
     """
     model = Model.load(path)
     if not isinstance(model, Classifier):
-        saved = algorithm._legacy_class_name(model.algorithm.name, model.task_type)
         raise ValidationError(
-            f"Model type '{saved}' is not a supported classifier: {path!r} holds a "
-            "regressor. Load it with regressors.load() or smallaxe.load_model()."
+            f"Cannot load a classifier: {path!r} holds a {model.algorithm.name!r} regressor. "
+            "Load it with regressors.load() or smallaxe.load_model()."
         )
     return model
 
@@ -208,103 +230,15 @@ def algorithms() -> List[str]:
 
 
 def available_models() -> Dict[str, Dict[str, Any]]:
-    """Report installed and unavailable classifiers with install hints.
+    """Report which algorithms are installed, with install hints for the others.
 
     Returns:
-        Dictionary keyed by algorithm (constructor function) name. Each entry holds
-        ``available``, the optional ``dependency`` package, and ``install_hint`` when
-        the algorithm is not installed.
+        A dict keyed by algorithm (constructor function) name. Each entry holds
+        ``available`` (bool), ``dependency`` (the optional package, or None) and
+        ``install_hint`` (how to install it when it is missing, else None).
 
     Example:
         >>> classifiers.available_models()["random_forest"]
         {'available': True, 'dependency': None, 'install_hint': None}
     """
-    report = {}
-    for name in algorithm.names():
-        record = algorithm.get(name)
-        available = record.available()
-        dependency = record.dependency
-        report[name] = {
-            "available": available,
-            "dependency": dependency.package if dependency else None,
-            "install_hint": None if available or dependency is None else dependency.install_hint,
-        }
-    return report
-
-
-def _warn_static(method: str, replacement: str) -> None:
-    _deprecation.warn(
-        f"Classifiers.{method}() is deprecated and will be removed in smallaxe 1.0. Use "
-        f"{replacement} (from smallaxe.training import classifiers) instead."
-    )
-
-
-class Classifiers:
-    """Deprecated: use the functions of :mod:`smallaxe.training.classifiers`. Removed in 1.0.
-
-    Every static method warns once and calls the module function that replaces it:
-    ``Classifiers.xgboost(...)`` is ``classifiers.xgboost(...)``.
-    """
-
-    @staticmethod
-    def random_forest(task: str = "binary", **kwargs: Any) -> Classifier:
-        """Deprecated: use :func:`smallaxe.training.classifiers.random_forest`."""
-        _warn_static("random_forest", "classifiers.random_forest()")
-        return random_forest(task=task, **kwargs)
-
-    @staticmethod
-    def xgboost(task: str = "binary", **kwargs: Any) -> Classifier:
-        """Deprecated: use :func:`smallaxe.training.classifiers.xgboost`."""
-        _warn_static("xgboost", "classifiers.xgboost()")
-        return xgboost(task=task, **kwargs)
-
-    @staticmethod
-    def lightgbm(task: str = "binary", **kwargs: Any) -> Classifier:
-        """Deprecated: use :func:`smallaxe.training.classifiers.lightgbm`."""
-        _warn_static("lightgbm", "classifiers.lightgbm()")
-        return lightgbm(task=task, **kwargs)
-
-    @staticmethod
-    def catboost(task: str = "binary", **kwargs: Any) -> Classifier:
-        """Deprecated: use :func:`smallaxe.training.classifiers.catboost`."""
-        _warn_static("catboost", "classifiers.catboost()")
-        return catboost(task=task, **kwargs)
-
-    @staticmethod
-    def load(path: str) -> Classifier:
-        """Deprecated: use :func:`smallaxe.training.classifiers.load`."""
-        _warn_static("load", "classifiers.load()")
-        return load(path)
-
-    @staticmethod
-    def list_models() -> List[str]:
-        """Deprecated: use :func:`~smallaxe.training.classifiers.algorithms` and
-        :func:`~smallaxe.training.classifiers.available_models`.
-
-        Returns:
-            The 0.8.x class names of the classifiers whose dependencies are installed.
-        """
-        _warn_static(
-            "list_models",
-            "classifiers.algorithms() (and classifiers.available_models() for what is "
-            "installed)",
-        )
-        return [
-            algorithm._legacy_class_name(name, _TASK_TYPE)
-            for name in algorithm.names()
-            if algorithm.get(name).available()
-        ]
-
-    @staticmethod
-    def available_models() -> Dict[str, Dict[str, Any]]:
-        """Deprecated: use :func:`smallaxe.training.classifiers.available_models`.
-
-        Returns:
-            The module function's report, each entry led by ``class_name``, the 0.8.x
-            class name.
-        """
-        _warn_static("available_models", "classifiers.available_models()")
-        return {
-            name: {"class_name": algorithm._legacy_class_name(name, _TASK_TYPE), **entry}
-            for name, entry in available_models().items()
-        }
+    return algorithm._availability()

@@ -14,9 +14,11 @@ from abc import ABC, abstractmethod
 from typing import Any, Dict
 
 from smallaxe import _artifact, _fs
-from smallaxe.exceptions import ModelNotFittedError, ValidationError
+from smallaxe.exceptions import ModelNotFittedError
 
-ARTIFACT_KIND = "model"
+__all__ = ["PersistenceMixin"]
+
+_ARTIFACT_KIND = "model"
 
 
 class PersistenceMixin(ABC):
@@ -75,7 +77,7 @@ class PersistenceMixin(ABC):
 
         Raises:
             ModelNotFittedError: If the model has not been fitted.
-            ValidationError: If the path is empty.
+            ValidationError: If the path is empty or not a string.
 
         Example:
             >>> model.fit(dataframe, label_col='target', feature_cols=['f1', 'f2'])
@@ -84,8 +86,7 @@ class PersistenceMixin(ABC):
         if not self._is_fitted:
             raise ModelNotFittedError("Model has not been fitted. Call fit() before save().")
 
-        if not path:
-            raise ValidationError("Path cannot be empty.")
+        _artifact.check_path(path)
 
         state = self._get_persistence_state()
         state["__class__"] = self.__class__.__name__
@@ -93,7 +94,7 @@ class PersistenceMixin(ABC):
 
         _fs.delete(_fs.join(path, _artifact.METADATA_FILE))
         self._save_artifacts(path)
-        _artifact.write_metadata(path, ARTIFACT_KIND, state)
+        _artifact.write_metadata(path, _ARTIFACT_KIND, state)
 
     def _save_artifacts(self, path: str) -> None:  # noqa: B027
         """Save additional model artifacts.
@@ -124,5 +125,5 @@ class PersistenceMixin(ABC):
                 file cannot be read, it holds another kind of artifact, or it was
                 written by a newer smallaxe.
         """
-        metadata = _artifact.read_metadata(path, ARTIFACT_KIND, allow_unversioned=True)
+        metadata = _artifact.read_metadata(path, _ARTIFACT_KIND, allow_unversioned=True)
         return {key: value for key, value in metadata.items() if key not in _artifact.RESERVED_KEYS}

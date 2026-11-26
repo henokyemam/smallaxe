@@ -1,1 +1,5 @@
-"""Visualization module - Plotly-based charts."""
+"""Plotly-based visualization (planned; nothing here is public yet)."""
+
+from typing import List
+
+__all__: List[str] = []

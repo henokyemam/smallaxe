@@ -14,8 +14,9 @@ from pyspark.sql import functions as F
 from pyspark.sql.types import MapType, UserDefinedType
 
 import smallaxe
-from smallaxe import _deprecation
 from smallaxe.exceptions import ColumnNotFoundError, ValidationError
+
+__all__ = ["ValidationMixin"]
 
 # ``F.hash`` yields a signed 32-bit int; masking the sign bit maps it onto [0, 2**31).
 _HASH_RANGE = 2**31
@@ -76,10 +77,8 @@ def _resolve_split_seed(seed: Optional[int] = None, fallback: Optional[int] = No
 class ValidationMixin:
     """Mixin providing data splitting and cross-validation functionality.
 
-    Splits and folds are assigned by :func:`_split_hash`. Stratification is implicit:
-    a content hash is independent of the label, so every class is split in the same
-    proportion in expectation. The ``stratified`` arguments are accepted for API
-    compatibility and validated, but select no different rule.
+    Splits and folds are assigned by :func:`_split_hash`. A content hash is independent
+    of the label, so every class is split in the same proportion in expectation.
     """
 
     #: The seed the most recent split or fold assignment used.
@@ -89,8 +88,6 @@ class ValidationMixin:
         self,
         dataframe: DataFrame,
         test_size: float = 0.2,
-        stratified: bool = False,
-        label_col: Optional[str] = None,
         seed: Optional[int] = None,
         fold_key: Optional[str] = None,
     ) -> Tuple[DataFrame, DataFrame]:
@@ -99,9 +96,6 @@ class ValidationMixin:
         Args:
             dataframe: PySpark DataFrame to split.
             test_size: Proportion of data for the test set. Default is 0.2.
-            stratified: Accepted for compatibility; see the class docstring.
-                Requires label_col to be specified.
-            label_col: Column name for stratification. Required if stratified=True.
             seed: Seed for the assignment. Defaults to the global seed, else random.
             fold_key: Column to hash instead of the whole row.
 
@@ -109,36 +103,24 @@ class ValidationMixin:
             Tuple of (train_df, test_df).
 
         Raises:
-            ValidationError: If test_size is not between 0 and 1.
-            ValidationError: If stratified=True but label_col is not specified.
+            ValidationError: If test_size is not a number strictly between 0 and 1.
         """
-        if not 0 < test_size < 1:
-            raise ValidationError(f"test_size must be between 0 and 1, got {test_size}.")
-
-        if stratified and not label_col:
-            raise ValidationError("label_col must be specified when stratified=True.")
+        if (
+            isinstance(test_size, bool)
+            or not isinstance(test_size, (int, float))
+            or not 0 < test_size < 1
+        ):
+            raise ValidationError(f"test_size must be between 0 and 1, got {test_size!r}.")
 
         self._split_seed = _resolve_split_seed(seed)
         bucket = _split_hash(dataframe, self._split_seed, fold_key) / F.lit(float(_HASH_RANGE))
         is_test = bucket < F.lit(test_size)
         return dataframe.filter(~is_test), dataframe.filter(is_test)
 
-    def _stratified_train_test_split(
-        self,
-        dataframe: DataFrame,
-        test_size: float,
-        label_col: str,
-        seed: Optional[int] = None,
-    ) -> Tuple[DataFrame, DataFrame]:
-        """Same rule as :meth:`_train_test_split`; kept for compatibility."""
-        return self._train_test_split(dataframe, test_size, True, label_col, seed)
-
     def _kfold_split(
         self,
         dataframe: DataFrame,
         n_folds: int = 5,
-        stratified: bool = False,
-        label_col: Optional[str] = None,
         seed: Optional[int] = None,
         fold_key: Optional[str] = None,
     ) -> Iterator[Tuple[DataFrame, DataFrame]]:
@@ -147,9 +129,6 @@ class ValidationMixin:
         Args:
             dataframe: PySpark DataFrame to split.
             n_folds: Number of folds. Default is 5.
-            stratified: Accepted for compatibility; see the class docstring.
-                Requires label_col to be specified.
-            label_col: Column name for stratification. Required if stratified=True.
             seed: Seed for the assignment. Defaults to the global seed, else random.
             fold_key: Column to hash instead of the whole row.
 
@@ -157,55 +136,13 @@ class ValidationMixin:
             Tuple of (train_df, val_df) for each fold.
 
         Raises:
-            ValidationError: If n_folds < 2.
-            ValidationError: If stratified=True but label_col is not specified.
+            ValidationError: If n_folds is not an integer of at least 2.
         """
-        if n_folds < 2:
-            raise ValidationError(f"n_folds must be at least 2, got {n_folds}.")
-
-        if stratified and not label_col:
-            raise ValidationError("label_col must be specified when stratified=True.")
+        if isinstance(n_folds, bool) or not isinstance(n_folds, int) or n_folds < 2:
+            raise ValidationError(f"n_folds must be an integer of at least 2, got {n_folds!r}.")
 
         self._split_seed = _resolve_split_seed(seed)
         fold = _split_hash(dataframe, self._split_seed, fold_key) % n_folds
 
         for fold_idx in range(n_folds):
             yield dataframe.filter(fold != fold_idx), dataframe.filter(fold == fold_idx)
-
-    def _simple_kfold_split(
-        self,
-        dataframe: DataFrame,
-        n_folds: int,
-        seed: Optional[int] = None,
-    ) -> Iterator[Tuple[DataFrame, DataFrame]]:
-        """Same rule as :meth:`_kfold_split`; kept for compatibility."""
-        yield from self._kfold_split(dataframe, n_folds, False, None, seed)
-
-    def _stratified_kfold_split(
-        self,
-        dataframe: DataFrame,
-        n_folds: int,
-        label_col: str,
-        seed: Optional[int] = None,
-    ) -> Iterator[Tuple[DataFrame, DataFrame]]:
-        """Same rule as :meth:`_kfold_split`; kept for compatibility."""
-        yield from self._kfold_split(dataframe, n_folds, True, label_col, seed)
-
-
-# Deprecated public names, removed in smallaxe 1.0. The two that take a DataFrame still
-# accept df= under their old names.
-_SPLIT_ADVICE = (
-    "Use fit(validation='train_test' or 'kfold', fold_key=...), which assigns the splits, "
-    "instead."
-)
-_MOVED = {
-    "hashable_columns": (_SPLIT_ADVICE, _deprecation.with_df_keyword(_hashable_columns)),
-    "split_hash": (_SPLIT_ADVICE, _deprecation.with_df_keyword(_split_hash)),
-    "resolve_split_seed": (
-        "Use smallaxe.set_seed() or the model's seed parameter, which decide the split "
-        "seed, instead.",
-        lambda: _resolve_split_seed,
-    ),
-}
-__getattr__ = _deprecation.module_getattr(__name__, _MOVED)
-__dir__ = _deprecation.module_dir(globals(), _MOVED)

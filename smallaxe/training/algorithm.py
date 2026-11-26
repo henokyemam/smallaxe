@@ -7,10 +7,13 @@ settings reach the estimator, how to read feature importances, and which optiona
 dependency it needs. :func:`_estimator_kwargs` is the single translation rule that
 turns a record plus the user's parameter values into an estimator.
 
-The four records live next to their deprecated class aliases in
-``smallaxe.training.random_forest`` / ``xgboost`` / ``lightgbm`` / ``catboost``
-and are reached through :func:`get`. Nothing here imports those modules, or any
-optional package, at import time.
+The four records live in ``smallaxe.training.random_forest`` / ``xgboost`` /
+``lightgbm`` / ``catboost`` (one ``ALGORITHM`` each) and are reached through
+:func:`get`. Nothing here imports those modules, or any optional package, at import
+time.
+
+This module also defines the task names, once: :data:`REGRESSION_TASKS`,
+:data:`CLASSIFICATION_TASKS` and :data:`ALL_TASKS`.
 """
 
 import importlib
@@ -29,9 +32,22 @@ from typing import (
     Tuple,
 )
 
-from smallaxe import _deprecation
 from smallaxe.exceptions import DependencyError, ValidationError
 
+__all__ = [
+    "REGRESSION_TASKS",
+    "CLASSIFICATION_TASKS",
+    "ALL_TASKS",
+    "Importances",
+    "FitContext",
+    "Param",
+    "Dependency",
+    "Algorithm",
+    "names",
+    "get",
+]
+
+# The tasks a model can train, by kind. Every other module imports these.
 REGRESSION_TASKS: FrozenSet[str] = frozenset({"simple_regression"})
 CLASSIFICATION_TASKS: FrozenSet[str] = frozenset({"binary", "multiclass"})
 ALL_TASKS: FrozenSet[str] = REGRESSION_TASKS | CLASSIFICATION_TASKS
@@ -80,7 +96,12 @@ class Param:
 
 @dataclass(frozen=True)
 class Dependency:
-    """The optional package an algorithm needs, and how to install it."""
+    """The optional package an algorithm needs, and how to install it.
+
+    Args:
+        package: The package name (``"xgboost"``).
+        install_hint: How to install it (``"pip install smallaxe[xgboost]"``).
+    """
 
     package: str
     install_hint: str
@@ -125,16 +146,32 @@ class Algorithm:
 
     @property
     def tasks(self) -> FrozenSet[str]:
-        """Tasks this algorithm can train."""
+        """Tasks this algorithm can train.
+
+        Returns:
+            The tasks it has an estimator for.
+        """
         return frozenset(self.estimators)
 
     def visible_params(self, task: str) -> Tuple[Param, ...]:
-        """The parameter rows that apply to ``task``, in table order."""
+        """The parameter rows that apply to ``task``.
+
+        Args:
+            task: A task name.
+
+        Returns:
+            The rows whose ``tasks`` include ``task``, in table order (empty for a task
+            the algorithm does not know).
+        """
         return tuple(p for p in self.params if task in p.tasks)
 
     @property
     def module(self) -> str:
-        """The Python module the estimator classes live in (``"xgboost.spark"``)."""
+        """The Python module the estimator classes live in.
+
+        Returns:
+            Its dotted name (``"xgboost.spark"``).
+        """
         return next(iter(self.estimators.values())).rpartition(".")[0]
 
     def _import_error(self) -> Optional[ImportError]:
@@ -150,6 +187,9 @@ class Algorithm:
 
         Re-probed on every call rather than cached, because catboost_spark only
         becomes importable once the JVM package is on the Spark classpath.
+
+        Returns:
+            True if the algorithm can be used in this process.
         """
         return self._import_error() is None
 
@@ -159,6 +199,9 @@ class Algorithm:
         A plain "module not found" for the estimator module (or a parent package) says
         the package is not installed. Any other ImportError, such as a missing
         dependency of the package, is a broken install, and its text is included.
+
+        Raises:
+            DependencyError: If the estimator module cannot be imported.
         """
         error = self._import_error()
         if error is None:
@@ -176,12 +219,44 @@ class Algorithm:
         raise broken from error
 
     def estimator_class(self, task: str) -> Any:
-        """Resolve the Spark estimator class for ``task``."""
-        return self._resolve(self.estimators[task])
+        """Resolve the Spark estimator class for ``task``, importing its module.
+
+        Args:
+            task: One of :attr:`tasks`.
+
+        Returns:
+            The estimator class.
+
+        Raises:
+            ValidationError: If the algorithm has no estimator for ``task``.
+            ImportError: If the estimator module is not installed (use :meth:`require`
+                first for a ``DependencyError`` with an install hint).
+        """
+        return self._resolve(self._path(self.estimators, task))
 
     def model_class(self, task: str) -> Any:
-        """Resolve the fitted Spark model class for ``task``."""
-        return self._resolve(self.models[task])
+        """Resolve the fitted Spark model class for ``task``, importing its module.
+
+        Args:
+            task: One of :attr:`tasks`.
+
+        Returns:
+            The fitted-model class ``load`` reads a saved Spark model with.
+
+        Raises:
+            ValidationError: If the algorithm has no model class for ``task``.
+            ImportError: If the model module is not installed (use :meth:`require`
+                first for a ``DependencyError`` with an install hint).
+        """
+        return self._resolve(self._path(self.models, task))
+
+    def _path(self, paths: Mapping[str, str], task: str) -> str:
+        """``paths[task]``, or ValidationError for a task this algorithm does not have."""
+        if not isinstance(task, str) or task not in paths:
+            raise ValidationError(
+                f"Algorithm '{self.name}' has no task {task!r}; its tasks are {sorted(paths)}."
+            )
+        return paths[task]
 
     def _resolve(self, path: str) -> Any:
         module_name, _, attr = path.rpartition(".")
@@ -309,68 +384,63 @@ def _import_estimator_module(record: Algorithm, module_name: str) -> Any:
 
 
 def names() -> List[str]:
-    """Registered algorithm names, in factory order."""
+    """Registered algorithm names, in factory order.
+
+    Returns:
+        ``["random_forest", "xgboost", "lightgbm", "catboost"]``.
+    """
     return list(_MODULES)
 
 
 def get(name: str) -> Algorithm:
-    """Look up an algorithm record by name.
+    """Look up an algorithm record by name. Imports no optional package.
+
+    Args:
+        name: An algorithm name, one of :func:`names`.
+
+    Returns:
+        The algorithm's record.
 
     Raises:
         ValidationError: If ``name`` is not registered.
     """
+    if not isinstance(name, str):
+        raise ValidationError(f"Algorithm name must be a string, got {type(name).__name__}.")
     if name not in _MODULES:
         raise ValidationError(f"Unknown algorithm '{name}'. Known algorithms are: {names()}")
     return importlib.import_module(_MODULES[name]).ALGORITHM
 
 
+def _availability() -> Dict[str, Dict[str, Any]]:
+    """What ``regressors.available_models()`` / ``classifiers.available_models()`` report.
+
+    Returns:
+        Algorithm name -> ``{"available", "dependency", "install_hint"}``; the hint is
+        None when the algorithm is installed or needs no optional package.
+    """
+    report: Dict[str, Dict[str, Any]] = {}
+    for name in names():
+        record = get(name)
+        available = record.available()
+        dependency = record.dependency
+        report[name] = {
+            "available": available,
+            "dependency": dependency.package if dependency is not None else None,
+            "install_hint": None if available or dependency is None else dependency.install_hint,
+        }
+    return report
+
+
 # ``metadata.json`` written by smallaxe <= 0.8.x records the model class name instead
-# of ``algorithm``. The concrete task is read from the ``task`` field either way.
-_LEGACY_CLASS_NAMES: Dict[str, Tuple[str, str]] = {
-    "RandomForestRegressor": ("random_forest", "regression"),
-    "RandomForestClassifier": ("random_forest", "classification"),
-    "XGBoostRegressor": ("xgboost", "regression"),
-    "XGBoostClassifier": ("xgboost", "classification"),
-    "LightGBMRegressor": ("lightgbm", "regression"),
-    "LightGBMClassifier": ("lightgbm", "classification"),
-    "CatBoostRegressor": ("catboost", "regression"),
-    "CatBoostClassifier": ("catboost", "classification"),
+# of ``algorithm``; this map reads those artifacts and is used nowhere else. The task is
+# read from the ``task`` field either way.
+_LEGACY_CLASS_NAMES: Dict[str, str] = {
+    "RandomForestRegressor": "random_forest",
+    "RandomForestClassifier": "random_forest",
+    "XGBoostRegressor": "xgboost",
+    "XGBoostClassifier": "xgboost",
+    "LightGBMRegressor": "lightgbm",
+    "LightGBMClassifier": "lightgbm",
+    "CatBoostRegressor": "catboost",
+    "CatBoostClassifier": "catboost",
 }
-
-_LEGACY_BY_ALGORITHM: Dict[Tuple[str, str], str] = {
-    value: key for key, value in _LEGACY_CLASS_NAMES.items()
-}
-
-
-def _legacy_class_name(name: str, task_type: str) -> str:
-    """The 0.8.x class name for an algorithm and task type (``"XGBoostRegressor"``)."""
-    return _LEGACY_BY_ALGORITHM[(name, task_type)]
-
-
-# Deprecated public names, removed in smallaxe 1.0.
-_MOVED = {
-    "resolve": (
-        "Use get(name).estimator_class(task) or get(name).model_class(task) instead.",
-        lambda: _resolve,
-    ),
-    "estimator_kwargs": (
-        "Build a model with regressors.<algorithm>() / classifiers.<algorithm>() and "
-        "set_params() instead; the translation to estimator arguments is internal.",
-        lambda: _estimator_kwargs,
-    ),
-    "legacy_class_name": (
-        "Use the algorithm name (get(name).name) and the model's task instead.",
-        lambda: _legacy_class_name,
-    ),
-    "package_version": (
-        "Use a fitted model's metadata['algorithm_package_version'] instead.",
-        lambda: _package_version,
-    ),
-    "COLUMN_ROLES": ("Use get(name).cols instead.", lambda: _COLUMN_ROLES),
-    "LEGACY_CLASS_NAMES": (
-        "Use smallaxe.load_model(), which reads artifacts saved by 0.8.x, instead.",
-        lambda: _LEGACY_CLASS_NAMES,
-    ),
-}
-__getattr__ = _deprecation.module_getattr(__name__, _MOVED)
-__dir__ = _deprecation.module_dir(globals(), _MOVED)

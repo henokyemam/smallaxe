@@ -2,9 +2,9 @@
 
 from typing import Any, List, Optional
 
-from smallaxe import _deprecation
 from smallaxe.training.algorithm import Algorithm, Dependency, Param
-from smallaxe.training.base import Classifier, Regressor, _warn_deprecated_alias
+
+__all__ = ["ALGORITHM"]
 
 
 def _importances(model: Any, n_features: int) -> Optional[List[float]]:
@@ -53,36 +53,3 @@ ALGORITHM = Algorithm(
     # xgboost.spark trains with ``missing=nan`` and scores every row.
     accepts_missing=True,
 )
-
-
-# Deprecated public names, removed in smallaxe 1.0. ``XGBOOST_AVAILABLE`` is probed on every
-# read, so importing this module imports no optional package.
-_MOVED = {
-    "XGBOOST_AVAILABLE": (
-        "Use smallaxe.training.algorithm.get('xgboost').available() or "
-        "regressors.available_models() instead.",
-        lambda: ALGORITHM.available(),
-    ),
-}
-__getattr__ = _deprecation.module_getattr(__name__, _MOVED)
-__dir__ = _deprecation.module_dir(globals(), _MOVED)
-
-
-class XGBoostRegressor(Regressor):
-    """Deprecated alias; use ``regressors.xgboost()``."""
-
-    _alias_algorithm = "xgboost"
-
-    def __init__(self, task: str = "simple_regression") -> None:
-        _warn_deprecated_alias("XGBoostRegressor", "regressors.xgboost()")
-        super().__init__(ALGORITHM, task)
-
-
-class XGBoostClassifier(Classifier):
-    """Deprecated alias; use ``classifiers.xgboost()``."""
-
-    _alias_algorithm = "xgboost"
-
-    def __init__(self, task: str = "binary") -> None:
-        _warn_deprecated_alias("XGBoostClassifier", "classifiers.xgboost()")
-        super().__init__(ALGORITHM, task)

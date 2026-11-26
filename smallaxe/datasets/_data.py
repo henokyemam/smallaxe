@@ -1,4 +1,4 @@
-"""Raw data generators for sample datasets."""
+"""Sample datasets: synthetic housing prices (regression) and customer churn (binary)."""
 
 import copy
 import random
@@ -13,16 +13,17 @@ from pyspark.sql.types import (
     StructType,
 )
 
-from smallaxe import _deprecation
 from smallaxe.exceptions import ValidationError
 
+__all__ = ["load_sample_regression", "load_sample_classification", "dataset_info"]
+
 # Regression dataset constants
-LOCATIONS = ["urban", "suburban", "rural"]
-CONDITIONS = ["excellent", "good", "fair", "poor"]
+_LOCATIONS = ["urban", "suburban", "rural"]
+_CONDITIONS = ["excellent", "good", "fair", "poor"]
 
 # Classification dataset constants
-CONTRACTS = ["month-to-month", "one_year", "two_year"]
-PAYMENT_METHODS = ["credit_card", "bank_transfer", "electronic_check", "mailed_check"]
+_CONTRACTS = ["month-to-month", "one_year", "two_year"]
+_PAYMENT_METHODS = ["credit_card", "bank_transfer", "electronic_check", "mailed_check"]
 
 
 def _generate_regression_data(
@@ -52,8 +53,8 @@ def _generate_regression_data(
         sqft = int(500 + bedrooms * 400 + rng.gauss(0, 200))
         sqft = max(400, sqft)  # minimum sqft
         age = rng.choices(list(range(0, 51)), weights=[max(1, 50 - i) for i in range(51)])[0]
-        location = rng.choices(LOCATIONS, weights=[30, 50, 20])[0]
-        condition = rng.choices(CONDITIONS, weights=[15, 45, 30, 10])[0]
+        location = rng.choices(_LOCATIONS, weights=[30, 50, 20])[0]
+        condition = rng.choices(_CONDITIONS, weights=[15, 45, 30, 10])[0]
 
         # Calculate price with realistic correlation
         base_price = 50000 + sqft * 150 + bedrooms * 10000 + bathrooms * 8000
@@ -99,8 +100,8 @@ def _generate_classification_data(
         tenure = rng.choices(list(range(1, 73)), weights=[max(1, 72 - i) for i in range(72)])[0]
         monthly_charges = round(rng.uniform(20, 120), 2)
         total_charges = round(tenure * monthly_charges * rng.uniform(0.9, 1.1), 2)
-        contract = rng.choices(CONTRACTS, weights=[55, 25, 20])[0]
-        payment_method = rng.choices(PAYMENT_METHODS, weights=[25, 25, 30, 20])[0]
+        contract = rng.choices(_CONTRACTS, weights=[55, 25, 20])[0]
+        payment_method = rng.choices(_PAYMENT_METHODS, weights=[25, 25, 30, 20])[0]
 
         # Calculate churn probability
         base_churn = contract_churn_base[contract]
@@ -118,11 +119,41 @@ def _generate_classification_data(
     return data
 
 
-def load_sample_regression(spark: SparkSession, n_rows: int = 10000, seed: int = 42) -> DataFrame:
+def _session_and_checks(spark: Optional[SparkSession], n_rows: Any, seed: Any) -> SparkSession:
+    """The session to build the frame in, after checking the loader's arguments.
+
+    Raises:
+        ValidationError: If ``spark`` is None and there is no active SparkSession, or is
+            not a SparkSession; or ``n_rows`` is not a positive int or ``seed`` not an int.
+    """
+    if isinstance(n_rows, bool) or not isinstance(n_rows, int) or n_rows < 1:
+        raise ValidationError(f"n_rows must be a positive integer, got {n_rows!r}.")
+    if isinstance(seed, bool) or not isinstance(seed, int):
+        raise ValidationError(f"seed must be an integer, got {seed!r}.")
+    if spark is None:
+        spark = SparkSession.getActiveSession()
+        if spark is None:
+            raise ValidationError(
+                "There is no active SparkSession. Pass one as spark=, or create one first "
+                "(SparkSession.builder.getOrCreate())."
+            )
+        return spark
+    if not hasattr(spark, "createDataFrame"):
+        raise ValidationError(f"spark must be a SparkSession, got {type(spark).__name__}.")
+    return spark
+
+
+def load_sample_regression(
+    spark: Optional[SparkSession] = None, n_rows: int = 10000, seed: int = 42
+) -> DataFrame:
     """Load a sample regression dataset (housing prices).
 
+    The rows depend only on ``n_rows`` and ``seed``, never on Python's global ``random``
+    state, which loading leaves untouched.
+
     Args:
-        spark: SparkSession instance.
+        spark: The SparkSession to create the DataFrame in. Defaults to the active
+            session.
         n_rows: Number of rows to generate. Default is 10,000.
         seed: Random seed for reproducibility. Default is 42.
 
@@ -135,7 +166,15 @@ def load_sample_regression(spark: SparkSession, n_rows: int = 10000, seed: int =
             - location (str): 'urban', 'suburban', or 'rural'
             - condition (str): 'excellent', 'good', 'fair', or 'poor'
             - price (float): House price in dollars (label column)
+
+    Raises:
+        ValidationError: If ``spark`` is None and there is no active SparkSession, or
+            ``n_rows`` or ``seed`` is invalid.
+
+    Example:
+        >>> houses = load_sample_regression(n_rows=1000)
     """
+    spark = _session_and_checks(spark, n_rows, seed)
     schema = StructType(
         [
             StructField("bedrooms", IntegerType(), False),
@@ -153,12 +192,16 @@ def load_sample_regression(spark: SparkSession, n_rows: int = 10000, seed: int =
 
 
 def load_sample_classification(
-    spark: SparkSession, n_rows: int = 10000, seed: int = 42
+    spark: Optional[SparkSession] = None, n_rows: int = 10000, seed: int = 42
 ) -> DataFrame:
-    """Load a sample classification dataset (customer churn).
+    """Load a sample binary classification dataset (customer churn).
+
+    The rows depend only on ``n_rows`` and ``seed``, never on Python's global ``random``
+    state, which loading leaves untouched.
 
     Args:
-        spark: SparkSession instance.
+        spark: The SparkSession to create the DataFrame in. Defaults to the active
+            session.
         n_rows: Number of rows to generate. Default is 10,000.
         seed: Random seed for reproducibility. Default is 42.
 
@@ -170,7 +213,15 @@ def load_sample_classification(
             - contract (str): 'month-to-month', 'one_year', or 'two_year'
             - payment_method (str): Payment method used
             - churn (int): 1 if churned, 0 otherwise (label column)
+
+    Raises:
+        ValidationError: If ``spark`` is None and there is no active SparkSession, or
+            ``n_rows`` or ``seed`` is invalid.
+
+    Example:
+        >>> churn = load_sample_classification(n_rows=1000)
     """
+    spark = _session_and_checks(spark, n_rows, seed)
     schema = StructType(
         [
             StructField("tenure", IntegerType(), False),
@@ -242,7 +293,7 @@ _INFO: Dict[str, Dict[str, Any]] = {
     },
 }
 
-# What dataset_info prints, unchanged from 0.10.
+# What dataset_info(verbose=True) prints.
 _TEXT = {
     "regression": """
 Sample Regression Dataset: Housing Prices
@@ -263,7 +314,7 @@ Label: price
 
 Usage:
   from smallaxe.datasets import load_sample_regression
-  dataframe = load_sample_regression(spark)
+  dataframe = load_sample_regression()
 """,
     "classification": """
 Sample Classification Dataset: Customer Churn
@@ -285,24 +336,17 @@ Class distribution: ~30% churn (1), ~70% no churn (0)
 
 Usage:
   from smallaxe.datasets import load_sample_classification
-  dataframe = load_sample_classification(spark)
+  dataframe = load_sample_classification()
 """,
 }
 
 
-class _UnknownDatasetError(ValidationError, ValueError):
-    """An unknown dataset name. Also a ``ValueError``, which 0.10 raised, until 1.0."""
-
-
-def dataset_info(dataset_name: str, *, verbose: Optional[bool] = None) -> Dict[str, Any]:
+def dataset_info(dataset_name: str, *, verbose: bool = False) -> Dict[str, Any]:
     """Describe a sample dataset: its columns, features, label and loader.
 
     Args:
         dataset_name: Either 'regression' or 'classification'.
-        verbose: Whether to also print the description. ``None`` (the default) prints
-            it, as 0.10 did, with a ``DeprecationWarning``: from smallaxe 1.0 the default
-            prints nothing. Pass ``False`` for the 1.0 behaviour, ``True`` to keep
-            printing; neither warns.
+        verbose: Also print a readable description. Default False.
 
     Returns:
         A new dict with ``name``, ``title``, ``task``, ``columns`` (column name ->
@@ -311,25 +355,17 @@ def dataset_info(dataset_name: str, *, verbose: Optional[bool] = None) -> Dict[s
         it); the classification dataset adds ``class_distribution``.
 
     Raises:
-        ValidationError: If dataset_name is not recognized. In 0.11 the error is also a
-            ``ValueError``, which earlier releases raised; that ends in smallaxe 1.0.
+        ValidationError: If dataset_name is not recognized.
 
     Example:
-        >>> info = dataset_info('regression', verbose=False)
+        >>> info = dataset_info('regression')
         >>> info['label']
         'price'
     """
-    if dataset_name not in _INFO:
-        raise _UnknownDatasetError(
-            f"Unknown dataset: '{dataset_name}'. Use 'regression' or 'classification'."
+    if not isinstance(dataset_name, str) or dataset_name not in _INFO:
+        raise ValidationError(
+            f"Unknown dataset: {dataset_name!r}. Use 'regression' or 'classification'."
         )
-    if verbose is None:
-        _deprecation.warn(
-            "dataset_info() printing by default is deprecated and will be removed in "
-            "smallaxe 1.0, where it only returns the information as a dict. Pass "
-            "verbose=False to stop printing, or verbose=True to keep it."
-        )
-        verbose = True
     if verbose:
         print(_TEXT[dataset_name])
     return copy.deepcopy(_INFO[dataset_name])

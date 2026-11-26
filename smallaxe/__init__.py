@@ -1,17 +1,24 @@
-"""
-smallaxe - A PySpark MLOps library for simplified model training and optimization.
+"""smallaxe: train, validate, tune and save PySpark ML models with a scikit-learn-like API.
+
+The top-level package holds the global settings (verbosity and seed) and the loaders
+that read any saved artifact. ``import smallaxe`` imports no training code and no
+optional algorithm package; each subpackage is imported when it is first used:
+
+- :mod:`smallaxe.training`: models (``regressors.<algorithm>()``,
+  ``classifiers.<algorithm>()``) and the algorithm records.
+- :mod:`smallaxe.preprocessing`: ``Imputer``, ``Scaler``, ``Encoder``.
+- :mod:`smallaxe.pipeline`: ``Pipeline``.
+- :mod:`smallaxe.metrics`: regression and classification metrics.
+- :mod:`smallaxe.search`: hyperparameter search (``optimize.run``).
+- :mod:`smallaxe.datasets`: sample datasets.
+- :mod:`smallaxe.exceptions`: the exception hierarchy.
 """
 
-import warnings  # noqa: F401 - smallaxe.warnings was importable in 0.10; kept until 1.0
 from contextlib import contextmanager
 from importlib.metadata import PackageNotFoundError, version
-from typing import TYPE_CHECKING, Any, Generator, Optional, Union, cast
+from typing import TYPE_CHECKING, Generator, Optional, Union, cast
 
-from smallaxe._config import (
-    VALID_CACHE_STRATEGIES,
-    VALID_VERBOSITY_LEVELS,
-    _config,
-)
+from smallaxe._config import VALID_VERBOSITY_LEVELS, _config
 from smallaxe.exceptions import ConfigurationError, ValidationError
 
 if TYPE_CHECKING:  # pragma: no cover - these are imported only when used
@@ -29,12 +36,8 @@ __all__ = [
     "set_verbosity",
     "get_verbosity",
     "verbosity",
-    "set_spark_session",
-    "get_spark_session",
     "set_seed",
     "get_seed",
-    "set_cache_strategy",
-    "get_cache_strategy",
     "load_model",
     "load_pipeline",
     "load",
@@ -147,14 +150,23 @@ def load(
 def set_verbosity(level: str) -> None:
     """Set the global verbosity level.
 
+    The level decides one thing today: whether :func:`smallaxe.search.optimize.run`
+    shows hyperopt's progress bar when its ``verbose`` argument is None. Warnings
+    (``UserWarning``) are emitted at every level; silence them with the ``warnings``
+    module.
+
     Args:
-        level: Verbosity level. One of 'quiet', 'normal', or 'verbose'.
-            - 'quiet': Only errors, no progress bars or info messages
-            - 'normal': Progress bars and key info (default)
-            - 'verbose': Detailed logging for debugging
+        level: One of:
+            - ``'quiet'``: ``optimize.run`` shows no progress bar.
+            - ``'normal'`` (default): ``optimize.run`` shows its progress bar.
+            - ``'verbose'``: the same as ``'normal'``; reserved for more output in a
+              later release.
 
     Raises:
         ConfigurationError: If level is not a valid verbosity level.
+
+    Example:
+        >>> smallaxe.set_verbosity('quiet')
     """
     if level not in VALID_VERBOSITY_LEVELS:
         raise ConfigurationError(
@@ -166,7 +178,7 @@ def set_verbosity(level: str) -> None:
 
 
 def get_verbosity() -> str:
-    """Get the current verbosity level.
+    """Get the current verbosity level (see :func:`set_verbosity`).
 
     Returns:
         The current verbosity level ('quiet', 'normal', or 'verbose').
@@ -176,17 +188,22 @@ def get_verbosity() -> str:
 
 @contextmanager
 def verbosity(level: str) -> Generator[None, None, None]:
-    """Context manager for temporarily changing verbosity level.
+    """Context manager that sets the verbosity level for the duration of a block.
+
+    The previous level is restored on exit, also when the block raises.
 
     Args:
-        level: Verbosity level to use within the context.
+        level: Verbosity level to use within the context (see :func:`set_verbosity`).
+
+    Yields:
+        None.
 
     Raises:
         ConfigurationError: If level is not a valid verbosity level.
 
     Example:
         >>> with smallaxe.verbosity('quiet'):
-        ...     model.fit(dataframe, label_col='target')  # runs silently
+        ...     result = optimize.run(model, dataframe, 'target', space)  # no progress bar
     """
     previous_level = get_verbosity()
     set_verbosity(level)
@@ -194,32 +211,6 @@ def verbosity(level: str) -> Generator[None, None, None]:
         yield
     finally:
         _config._verbosity = previous_level
-
-
-def set_spark_session(spark: Any) -> None:
-    """Deprecated: smallaxe reads the session from the DataFrame it is given.
-
-    Stores the value for :func:`get_spark_session`, but no library code uses it.
-    Removed in smallaxe 1.0.
-    """
-    from smallaxe import _deprecation
-
-    _deprecation.warn(
-        "smallaxe.set_spark_session has no effect and will be removed in smallaxe 1.0. "
-        "smallaxe uses the session of the DataFrame it is given, or the active session."
-    )
-    _config._spark_session = spark
-
-
-def get_spark_session() -> Optional[Any]:
-    """Deprecated: returns whatever :func:`set_spark_session` stored. Removed in smallaxe 1.0."""
-    from smallaxe import _deprecation
-
-    _deprecation.warn(
-        "smallaxe.get_spark_session is deprecated and will be removed in smallaxe 1.0. Use "
-        "dataframe.sparkSession or SparkSession.getActiveSession() instead."
-    )
-    return _config._spark_session
 
 
 def set_seed(seed: Optional[int]) -> None:
@@ -236,9 +227,12 @@ def set_seed(seed: Optional[int]) -> None:
         seed: Integer seed value, or None to reset to no seed.
 
     Raises:
-        ConfigurationError: If seed is not an integer or None.
+        ConfigurationError: If seed is not an integer or None (a bool is rejected).
+
+    Example:
+        >>> smallaxe.set_seed(42)
     """
-    if seed is not None and not isinstance(seed, int):
+    if seed is not None and (isinstance(seed, bool) or not isinstance(seed, int)):
         raise ConfigurationError(
             message=f"Seed must be an integer or None, got {type(seed).__name__}."
         )
@@ -252,39 +246,3 @@ def get_seed() -> Optional[int]:
         The current seed value, or None if not set.
     """
     return _config._seed
-
-
-def set_cache_strategy(strategy: str) -> None:
-    """Deprecated: has no effect and will be removed in smallaxe 1.0.
-
-    Caching is decided per ``fit`` call through its ``cache_strategy`` argument
-    (``None``, ``'none'``, ``'memory'``, ``'disk'``), because it depends on the
-    DataFrame, not on the process.
-
-    Raises:
-        ConfigurationError: If strategy is not one of 'auto', 'always', 'never'.
-    """
-    from smallaxe import _deprecation
-
-    _deprecation.warn(
-        "smallaxe.set_cache_strategy has no effect and will be removed in smallaxe 1.0. "
-        "Pass cache_strategy= to fit() instead."
-    )
-    if strategy not in VALID_CACHE_STRATEGIES:
-        raise ConfigurationError(
-            setting="cache_strategy",
-            value=strategy,
-            allowed_values=list(VALID_CACHE_STRATEGIES),
-        )
-    _config._cache_strategy = strategy
-
-
-def get_cache_strategy() -> str:
-    """Deprecated: returns whatever :func:`set_cache_strategy` stored. Removed in smallaxe 1.0."""
-    from smallaxe import _deprecation
-
-    _deprecation.warn(
-        "smallaxe.get_cache_strategy is deprecated and will be removed in smallaxe 1.0. "
-        "Caching is set per fit() call: pass cache_strategy= to fit() instead."
-    )
-    return _config._cache_strategy

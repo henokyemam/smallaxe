@@ -4,16 +4,43 @@ from abc import ABC, abstractmethod
 from typing import Any, Dict, List, Optional, Tuple
 
 from pyspark.ml.feature import VectorAssembler
+from pyspark.ml.linalg import VectorUDT
 from pyspark.sql import DataFrame
+from pyspark.sql.types import BooleanType, NumericType
 
-from smallaxe.exceptions import ModelNotFittedError, ValidationError
+from smallaxe.exceptions import ColumnNotFoundError, ModelNotFittedError, ValidationError
+
+__all__ = ["SparkModelMixin"]
+
+
+def _check_feature_types(dataframe: DataFrame, feature_cols: List[str]) -> None:
+    """Reject a feature column that is not numeric, boolean or an ML vector.
+
+    Columns missing from ``dataframe`` are left to the caller's ColumnNotFoundError.
+
+    Raises:
+        ValidationError: Naming the first feature column of another type.
+    """
+    types = {field.name: field.dataType for field in dataframe.schema.fields}
+    for col in feature_cols:
+        data_type = types.get(col)
+        if data_type is not None and not isinstance(
+            data_type, (NumericType, BooleanType, VectorUDT)
+        ):
+            raise ValidationError(
+                f"Feature column '{col}' has type {data_type.simpleString()}; features "
+                "must be numeric, boolean or ML vectors. Encode it first, for example "
+                "with smallaxe.preprocessing.Encoder."
+            )
 
 
 class SparkModelMixin(ABC):
     """Mixin providing Spark MLlib model operations.
 
-    This mixin provides common functionality for working with Spark MLlib models,
-    including feature assembly, fitting, and prediction.
+    This mixin provides feature assembly, prediction, feature importances, and saving
+    and loading the fitted Spark model. A subclass fits the estimator
+    (:meth:`_fit_spark_model`) and reads its importances
+    (:meth:`_get_feature_importance`).
 
     The assembled feature vector and the estimator's output columns live under
     internal names while a Spark model runs, and user columns that share a name
@@ -29,40 +56,9 @@ class SparkModelMixin(ABC):
     PROBABILITY_COL = "probability"
     RAW_PREDICTION_COL = "rawPrediction"
 
-    @abstractmethod
-    def _create_spark_estimator(
-        self,
-        features_col: Optional[str] = None,
-        label_col: Optional[str] = None,
-        prediction_col: Optional[str] = None,
-    ) -> Any:
-        """Create the underlying Spark MLlib estimator.
-
-        Subclasses must implement this to create their specific
-        Spark MLlib estimator (e.g., RandomForestRegressor).
-
-        For estimators that accept column names via constructor (XGBoost,
-        LightGBM), use the provided column params. For estimators that use
-        setters (native Spark ML), ignore these and let the base class set
-        them via setters.
-
-        Args:
-            features_col: Features column name.
-            label_col: Label column name.
-            prediction_col: Prediction column name.
-
-        Returns:
-            A Spark MLlib estimator instance.
-        """
-        pass
-
-    def _uses_constructor_col_params(self) -> bool:
-        """Whether this estimator takes column names via constructor.
-
-        Override and return True for estimators like XGBoost and LightGBM
-        that require column names at construction time rather than via setters.
-        """
-        return False
+    # Set by fit (or load): the fitted Spark model and the columns it was fitted on.
+    _spark_model: Any
+    _feature_cols: List[str]
 
     def _handle_invalid(self) -> str:
         """``VectorAssembler``'s policy for null and NaN features.
@@ -157,6 +153,10 @@ class SparkModelMixin(ABC):
         are still present and shielded user columns still carry their aliases;
         callers finish with :meth:`_unshield_user_columns`.
         """
+        missing = [col for col in feature_cols if col not in dataframe.columns]
+        if missing:
+            raise ColumnNotFoundError(column=missing[0], available_columns=list(dataframe.columns))
+        _check_feature_types(dataframe, feature_cols)
         dataframe, shielded = self._shield_user_columns(dataframe)
         df_with_features = self._assemble_features(dataframe, feature_cols)
         return self._spark_model.transform(df_with_features), shielded
@@ -169,13 +169,16 @@ class SparkModelMixin(ABC):
                 f"overwritten. Pass a different output_col, or drop the column first."
             )
 
+    @abstractmethod
     def _fit_spark_model(
         self,
         dataframe: DataFrame,
         label_col: str,
         feature_cols: List[str],
     ) -> Any:
-        """Fit a Spark MLlib model.
+        """Fit the Spark estimator on ``dataframe`` and keep it as ``self._spark_model``.
+
+        Implementations also record ``self._feature_cols`` and ``self._label_col``.
 
         Args:
             dataframe: PySpark DataFrame with training data.
@@ -183,33 +186,8 @@ class SparkModelMixin(ABC):
             feature_cols: List of feature column names.
 
         Returns:
-            Fitted Spark MLlib model.
+            The fitted Spark model.
         """
-        self._features_col = self.FEATURES_COL
-        dataframe, _ = self._shield_user_columns(dataframe)
-        df_with_features = self._assemble_features(dataframe, feature_cols)
-
-        # Create the estimator with column params
-        estimator = self._create_spark_estimator(
-            features_col=self.FEATURES_COL,
-            label_col=label_col,
-            prediction_col=self.PREDICTION_COL,
-        )
-
-        # For estimators that use setters (native Spark ML), set column names
-        if not self._uses_constructor_col_params():
-            estimator.setLabelCol(label_col)
-            estimator.setFeaturesCol(self.FEATURES_COL)
-            estimator.setPredictionCol(self.PREDICTION_COL)
-
-        # Store feature columns for prediction
-        self._feature_cols = feature_cols
-        self._label_col = label_col
-
-        # Fit the model
-        self._spark_model = estimator.fit(df_with_features)
-
-        return self._spark_model
 
     def _predict_spark_model(
         self,
@@ -229,6 +207,7 @@ class SparkModelMixin(ABC):
 
         Raises:
             ModelNotFittedError: If the model has not been fitted.
+            ColumnNotFoundError: If a feature column is not in ``dataframe``.
             ValidationError: If ``output_col`` is already a column of ``dataframe``.
         """
         if not hasattr(self, "_spark_model") or self._spark_model is None:
@@ -281,6 +260,7 @@ class SparkModelMixin(ABC):
 
         Raises:
             ModelNotFittedError: If the model has not been fitted.
+            ColumnNotFoundError: If a feature column is not in ``dataframe``.
             ValidationError: If ``output_col`` is already a column of ``dataframe``.
         """
         if not hasattr(self, "_spark_model") or self._spark_model is None:
@@ -295,31 +275,24 @@ class SparkModelMixin(ABC):
             keep[self.PROBABILITY_COL] = output_col
         return self._finish_prediction(predictions_df, shielded, keep)
 
+    @abstractmethod
     def _get_feature_importance(self) -> Optional[List[float]]:
-        """Get feature importance scores from the fitted model.
-
-        Returns:
-            List of feature importance scores, or None if not available.
+        """One importance score per feature column, in order, or None if unavailable.
 
         Raises:
             ModelNotFittedError: If the model has not been fitted.
         """
-        if not hasattr(self, "_spark_model") or self._spark_model is None:
-            raise ModelNotFittedError(
-                "Model has not been fitted. Call fit() before getting feature importance."
-            )
-
-        if hasattr(self._spark_model, "featureImportances"):
-            return list(self._spark_model.featureImportances.toArray())
-        return None
 
     @property
-    def feature_importances(self) -> Optional[dict]:
-        """Get feature importance as a dictionary mapping feature names to scores.
+    def feature_importances(self) -> Optional[Dict[str, float]]:
+        """Feature importance per feature column, as the algorithm defines it.
+
+        Random Forest gives MLlib's normalised Gini importances, XGBoost the total gain,
+        LightGBM split counts, CatBoost PredictionValuesChange (summing to 100).
 
         Returns:
             Dictionary mapping feature names to importance scores,
-            or None if not available.
+            or None if the fitted model cannot supply them.
 
         Raises:
             ModelNotFittedError: If the model has not been fitted.

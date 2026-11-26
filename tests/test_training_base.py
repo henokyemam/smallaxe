@@ -1,71 +1,31 @@
-"""Tests for training base classes."""
+"""Tests for the shared fit / validate / predict machinery of the model classes.
 
-from typing import Any, Dict
+``ConcreteRegressor`` / ``ConcreteClassifier`` are Random Forest models with 10 trees,
+the smallest real models that exercise ``BaseModel`` end to end.
+"""
 
 import pytest
-from pyspark.ml.classification import RandomForestClassificationModel
-from pyspark.ml.classification import RandomForestClassifier as SparkRFClassifier
-from pyspark.ml.regression import RandomForestRegressionModel
-from pyspark.ml.regression import RandomForestRegressor as SparkRFRegressor
 
 from smallaxe.exceptions import ModelNotFittedError, ValidationError
-from smallaxe.training.base import BaseClassifier, BaseRegressor
+from smallaxe.training.base import Classifier, Regressor
 
-# --- Concrete implementations for testing ---
-
-
-class ConcreteRegressor(BaseRegressor):
-    """Concrete implementation of BaseRegressor for testing."""
-
-    @property
-    def params(self) -> Dict[str, str]:
-        return {
-            "n_estimators": "Number of trees",
-            "max_depth": "Maximum tree depth",
-        }
-
-    @property
-    def default_params(self) -> Dict[str, Any]:
-        return {
-            "n_estimators": 10,
-            "max_depth": 5,
-        }
-
-    def _create_spark_estimator(self, **kwargs) -> Any:
-        n_estimators = self.get_param("n_estimators")
-        max_depth = self.get_param("max_depth")
-        return SparkRFRegressor(numTrees=n_estimators, maxDepth=max_depth)
-
-    def _load_artifacts(self, path: str) -> None:
-        """Load the Spark model from disk."""
-        self._load_spark_model(path, RandomForestRegressionModel)
+# --- Concrete models for testing ---
 
 
-class ConcreteClassifier(BaseClassifier):
-    """Concrete implementation of BaseClassifier for testing."""
+class ConcreteRegressor(Regressor):
+    """A Random Forest regressor with 10 trees."""
 
-    @property
-    def params(self) -> Dict[str, str]:
-        return {
-            "n_estimators": "Number of trees",
-            "max_depth": "Maximum tree depth",
-        }
+    def __init__(self, task: str = "simple_regression") -> None:
+        super().__init__("random_forest", task)
+        self.set_params(n_estimators=10)
 
-    @property
-    def default_params(self) -> Dict[str, Any]:
-        return {
-            "n_estimators": 10,
-            "max_depth": 5,
-        }
 
-    def _create_spark_estimator(self, **kwargs) -> Any:
-        n_estimators = self.get_param("n_estimators")
-        max_depth = self.get_param("max_depth")
-        return SparkRFClassifier(numTrees=n_estimators, maxDepth=max_depth)
+class ConcreteClassifier(Classifier):
+    """A Random Forest classifier with 10 trees."""
 
-    def _load_artifacts(self, path: str) -> None:
-        """Load the Spark model from disk."""
-        self._load_spark_model(path, RandomForestClassificationModel)
+    def __init__(self, task: str = "binary") -> None:
+        super().__init__("random_forest", task)
+        self.set_params(n_estimators=10)
 
 
 # --- Test fixtures ---

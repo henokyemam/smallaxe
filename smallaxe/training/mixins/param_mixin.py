@@ -3,8 +3,9 @@
 from abc import ABC, abstractmethod
 from typing import Any, Dict, Mapping, TypeVar
 
-from smallaxe import _deprecation
 from smallaxe.exceptions import ValidationError
+
+__all__ = ["ParamMixin"]
 
 _Self = TypeVar("_Self", bound="ParamMixin")
 
@@ -48,11 +49,18 @@ class ParamMixin(ABC):
     def set_params(self: _Self, **params: Any) -> _Self:
         """Set one or more model parameters.
 
+        Each value is checked against the parameter's default: it must have the same
+        type (an int is accepted for a float parameter; a bool only for a bool one), and
+        ``seed`` must be an int or None. None resets a parameter to "let the estimator
+        decide". Nothing is set if any value is rejected. Ranges are the estimator's
+        to check, when ``fit`` runs: ``max_depth=-3`` is accepted here and rejected by
+        ``fit``.
+
         Args:
             **params: Parameter names and the values to set.
 
         Returns:
-            self: The model instance, for method chaining.
+            The model itself, for method chaining.
 
         Raises:
             ValidationError: If a parameter name is invalid or value fails validation.
@@ -62,26 +70,8 @@ class ParamMixin(ABC):
         """
         return self._set_params(params)
 
-    def set_param(self: _Self, params: Dict[str, Any]) -> _Self:
-        """Deprecated: use :meth:`set_params` (``set_params(**params)``). Removed in 1.0.
-
-        Args:
-            params: Dictionary of parameter names and values to set.
-
-        Returns:
-            self: The model instance for method chaining.
-
-        Raises:
-            ValidationError: If a parameter name is invalid or value fails validation.
-        """
-        _deprecation.warn(
-            "set_param(dict) is deprecated and will be removed in smallaxe 1.0. "
-            "Use set_params(**params) instead."
-        )
-        return self._set_params(params)
-
-    def _set_params(self: _Self, params: Mapping[Any, Any]) -> _Self:
-        """Validate and set each of ``params``: the rule behind set_params and set_param."""
+    def _set_params(self: _Self, params: Mapping[str, Any]) -> _Self:
+        """Validate every one of ``params``, then set them all: the rule behind set_params."""
         valid_params = set(self.params.keys())
 
         for name, value in params.items():
@@ -90,6 +80,7 @@ class ParamMixin(ABC):
                     f"Invalid parameter '{name}'. Valid parameters are: {sorted(valid_params)}"
                 )
             self._validate_param(name, value)
+        for name, value in params.items():
             self._set_param_value(name, value)
 
         return self
@@ -133,17 +124,31 @@ class ParamMixin(ABC):
         Raises:
             ValidationError: If the value is invalid for the parameter.
         """
+        if value is None:
+            return
+        if name == "seed":
+            if isinstance(value, bool) or not isinstance(value, int):
+                raise ValidationError(
+                    f"Parameter 'seed' must be an int or None, got {type(value).__name__}."
+                )
+            return
         # Default validation: check type matches default
         default_value = self.default_params.get(name)
-        if default_value is not None and value is not None:
-            if not isinstance(value, type(default_value)):
-                # Allow int for float parameters
-                if isinstance(default_value, float) and isinstance(value, int):
-                    return
-                raise ValidationError(
-                    f"Parameter '{name}' must be of type {type(default_value).__name__}, "
-                    f"got {type(value).__name__}."
-                )
+        if default_value is None:
+            return
+        expected = type(default_value)
+        if isinstance(value, bool) and expected is not bool:
+            valid = False
+        elif isinstance(value, expected):
+            valid = True
+        else:
+            # Allow int for float parameters
+            valid = expected is float and isinstance(value, int)
+        if not valid:
+            raise ValidationError(
+                f"Parameter '{name}' must be of type {expected.__name__}, "
+                f"got {type(value).__name__}."
+            )
 
     def _set_param_value(self, name: str, value: Any) -> None:
         """Set a single parameter value.

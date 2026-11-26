@@ -176,6 +176,21 @@ class TestConfigurationError:
         assert error.setting == "verbosity"
         assert error.value == "invalid"
 
+    @pytest.mark.parametrize("value", ["", 0, None, False])
+    def test_falsy_value_still_builds_the_message(self, value):
+        """A falsy value is still a value: the message names the setting and the value."""
+        error = ConfigurationError(setting="verbosity", value=value, allowed_values=["quiet"])
+        assert str(error) == (
+            f"Invalid value {value!r} for setting 'verbosity'. Allowed values: ['quiet']"
+        )
+        assert error.value is value
+
+    def test_setting_without_value_keeps_the_message(self):
+        """Without a value there is nothing to report; the given message stands."""
+        error = ConfigurationError("custom", setting="verbosity")
+        assert str(error) == "custom"
+        assert error.value is None
+
     def test_with_allowed_values(self):
         """Test error message with allowed values."""
         error = ConfigurationError(

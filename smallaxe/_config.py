@@ -1,36 +1,32 @@
-"""Internal configuration state for smallaxe."""
+"""Internal configuration state for smallaxe: the global verbosity and seed."""
 
-from typing import Any, Optional
+from typing import Optional
+
+__all__ = ["VALID_VERBOSITY_LEVELS", "DEFAULT_VERBOSITY", "DEFAULT_SEED"]
 
 # Valid configuration values
 VALID_VERBOSITY_LEVELS = ("quiet", "normal", "verbose")
-VALID_CACHE_STRATEGIES = ("auto", "always", "never")
 
 # Default configuration values
 DEFAULT_VERBOSITY = "normal"
-DEFAULT_CACHE_STRATEGY = "auto"
-DEFAULT_SEED = None
+DEFAULT_SEED: Optional[int] = None
 
 
 class _Config:
     """Internal configuration state container.
 
-    This class holds the global configuration state for smallaxe.
-    It should not be accessed directly - use the module-level functions instead.
+    Holds the global settings. Use ``smallaxe.set_verbosity`` / ``set_seed`` and their
+    getters instead of reading it.
     """
 
     def __init__(self) -> None:
         self._verbosity: str = DEFAULT_VERBOSITY
-        self._cache_strategy: str = DEFAULT_CACHE_STRATEGY
         self._seed: Optional[int] = DEFAULT_SEED
-        self._spark_session: Optional[Any] = None
 
     def reset(self) -> None:
         """Reset configuration to defaults."""
         self._verbosity = DEFAULT_VERBOSITY
-        self._cache_strategy = DEFAULT_CACHE_STRATEGY
         self._seed = DEFAULT_SEED
-        self._spark_session = None
 
 
 # Global configuration instance
