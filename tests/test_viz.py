@@ -404,6 +404,29 @@ def test_vector_and_numeric_scores_give_the_same_curve(spark_session):
     assert by_number.data[0].name == by_vector.data[0].name
 
 
+@pytest.mark.parametrize("chart", ["roc_curve", "precision_recall_curve"])
+@pytest.mark.parametrize("score_type", ["float", "int", "decimal(5,4)", "long"])
+def test_curves_accept_a_score_column_of_any_numeric_type(spark_session, chart, score_type):
+    # Spark's BinaryClassificationEvaluator, behind metrics.auc_roc / auc_pr, takes only
+    # a double or a vector; the chart casts the score so a float32 column works too.
+    rows = [(float(i % 2), ((i * 7) % 10) / 10.0 if i % 3 else float(i % 2)) for i in range(60)]
+    if score_type in ("int", "long"):
+        rows = [(label, float(round(score))) for label, score in rows]
+    typed = spark_session.createDataFrame(rows, "label double, score double").withColumn(
+        "score", F.col("score").cast(score_type)
+    )
+    # The same values as doubles (float32 rounding moves 0.3 across a bin edge).
+    doubles = typed.withColumn("score", F.col("score").cast("double"))
+
+    fig = getattr(viz, chart)(typed, "label", "score", n_bins=10)
+
+    metric = metrics.auc_roc if chart == "roc_curve" else metrics.auc_pr
+    assert f"{metric(doubles, 'label', 'score'):.4f}" in fig.data[0].name
+    reference = getattr(viz, chart)(doubles, "label", "score", n_bins=10)
+    assert list(fig.data[0].x) == list(reference.data[0].x)
+    assert list(fig.data[0].y) == list(reference.data[0].y)
+
+
 def test_score_bins_are_bounded_by_n_bins_and_leave_out_nulls(spark_session, scored_df):
     table = _classification._score_bins(scored_df, "label", "score", 10, "ROC curve")
     assert table.count() <= 10
@@ -498,6 +521,71 @@ def test_residuals_of_a_constant_column_are_one_bar(spark_session):
 
     assert list(fig.data[0].x) == [2.0]
     assert list(fig.data[0].y) == [7]
+
+
+INF = float("inf")
+
+
+def test_residuals_leave_out_infinite_values_and_say_how_many(spark_session):
+    rows = [(float(i), i + (i % 3) - 1.0) for i in range(30)]
+    infinite = [(INF, INF), (INF, 1.0), (0.0, -INF), (-INF, -INF)]
+    frame = spark_session.createDataFrame(rows + infinite, "y double, p double")
+
+    fig = viz.residuals(frame, "y", "p", n_bins=3)
+
+    bars = fig.data[0]
+    assert sum(bars.y) == 30
+    assert all(math.isfinite(value) for value in list(bars.x) + list(bars.width))
+    assert list(bars.x) == pytest.approx([-2 / 3, 0.0, 2 / 3])
+    assert "30 rows" in fig.layout.title.text
+    assert "4 rows with an infinite value left out" in fig.layout.title.text
+    assert "nan" not in fig.layout.title.text and "mean inf" not in fig.layout.title.text
+    fig.to_json()
+
+
+def test_residuals_of_only_infinite_values_have_no_rows(spark_session):
+    frame = spark_session.createDataFrame([(INF, INF), (INF, 1.0)], "y double, p double")
+
+    with pytest.raises(ValidationError, match="no row"):
+        viz.residuals(frame, "y", "p")
+
+
+def test_residuals_whose_difference_overflows_are_left_out(spark_session):
+    # Both values are finite, the residual is not.
+    frame = spark_session.createDataFrame(
+        [(1e308, -1e308), (1.0, 0.5), (2.0, 2.5)], "y double, p double"
+    )
+    fig = viz.residuals(frame, "y", "p", n_bins=2)
+
+    assert sum(fig.data[0].y) == 2
+    assert "1 rows with an infinite value left out" in fig.layout.title.text
+
+
+def test_regression_charts_refuse_a_range_too_wide_to_bin(spark_session):
+    frame = spark_session.createDataFrame([(1e308, 1e308), (-1e308, -1e308)], "y double, p double")
+    with pytest.raises(ValidationError, match="too wide"):
+        viz.actual_vs_predicted(frame, "y", "p")
+    residual_frame = spark_session.createDataFrame(
+        [(1e308, -1e307), (-1e308, 1e307)], "y double, p double"
+    )
+    with pytest.raises(ValidationError, match="too wide"):
+        viz.residuals(residual_frame, "y", "p")
+
+
+def test_density_leaves_out_infinite_values_and_says_how_many(spark_session):
+    rows = [(float(i), float(i)) for i in range(10)]
+    frame = spark_session.createDataFrame(
+        rows + [(INF, 1.0), (1.0, -INF)], "label double, predict_label double"
+    )
+
+    fig = viz.actual_vs_predicted(frame, "label", n_bins=5)
+
+    heatmap = fig.data[0]
+    assert sum(map(sum, heatmap.z)) == 10
+    assert [row[index] for index, row in enumerate(heatmap.z)] == [2] * 5
+    assert list(heatmap.x) == pytest.approx([0.9, 2.7, 4.5, 6.3, 8.1])
+    assert "2 rows with an infinite value left out" in fig.layout.title.text
+    fig.to_json()
 
 
 def test_residual_table_is_bounded_by_n_bins(scored_df):
@@ -795,6 +883,29 @@ def _bad_calls(scored_df, multiclass_df):
         "feature_importances(None)": (lambda: viz.feature_importances(None), ValidationError),
         "model_comparison(None)": (lambda: viz.model_comparison(None, "rmse"), ValidationError),
     }
+
+
+# Names Spark would otherwise read as struct access ("a.y") or must escape ("p`q").
+ODD_NAMES = {"label": "a.label", "score": "s`core", "y": "a.y", "pred": "p`q`"}
+
+
+def test_every_dataframe_chart_takes_column_names_with_dots_and_backticks(scored_df):
+    odd = scored_df.toDF(*[ODD_NAMES[name] for name in scored_df.columns])
+
+    positives = sum(1 for row in _rows_2000() if row[0] == 1.0)
+    matrix = viz.confusion_matrix(odd, "a.label", "a.label").data[0].z
+    assert [list(row) for row in matrix] == [[2000 - positives, 0], [0, positives]]
+    for chart in (viz.roc_curve, viz.precision_recall_curve):
+        assert (
+            chart(odd, "a.label", "s`core").data[0].name
+            == chart(scored_df, "label", "score").data[0].name
+        )
+    assert list(viz.residuals(odd, "a.y", "p`q`").data[0].y) == list(
+        viz.residuals(scored_df, "y", "pred").data[0].y
+    )
+    assert viz.actual_vs_predicted(odd, "a.y", "p`q`").data[0].z == (
+        viz.actual_vs_predicted(scored_df, "y", "pred").data[0].z
+    )
 
 
 def test_bad_inputs_raise_smallaxe_exceptions(scored_df, multiclass_df):

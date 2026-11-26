@@ -51,8 +51,8 @@ def _confusion_table(dataframe: DataFrame, label_col: str, prediction_col: str) 
     """
     validate_columns(dataframe, label_col, prediction_col)
     require_numeric(dataframe, "confusion_matrix", label_col, prediction_col)
-    actual = F.col(label_col).cast("double")
-    predicted = F.col(prediction_col).cast("double")
+    actual = _frames.column(label_col).cast("double")
+    predicted = _frames.column(prediction_col).cast("double")
     return (
         dataframe.where(_frames.present(actual) & _frames.present(predicted))
         .groupBy(actual.alias("actual"), predicted.alias("predicted"))
@@ -188,16 +188,26 @@ def confusion_matrix(
 
 
 def _scored(dataframe: DataFrame, label_col: str, probability_col: str) -> DataFrame:
-    """The rows a curve uses: a label that is not null or NaN, and a score that is not null.
+    """The rows a curve uses, as two columns: ``label`` and ``score``.
 
-    A numeric score that is NaN is left out too; a vector's entries are checked later.
+    ``label`` is the label as a double; ``score`` is the probability vector as it is, or
+    a numeric score cast to double (Spark's ``BinaryClassificationEvaluator``, behind
+    the exact area, takes only a double or a vector). Rows with a null or NaN label or a
+    null score are left out; a numeric score that is NaN is left out too, a vector's
+    entries are checked by :func:`_score_bins`. The fixed names also keep the
+    evaluator away from the user's column names, which may hold a dot.
     """
-    probability = F.col(probability_col)
+    label = _frames.column(label_col)
+    probability = _frames.column(probability_col)
     if isinstance(dataframe.schema[probability_col].dataType, VectorUDT):
         has_score = probability.isNotNull()
+        score = probability
     else:
         has_score = _frames.present(probability)
-    return dataframe.where(_frames.present(F.col(label_col)) & has_score)
+        score = probability.cast("double")
+    return dataframe.where(_frames.present(label) & has_score).select(
+        label.cast("double").alias("label"), score.alias("score")
+    )
 
 
 def _score_bins(
@@ -206,12 +216,13 @@ def _score_bins(
     """Positives and negatives per score bin, plus counts of the rows that are invalid.
 
     The score is the positive-class probability: element 1 of a probability vector, or
-    the value of a numeric column. Rows with a null or NaN label, or a null score (a
-    NaN numeric score too), are left out. The rest are bucketed into ``n_bins``
-    equal-width bins over [0, 1]. One ``groupBy`` returns at most ``n_bins + 1`` rows: one
-    per bin that holds a row, and a null bin for the rows that cannot be binned. Each row
-    also counts the rows whose label is not 0/1 (``bad_labels``), whose vector does not
-    have length 2 (``bad_sizes``) or whose score is outside [0, 1] (``bad_scores``).
+    the value of a numeric column (of any numeric type). Rows with a null or NaN label,
+    or a null score (a NaN numeric score too), are left out. The rest are bucketed into
+    ``n_bins`` equal-width bins over [0, 1]. One ``groupBy`` returns at most
+    ``n_bins + 1`` rows: one per bin that holds a row, and a null bin for the rows that
+    cannot be binned. Each row also counts the rows whose label is not 0/1
+    (``bad_labels``), whose vector does not have length 2 (``bad_sizes``) or whose score
+    is outside [0, 1] (``bad_scores``).
 
     Raises:
         ValidationError: If ``dataframe`` is not a DataFrame, the label is not numeric,
@@ -220,19 +231,16 @@ def _score_bins(
     """
     validate_columns(dataframe, label_col, probability_col)
     _check_auc_columns(dataframe, label_col, probability_col, chart)
-    label = F.col(label_col).cast("double")
-    probability = F.col(probability_col)
+    scored = _scored(dataframe, label_col, probability_col)
     if isinstance(dataframe.schema[probability_col].dataType, VectorUDT):
-        values = vector_to_array(probability)
+        values = vector_to_array(F.col("score"))
         size = F.size(values)
         score = F.when(size == 2, values[1])
     else:
         size = F.lit(2)
-        score = probability.cast("double")
+        score = F.col("score")
 
-    rows = _scored(dataframe, label_col, probability_col).select(
-        label.alias("label"), score.alias("score"), size.alias("size")
-    )
+    rows = scored.select(F.col("label"), score.alias("score"), size.alias("size"))
     bad_size = F.col("size") != 2
     value = F.col("score")
     bad_score = ~bad_size & (value.isNull() | F.isnan(value) | (value < 0) | (value > 1))
@@ -257,7 +265,8 @@ def _curve_input(
     Returns:
         ``(bins, positives, negatives, scored rows)``: the non-empty bins as ``(bin,
         positives, negatives)`` from the highest score down, the totals, and the input's
-        rows with a label and a score, for the exact area.
+        rows with a label and a score as the columns ``label`` and ``score`` (see
+        :func:`_scored`), for the exact area.
 
     Raises:
         ValidationError: If ``n_bins`` is not an int in [10, 10000], an input is
@@ -350,8 +359,8 @@ def roc_curve(
         label_col: The binary label column, 0 or 1.
         probability_col: The probability vector ``predict_proba`` writes (its element 1,
             the probability of class 1, is the score; vectors must have length 2), or a
-            numeric column holding the positive-class score in [0, 1]. Default
-            'probability'.
+            numeric column of any numeric type holding the positive-class score in
+            [0, 1]. Default 'probability'.
         n_bins: Number of score bins, an integer in [10, 10000]. Default 200.
         title: The chart title. Defaults to "ROC curve (AUC = <auc_roc>)".
 
@@ -378,7 +387,7 @@ def roc_curve(
     bins, positives, negatives, scored = _curve_input(
         dataframe, label_col, probability_col, n_bins, chart
     )
-    area = _exact_area(auc_roc(scored, label_col, probability_col), chart, label_col)
+    area = _exact_area(auc_roc(scored, "label", "score"), chart, label_col)
     fpr, tpr, hover = _roc_points(bins, positives, negatives, n_bins)
 
     fig = _style.figure(
@@ -458,8 +467,9 @@ def precision_recall_curve(
             ``model.predict_proba``.
         label_col: The binary label column, 0 or 1.
         probability_col: The probability vector ``predict_proba`` writes (its element 1
-            is the score; vectors must have length 2), or a numeric column holding the
-            positive-class score in [0, 1]. Default 'probability'.
+            is the score; vectors must have length 2), or a numeric column of any
+            numeric type holding the positive-class score in [0, 1]. Default
+            'probability'.
         n_bins: Number of score bins, an integer in [10, 10000]. Default 200.
         title: The chart title. Defaults to "Precision-recall curve (AUC-PR = <auc_pr>)".
 
@@ -483,7 +493,7 @@ def precision_recall_curve(
     bins, positives, negatives, scored = _curve_input(
         dataframe, label_col, probability_col, n_bins, chart
     )
-    area = _exact_area(auc_pr(scored, label_col, probability_col), chart, label_col)
+    area = _exact_area(auc_pr(scored, "label", "score"), chart, label_col)
     recall, precision, hover = _pr_points(bins, positives, n_bins)
     rate = positives / (positives + negatives)
 

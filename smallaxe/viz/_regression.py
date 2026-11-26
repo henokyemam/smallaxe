@@ -4,8 +4,11 @@ Each runs two Spark jobs and collects only aggregates: one global aggregate (cou
 range, mean, standard deviation: one row), then one ``groupBy`` over the bin indices
 (at most ``n_bins`` rows for the histogram, ``n_bins * n_bins`` for the density).
 Rows where the label or the prediction is null or NaN are left out and never counted.
+Rows with an infinite value (or, for the residuals, an infinite difference) cannot be
+binned either: they are left out too, and the subtitle says how many.
 """
 
+import math
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
 
 from pyspark.sql import Column, DataFrame
@@ -25,7 +28,10 @@ _MIN_DENSITY_BINS, _MAX_DENSITY_BINS = 5, 500
 
 
 def _complete(dataframe: DataFrame, label_col: str, prediction_col: str, chart: str) -> DataFrame:
-    """The rows with a number in both columns, after checking the columns.
+    """The rows with a number in both columns, as the doubles ``actual`` and ``predicted``.
+
+    Rows where either column is null or NaN are left out; infinite values are kept, for
+    the caller to count.
 
     Raises:
         ValidationError: If ``dataframe`` is not a DataFrame or a column is not numeric.
@@ -33,16 +39,38 @@ def _complete(dataframe: DataFrame, label_col: str, prediction_col: str, chart: 
     """
     validate_columns(dataframe, label_col, prediction_col)
     require_numeric(dataframe, chart, label_col, prediction_col)
-    return dataframe.where(
-        _frames.present(F.col(label_col)) & _frames.present(F.col(prediction_col))
+    actual = _frames.column(label_col)
+    predicted = _frames.column(prediction_col)
+    return dataframe.where(_frames.present(actual) & _frames.present(predicted)).select(
+        actual.cast("double").alias("actual"), predicted.cast("double").alias("predicted")
     )
 
 
 def _no_rows(chart: str, label_col: str, prediction_col: str) -> ValidationError:
     return ValidationError(
         f"Cannot build the {chart}: no row has both a '{label_col}' and a "
-        f"'{prediction_col}' value."
+        f"'{prediction_col}' value (null, NaN and infinite values are left out)."
     )
+
+
+def _range_width(low: float, high: float, n_bins: int, chart: str) -> float:
+    """The width of one of ``n_bins`` equal bins over [low, high].
+
+    Raises:
+        ValidationError: If ``high - low`` overflows a double, so no bin edge is finite.
+    """
+    span = high - low
+    if not math.isfinite(span):
+        raise ValidationError(
+            f"Cannot build the {chart}: the values span [{low:.4g}, {high:.4g}], a range "
+            "too wide to bin in double precision."
+        )
+    return span / n_bins
+
+
+def _left_out(infinite: int) -> str:
+    """The subtitle note on rows with an infinite value, or ``""`` when there are none."""
+    return f"; {infinite} rows with an infinite value left out" if infinite else ""
 
 
 def _bin_index(value: Column, low: float, width: float, n_bins: int) -> Column:
@@ -61,26 +89,30 @@ def _residual_table(
 ) -> Tuple[DataFrame, Dict[str, Any]]:
     """The residual histogram as a small DataFrame, and the residuals' statistics.
 
-    Runs one global aggregate (count, min, max, mean, standard deviation of
-    ``label - prediction``); the histogram is returned unevaluated: one row per non-empty
-    bin (``bin``, ``count``), at most ``n_bins`` rows.
+    Runs one global aggregate (count, min, max, mean, standard deviation of the finite
+    ``label - prediction``, and the number of rows whose residual is infinite or
+    undefined, such as ``inf - inf``); the histogram is returned unevaluated: one row per
+    non-empty bin (``bin``, ``count``), at most ``n_bins`` rows.
 
     Returns:
-        ``(histogram, stats)``, where ``stats`` holds ``count``, ``low``, ``high``,
-        ``mean``, ``std`` (0.0 for a single row) and ``width`` (0.0 when every residual
-        is equal).
+        ``(histogram, stats)``, where ``stats`` holds ``count``, ``infinite`` (the rows
+        left out for an infinite residual), ``low``, ``high``, ``mean``, ``std`` (0.0 for
+        a single row) and ``width`` (0.0 when every residual is equal).
 
     Raises:
-        ValidationError: If an input is invalid or no row has both values.
+        ValidationError: If an input is invalid, no row has a finite residual, or the
+            residuals span a range too wide to bin.
         ColumnNotFoundError: If a column is missing.
     """
+    difference = F.col("actual") - F.col("predicted")
     rows = _complete(dataframe, label_col, prediction_col, "residuals").select(
-        (F.col(label_col).cast("double") - F.col(prediction_col).cast("double")).alias("residual")
+        F.when(_frames.finite(difference), difference).alias("residual")
     )
     residual = F.col("residual")
     row = _frames.summary(
         rows.select(
             F.count(residual).alias("count"),
+            F.sum(residual.isNull().cast("long")).alias("infinite"),
             F.min(residual).alias("low"),
             F.max(residual).alias("high"),
             F.mean(residual).alias("mean"),
@@ -94,13 +126,18 @@ def _residual_table(
     low, high = float(row["low"]), float(row["high"])
     stats: Dict[str, Any] = {
         "count": count,
+        "infinite": int(row["infinite"]),
         "low": low,
         "high": high,
         "mean": float(row["mean"]),
         "std": float(row["std"]) if row["std"] is not None else 0.0,
-        "width": (high - low) / n_bins,
+        "width": _range_width(low, high, n_bins, "residuals chart"),
     }
-    histogram = rows.groupBy(_bin_index(residual, low, stats["width"], n_bins).alias("bin")).count()
+    histogram = (
+        rows.where(residual.isNotNull())
+        .groupBy(_bin_index(residual, low, stats["width"], n_bins).alias("bin"))
+        .count()
+    )
     return histogram, stats
 
 
@@ -116,7 +153,9 @@ def residuals(
 
     ``n_bins`` equal-width bins span the smallest to the largest residual; when every
     residual is equal there is one bar. The mean and standard deviation are in the
-    subtitle. Rows with a null or NaN label or prediction are left out and not counted.
+    subtitle. Rows with a null or NaN label or prediction are left out and not counted;
+    so are rows whose residual is infinite or undefined (an infinite label or
+    prediction), and the subtitle says how many.
 
     Args:
         dataframe: PySpark DataFrame with the label and prediction columns, such as the
@@ -133,7 +172,8 @@ def residuals(
     Raises:
         DependencyError: If plotly is not installed (``pip install smallaxe[viz]``).
         ValidationError: If ``dataframe`` is not a DataFrame, a column is not numeric,
-            ``n_bins`` or ``title`` is invalid, or no row has both values.
+            ``n_bins`` or ``title`` is invalid, no row has a finite residual, or the
+            residuals span a range too wide to bin in double precision.
         ColumnNotFoundError: If a column is missing.
 
     Example:
@@ -164,7 +204,7 @@ def residuals(
         y_title="Rows",
         subtitle=(
             f"mean {_style.number(stats['mean'])}, standard deviation "
-            f"{_style.number(stats['std'])}, {stats['count']} rows"
+            f"{_style.number(stats['std'])}, {stats['count']} rows" + _left_out(stats["infinite"])
         ),
     )
     fig.add_trace(
@@ -190,28 +230,31 @@ def _density_table(
 ) -> Tuple[DataFrame, Dict[str, Any]]:
     """The 2-D binned counts as a small DataFrame, and the shared range.
 
-    One global aggregate finds the joint range of label and prediction; the counts are
-    returned unevaluated: one row per non-empty cell (``x_bin`` for the label, ``y_bin``
-    for the prediction, ``count``), at most ``n_bins * n_bins`` rows.
+    One global aggregate finds the joint range of the finite labels and predictions and
+    counts the rows with an infinite value; the counts are returned unevaluated: one row
+    per non-empty cell (``x_bin`` for the label, ``y_bin`` for the prediction,
+    ``count``), at most ``n_bins * n_bins`` rows.
 
     Returns:
-        ``(cells, stats)``, where ``stats`` holds ``count``, ``low``, ``high`` and
-        ``width`` (0.0 when both columns hold one and the same value).
+        ``(cells, stats)``, where ``stats`` holds ``count``, ``infinite`` (the rows left
+        out for an infinite value), ``low``, ``high`` and ``width`` (0.0 when both
+        columns hold one and the same value).
 
     Raises:
-        ValidationError: If an input is invalid or no row has both values.
+        ValidationError: If an input is invalid, no row has two finite values, or the
+            values span a range too wide to bin.
         ColumnNotFoundError: If a column is missing.
     """
-    actual = F.col(label_col).cast("double")
-    predicted = F.col(prediction_col).cast("double")
-    rows = _complete(dataframe, label_col, prediction_col, "actual_vs_predicted").select(
-        actual.alias("actual"), predicted.alias("predicted")
-    )
+    rows = _complete(dataframe, label_col, prediction_col, "actual_vs_predicted")
+    both_finite = _frames.finite(F.col("actual")) & _frames.finite(F.col("predicted"))
+    actual = F.when(both_finite, F.col("actual"))
+    predicted = F.when(both_finite, F.col("predicted"))
     row = _frames.summary(
         rows.select(
-            F.count("actual").alias("count"),
-            F.least(F.min("actual"), F.min("predicted")).alias("low"),
-            F.greatest(F.max("actual"), F.max("predicted")).alias("high"),
+            F.count(actual).alias("count"),
+            F.sum((~both_finite).cast("long")).alias("infinite"),
+            F.least(F.min(actual), F.min(predicted)).alias("low"),
+            F.greatest(F.max(actual), F.max(predicted)).alias("high"),
         ),
         "Cannot build the actual-vs-predicted chart",
     )
@@ -219,12 +262,17 @@ def _density_table(
     if count == 0:
         raise _no_rows("actual-vs-predicted chart", label_col, prediction_col)
     low, high = float(row["low"]), float(row["high"])
-    width = (high - low) / n_bins
-    cells = rows.groupBy(
-        _bin_index(F.col("actual"), low, width, n_bins).alias("x_bin"),
-        _bin_index(F.col("predicted"), low, width, n_bins).alias("y_bin"),
-    ).count()
-    return cells, {"count": count, "low": low, "high": high, "width": width}
+    width = _range_width(low, high, n_bins, "actual-vs-predicted chart")
+    cells = (
+        rows.where(both_finite)
+        .groupBy(
+            _bin_index(F.col("actual"), low, width, n_bins).alias("x_bin"),
+            _bin_index(F.col("predicted"), low, width, n_bins).alias("y_bin"),
+        )
+        .count()
+    )
+    infinite = int(row["infinite"])
+    return cells, {"count": count, "infinite": infinite, "low": low, "high": high, "width": width}
 
 
 def actual_vs_predicted(
@@ -240,7 +288,8 @@ def actual_vs_predicted(
     Both axes share ``n_bins`` equal-width bins over the joint range of the two columns,
     so a perfect model lies on the diagonal. Each cell counts the rows in it (one
     ``groupBy`` over the two bin indices); when both columns hold a single value there is
-    one cell. Rows with a null or NaN label or prediction are left out.
+    one cell. Rows with a null or NaN label or prediction are left out; so are rows with
+    an infinite value, and the subtitle says how many.
 
     Args:
         dataframe: PySpark DataFrame with the label and prediction columns, such as the
@@ -259,7 +308,8 @@ def actual_vs_predicted(
     Raises:
         DependencyError: If plotly is not installed (``pip install smallaxe[viz]``).
         ValidationError: If ``dataframe`` is not a DataFrame, a column is not numeric,
-            ``n_bins`` or ``title`` is invalid, or no row has both values.
+            ``n_bins`` or ``title`` is invalid, no row has two finite values, or the
+            values span a range too wide to bin in double precision.
         ColumnNotFoundError: If a column is missing.
 
     Example:
@@ -283,7 +333,7 @@ def actual_vs_predicted(
         default_title="Actual vs predicted",
         x_title=f"Actual ({_style.text(label_col)})",
         y_title=f"Predicted ({_style.text(prediction_col)})",
-        subtitle=f"{stats['count']} rows in {size} x {size} bins",
+        subtitle=f"{stats['count']} rows in {size} x {size} bins" + _left_out(stats["infinite"]),
     )
     fig.add_trace(
         go.Heatmap(

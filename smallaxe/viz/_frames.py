@@ -1,8 +1,9 @@
-"""The Spark side every DataFrame chart shares: which rows count, and collecting a summary.
+"""The Spark side every DataFrame chart shares: columns, which rows count, collecting.
 
 A chart aggregates in Spark and collects only the aggregated rows. :func:`collect` is
 the one place a chart's aggregate reaches the driver; its callers hand it a grouped or
-globally aggregated DataFrame, never row-level data.
+globally aggregated DataFrame, never row-level data. Charts name the user's columns with
+:func:`column`, so a name holding a dot or a backtick is read as that one column.
 """
 
 from typing import List, Optional
@@ -12,7 +13,25 @@ from pyspark.sql import functions as F
 
 from smallaxe import _checks
 
-__all__ = ["present", "collect", "summary"]
+__all__ = ["column", "present", "finite", "collect", "summary"]
+
+_INFINITY = float("inf")
+
+
+def column(name: str) -> Column:
+    """The top-level column called ``name``, quoted.
+
+    ``F.col("a.y")`` would read a struct field ``y`` of a column ``a``; the quoted name
+    (``"`a.y`"``, a backtick doubled inside it) is the column ``a.y`` itself, which is
+    what :func:`smallaxe.metrics._checks.validate_columns` found in ``dataframe.columns``.
+
+    Args:
+        name: A column name, as ``dataframe.columns`` lists it.
+
+    Returns:
+        The column expression.
+    """
+    return F.col("`" + name.replace("`", "``") + "`")
 
 
 def present(column: Column) -> Column:
@@ -26,6 +45,18 @@ def present(column: Column) -> Column:
     """
     as_double = column.cast("double")
     return as_double.isNotNull() & ~F.isnan(as_double)
+
+
+def finite(column: Column) -> Column:
+    """True where ``column`` holds a finite number: present and not +/- infinity.
+
+    Args:
+        column: A numeric column expression.
+
+    Returns:
+        A boolean column expression.
+    """
+    return present(column) & (F.abs(column.cast("double")) != F.lit(_INFINITY))
 
 
 def collect(table: DataFrame, context: str, limit: Optional[int] = None) -> List[Row]:
