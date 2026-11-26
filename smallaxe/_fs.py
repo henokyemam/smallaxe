@@ -10,10 +10,17 @@ the same layer Spark uses — keeps metadata and model together and makes
 
 Only core ``java.io`` classes are used (always on the Spark classpath); no
 optional dependencies.
+
+This module is the one place smallaxe reaches the JVM (``spark._jvm``,
+``spark._jsc``), so it needs a classic Spark session: the default of ``pip install
+pyspark`` on Spark 3.3 to 4.x. A Spark Connect session has no JVM on the client; with
+one active, every function here raises ``ConfigurationError`` (see :func:`_spark`).
 """
 
 import json
 from typing import Any, Dict, List, Tuple, Type
+
+from smallaxe.exceptions import ConfigurationError
 
 __all__ = [
     "join",
@@ -28,13 +35,35 @@ __all__ = [
 ]
 
 
+_CONNECT_UNSUPPORTED = "smallaxe needs a classic Spark session; Spark Connect is not supported"
+
+
+def _is_spark_connect(spark: Any) -> bool:
+    """Whether ``spark`` is a Spark Connect session rather than a classic (JVM) one.
+
+    Reads the module of the session's class (``pyspark.sql.connect.session`` for
+    Connect) instead of an ``isinstance`` check, so it never imports
+    ``pyspark.sql.connect``, which PySpark 3.3 does not have and which needs the
+    Connect client's dependencies (grpcio, pyarrow) where it does exist.
+    """
+    module = type(spark).__module__ or ""
+    return module == "pyspark.sql.connect" or module.startswith("pyspark.sql.connect.")
+
+
 def _spark() -> Any:
-    """Return the active SparkSession (models are always fit through Spark)."""
+    """Return the active classic SparkSession (models are always fit through Spark).
+
+    Raises:
+        ConfigurationError: If the session is a Spark Connect session, which has no JVM
+            to reach the Hadoop FileSystem through.
+    """
     from pyspark.sql import SparkSession
 
     spark = SparkSession.getActiveSession()
     if spark is None:
         spark = SparkSession.builder.getOrCreate()
+    if _is_spark_connect(spark):
+        raise ConfigurationError(_CONNECT_UNSUPPORTED)
     return spark
 
 

@@ -13,7 +13,7 @@ smallaxe/
 │   ├── _artifact.py           # Versioned metadata.json header of every saved artifact
 │   ├── _checks.py             # Shared argument checks (a DataFrame, a list of column names)
 │   ├── _config.py             # Internal config state
-│   ├── _fs.py                 # Hadoop FileSystem IO (local, dbfs:/, s3://, hdfs://)
+│   ├── _fs.py                 # Hadoop FileSystem IO (local, dbfs:/, s3://, hdfs://); the one JVM access point (refuses Spark Connect)
 │   ├── _warn.py               # caller_stacklevel(): warnings point at the user's line
 │   ├── auto/                  # AutomatedTraining: every algorithm on one split, best kept
 │   │   └── _automated.py

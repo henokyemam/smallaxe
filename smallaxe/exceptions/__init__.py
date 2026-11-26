@@ -161,6 +161,9 @@ class DependencyError(SmallaxeError):
 class ConfigurationError(SmallaxeError):
     """Raised when a global setting (``set_verbosity``, ``set_seed``) gets an invalid value.
 
+    Also raised when smallaxe needs the JVM (every ``save`` and ``load``) and the active
+    session is a Spark Connect session: smallaxe needs a classic Spark session.
+
     Args:
         message: The message, used when ``setting`` and ``value`` are not both given.
         setting: The setting's name (``"verbosity"``).

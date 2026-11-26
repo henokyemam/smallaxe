@@ -122,6 +122,15 @@ deprecated in 0.11"), naming its replacement. In 1.0 a removed name raises
   of `smallaxe.training.mixins` stay in their modules' `__all__`, but the README's
   stability policy leaves them out of the public API: their members are public as
   members of `Model`, `Regressor` and `Classifier`.
+- **A Spark Connect session raises `ConfigurationError`.** smallaxe needs a classic
+  (JVM, py4j) Spark session: every `save` and `load` reads and writes through the
+  Hadoop FileSystem on the JVM (`smallaxe._fs`). With a Spark Connect session active
+  (`SparkSession.builder.remote(...)`, `spark.api.mode=connect`, or `pyspark-connect`
+  installed on Spark 4), those calls now raise `ConfigurationError("smallaxe needs a
+  classic Spark session; Spark Connect is not supported")` instead of an
+  `AttributeError` from `spark._jvm`. The check reads the session's class module, so it
+  never imports `pyspark.sql.connect`; a classic session is unaffected. Spark Connect
+  is out of scope for 1.0.
 - **`fit`, `set_params` and `clone` return the model's own type.** They were typed as
   the base class; now `regressors.xgboost().fit(...)` is typed as a `Regressor`, so
   chained calls type-check. Runtime behaviour is unchanged.
