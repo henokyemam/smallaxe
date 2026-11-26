@@ -385,8 +385,8 @@ algorithms are installed in the current environment, with install hints for the 
 | Session | classic | classic only (no Spark Connect) |
 | Random Forest | ✓ | ✓ |
 | XGBoost | ✓ | ✓ tested on 4.3 with xgboost 3.3 or later |
-| LightGBM (SynapseML) | ✓ Scala **2.12 only** (no Scala 2.13 build for Spark 3) | not supported |
-| CatBoost (catboost-spark) | ✓ Spark 3.5, Scala **2.12 or 2.13** | not validated |
+| LightGBM (SynapseML) | ✓ Scala **2.12 only** (no Scala 2.13 build for Spark 3) | ✓ validated on Spark 4.0 (Scala 2.13) |
+| CatBoost (catboost-spark) | ✓ Spark 3.5, Scala **2.12 or 2.13** | ✓ validated on Spark 4.0 (Scala 2.13) |
 | OS | Linux | Linux |
 
 CI tests every pair below on Linux with Java 11, plus Java 8 with PySpark 3.3 and
@@ -414,7 +414,9 @@ Python 3.11, and all of them Java 17 or later; pip installs an older PySpark on 
 older Python. smallaxe declares Python up to 3.12, so Python 3.13 and 3.14, which
 PySpark 4 supports, are not covered. On PySpark 4.1 and 4.2 only Python 3.12 is tested
 (3.10 and 3.11 are supported by PySpark but not run in CI). The Spark 4 CI legs install
-pandas below 3, the range Spark 4.0 – 4.3 document (4.2 and 4.3 warn on pandas 3).
+pandas below 3, the range Spark 4.0 – 4.3 document (4.2 and 4.3 warn on pandas 3); one
+more leg runs PySpark 4.3 on Python 3.12 with pandas 3, which a plain `pip install`
+resolves on Python 3.11 and later.
 
 - **Classic sessions only.** smallaxe reads and writes artifacts through the Hadoop
   FileSystem on the JVM, so it needs a classic Spark session: the default of
@@ -434,13 +436,15 @@ pandas below 3, the range Spark 4.0 – 4.3 document (4.2 and 4.3 warn on pandas
   PySpark 4 support; it needs Python 3.12 or later. `smallaxe[xgboost]` keeps its
   floor (1.7.0) for Spark 3.3, so on Spark 4 install `xgboost>=3.3`. CI runs XGBoost on
   PySpark 4.3 with Python 3.12.
-- **LightGBM** is supported on Spark 3.x only. SynapseML publishes builds for Spark 4.0
-  and 4.1 (`com.microsoft.azure:synapseml_2.13:1.1.3-spark4.0` / `-spark4.1`, from the
-  `https://mmlspark.blob.core.windows.net/maven` repository), but smallaxe has not been
-  validated with them, and there is none for Spark 4.2 or 4.3.
-- **CatBoost** is validated on Spark 3.5 only. catboost-spark publishes
-  `ai.catboost:catboost-spark_4.0_2.13` and `catboost-spark_4.1_2.13` (1.2.10) for Spark
-  4.0 and 4.1, not validated with smallaxe; there is none for Spark 4.2 or 4.3.
+- **LightGBM** on Spark 4 is validated on Spark 4.0 (Databricks Runtime 17.3 LTS, Scala
+  2.13) with `com.microsoft.azure:synapseml-lightgbm_2.13:1.1.3-spark4.0`, from the
+  `https://mmlspark.azureedge.net/maven` repository. SynapseML also publishes a
+  `-spark4.1` build, not validated with smallaxe; there is none for Spark 4.2 or 4.3.
+- **CatBoost** on Spark 4 is validated on Spark 4.0 (Databricks Runtime 17.3 LTS, Scala
+  2.13) with `ai.catboost:catboost-spark_4.0_2.13:1.2.10`. catboost-spark also publishes
+  `catboost-spark_4.1_2.13`, not validated with smallaxe; there is none for Spark 4.2 or
+  4.3.
+- LightGBM and CatBoost are validated on Databricks, not in CI, on Spark 3.5 and 4.0.
 
 CI also runs the oldest versions smallaxe allows (Python 3.8, PySpark 3.3.0 and the
 lowest allowed version of every other runtime dependency), and XGBoost on PySpark 3.3

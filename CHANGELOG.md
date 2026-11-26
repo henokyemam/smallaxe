@@ -296,18 +296,18 @@ deprecated in 0.11"), naming its replacement. In 1.0 a removed name raises
   CI adds legs on Java 17 for PySpark 4.0 on Python 3.9, 3.10, 3.11 and 3.12, 4.1 and
   4.2 on Python 3.12, and 4.3 on Python 3.11 and 3.12, plus 4.3 / Python 3.12 on Java
   25, and runs XGBoost on 4.3 / Python 3.12; the Spark 4 legs install pandas below 3,
-  as Spark 4 documents. Spark 4 needs Java 17 or later and Python 3.9 or later (4.1 and
+  as Spark 4 documents, except one 4.3 / Python 3.12 leg that installs pandas 3, which a
+  plain `pip install` resolves on Python 3.11 and later. Spark 4 needs Java 17 or later and Python 3.9 or later (4.1 and
   4.2: 3.10; 4.3: 3.11). Limits:
   - **Classic sessions only.** Spark Connect is not supported; a Connect session raises
     `ConfigurationError` (see "Changed").
   - **XGBoost** needs xgboost 3.3 or later on Spark 4, the first release that declares
     PySpark 4 support (Python 3.12+). The `smallaxe[xgboost]` floor stays 1.7.0, for
     Spark 3.3: an extra cannot depend on the installed PySpark.
-  - **LightGBM is supported on Spark 3.x only.** SynapseML publishes Spark 4.0 and 4.1
-    builds (`synapseml_2.13:1.1.3-spark4.0` / `-spark4.1`) that smallaxe has not
-    validated; nothing in smallaxe blocks them.
-  - **CatBoost** is validated on Spark 3.5 only; catboost-spark publishes
-    `catboost-spark_4.0_2.13` and `catboost-spark_4.1_2.13` (1.2.10), not validated.
+  - **LightGBM and CatBoost** are validated on Spark 4.0 only (Databricks Runtime 17.3
+    LTS, Scala 2.13), with `synapseml-lightgbm_2.13:1.1.3-spark4.0` and
+    `catboost-spark_4.0_2.13:1.2.10`. Their Spark 4.1 builds are not validated, and
+    neither publishes one for Spark 4.2 or 4.3.
   - Python 3.13 and 3.14, which PySpark 4 supports, are not declared (smallaxe stays
     `<3.13`).
 

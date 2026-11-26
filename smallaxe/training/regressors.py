@@ -110,8 +110,8 @@ def lightgbm(**params: Any) -> Regressor:
     """Create an unfitted LightGBM regressor.
 
     Needs SynapseML's LightGBM: ``pip install smallaxe[lightgbm]`` and the SynapseML Spark
-    package on the session's classpath. Supported on Spark 3.x only: SynapseML's Spark 4
-    builds are not validated with smallaxe (nothing stops you from trying one).
+    package on the session's classpath. Validated on Spark 3.5 and on Spark 4.0 (SynapseML's
+    ``-spark4.0`` build).
 
     Args:
         **params: Parameter values by name; every parameter left out keeps its default.

@@ -1,10 +1,10 @@
 """LightGBM via SynapseML (``pip install smallaxe[lightgbm]`` plus the Spark package).
 
-smallaxe supports LightGBM on Spark 3.x only, where SynapseML publishes Scala 2.12 builds.
-On Databricks the ``com.microsoft.azure:synapseml-lightgbm_2.12`` Maven library also puts
-the ``synapse.ml`` Python package on the path. SynapseML's Spark 4.0 and 4.1 builds
-(``synapseml_2.13:<version>-spark4.0`` / ``-spark4.1``) are not validated with smallaxe;
-nothing here blocks them.
+Validated on Spark 3.5 with ``com.microsoft.azure:synapseml-lightgbm_2.12`` (SynapseML
+has no Scala 2.13 build for Spark 3) and on Spark 4.0 with
+``synapseml-lightgbm_2.13:<version>-spark4.0``. On Databricks the Maven library also puts
+the ``synapse.ml`` Python package on the path. SynapseML's ``-spark4.1`` build is not
+validated with smallaxe; nothing here blocks it.
 """
 
 from typing import Any, List, Optional

@@ -152,7 +152,7 @@ asserts on figure data and on the row counts of the private aggregation helpers.
 - Python 3.8 - 3.12 (3.11 needs PySpark 3.4 or later; 3.12 needs PySpark 3.5 or later; PySpark 3.3 supports 3.8 - 3.10; PySpark 4.0 needs 3.9+, 4.1 and 4.2 3.10+, 4.3 3.11+)
 - PySpark 3.3 - 3.5 and 4.0 - 4.3 (`pyspark>=3.3,<4.4`; the bound is one past the newest Spark minor with CI legs, which `tests/test_packaging.py` checks against `ci.yml`)
 - Java 11 for Spark 3 (CI also tests Java 8 with PySpark 3.3 and Java 17 with PySpark 3.5); Java 17 for Spark 4 (CI also tests Java 25 with PySpark 4.3)
-- A classic (JVM, py4j) Spark session. Spark Connect is not supported: `smallaxe._fs`, the one place that reaches the JVM, raises `ConfigurationError` on a Connect session. On Spark 4, LightGBM is not supported and CatBoost not validated; XGBoost needs xgboost 3.3+
+- A classic (JVM, py4j) Spark session. Spark Connect is not supported: `smallaxe._fs`, the one place that reaches the JVM, raises `ConfigurationError` on a Connect session. On Spark 4, LightGBM and CatBoost are validated on Spark 4.0 only (Databricks, not CI); XGBoost needs xgboost 3.3+
 - Linux (CI runs on Ubuntu only)
 
 ### Setup

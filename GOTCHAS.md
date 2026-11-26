@@ -337,10 +337,11 @@ Spark 4 changes three things a user can trip over:
   `AttributeError` from `spark._jvm`.
 - **Algorithms.** Random Forest is built in. XGBoost needs xgboost 3.3 or later on
   Spark 4 (the `smallaxe[xgboost]` floor, 1.7.0, is for Spark 3.3; pip picks 3.3 or later
-  on Python 3.12, an older xgboost on 3.10 and 3.11). LightGBM is supported on Spark 3.x
-  only: SynapseML's Spark 4.0 and 4.1 builds (`synapseml_2.13:<version>-spark4.0` /
-  `-spark4.1`) are not validated with smallaxe, and nothing blocks them in code. CatBoost
-  publishes `catboost-spark_4.0_2.13` and `catboost-spark_4.1_2.13`, also not validated.
+  on Python 3.12, an older xgboost on 3.10 and 3.11). LightGBM and CatBoost are validated
+  on Spark 4.0 (Databricks Runtime 17.3 LTS, Scala 2.13) with
+  `synapseml-lightgbm_2.13:1.1.3-spark4.0` and `catboost-spark_4.0_2.13:1.2.10`. Their
+  Spark 4.1 builds are not validated with smallaxe, and neither publishes one for Spark
+  4.2 or 4.3; nothing blocks them in code.
 
 **Breaking.** No. Without ANSI mode every result is the one smallaxe 0.x gave on
 Spark 3, except where integer arithmetic overflowed: `mape` on integer columns and
