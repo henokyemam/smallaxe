@@ -126,11 +126,13 @@ class FakeFits:
 def fake_fits(monkeypatch):
     """Replace ``Model.fit``: no Spark training; scores (or an error) per algorithm.
 
-    LightGBM and CatBoost get fake estimator modules, so all four algorithms are
-    available and constructible.
+    Every algorithm whose package is not installed gets fake estimator modules, so all
+    four algorithms are available and constructible (CI's main test job has no xgboost).
     """
-    for name in ("lightgbm", "catboost"):
-        install_fake_modules(monkeypatch, algorithm.get(name))
+    for name in ALL:
+        record = algorithm.get(name)
+        if not record.available():
+            install_fake_modules(monkeypatch, record)
     fakes = FakeFits()
 
     def fit(self, dataframe, label_col, feature_cols=None, exclude_cols=None, **options):
