@@ -639,18 +639,37 @@ def _bad_fits(frame):
     }
 
 
-def test_bad_fit_arguments_raise_before_anything_trains(reg_df, no_training):
-    failures = []
-    for name, (call, expected) in _bad_fits(reg_df).items():
-        try:
-            call()
-        except expected:
-            continue
-        except Exception as exc:  # noqa: BLE001 - collected and reported below
-            failures.append(f"{name}: {type(exc).__name__}: {exc}"[:300])
-        else:
-            failures.append(f"{name}: raised nothing")
-    assert failures == []
+_BAD_FIT_NAMES = [
+    "validation none",
+    "validation list",
+    "missing label",
+    "label None",
+    "not a DataFrame",
+    "pandas DataFrame",
+    "string label",
+    "missing feature",
+    "feature_cols string",
+    "exclude_cols int",
+    "test_size 2",
+    "n_folds 1",
+    "fold_key int",
+    "fold_key missing",
+    "cache_strategy bogus",
+    "null labels",
+    "param value of the wrong type",
+    "malformed space",
+]
+
+
+def test_every_bad_fit_case_is_parametrized(reg_df):
+    assert sorted(_bad_fits(reg_df)) == sorted(_BAD_FIT_NAMES)
+
+
+@pytest.mark.parametrize("name", _BAD_FIT_NAMES)
+def test_bad_fit_arguments_raise_before_anything_trains(reg_df, no_training, name):
+    call, expected = _bad_fits(reg_df)[name]
+    with pytest.raises(expected):
+        call()
 
 
 def test_unfitted_access_raises_model_not_fitted(reg_df):
