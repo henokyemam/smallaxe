@@ -711,3 +711,32 @@ def test_predict_proba_is_binary_only(reg_df, fake_fits):
 def test_the_package_exports_automated_training_only():
     assert auto.__all__ == ["AutomatedTraining"]
     assert auto.AutomatedTraining is AutomatedTraining
+
+
+def test_an_empty_dataframe_is_rejected_before_anything_trains(reg_df, no_training):
+    trained = AutomatedTraining("simple_regression", algorithms=["random_forest", "xgboost"])
+    with pytest.raises(ValidationError, match="no rows"):
+        trained.fit(reg_df.limit(0), "y", ["x"])
+
+
+def test_a_fit_that_raises_discards_the_previous_results(reg_df, fake_fits):
+    fake_fits.outcomes.update(random_forest={"rmse": 1.0})
+    trained = AutomatedTraining("simple_regression", algorithms=["random_forest"])
+    trained.fit(reg_df, "y", ["x"])
+    assert trained.best_algorithm == "random_forest"
+    with pytest.raises(ValidationError):
+        trained.fit(reg_df, "y", ["x"], validation="none")
+    for read in (
+        lambda: trained.best_model,
+        lambda: trained.best_score,
+        lambda: trained.comparison,
+        lambda: trained.models,
+    ):
+        with pytest.raises(ModelNotFittedError):
+            read()
+
+
+@pytest.mark.parametrize("metric", ["", 0, [], {}])
+def test_a_falsy_metric_is_not_read_as_the_default(metric):
+    with pytest.raises(ValidationError, match="Invalid metric"):
+        AutomatedTraining("simple_regression", metric=metric)

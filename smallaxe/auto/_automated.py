@@ -439,6 +439,13 @@ class AutomatedTraining:
                 missing.
             DependencyError: If none of the requested algorithms is installed.
         """
+        # A fit that raises must not leave an earlier run's results looking current.
+        self._rows = []
+        self._models = {}
+        self._best_algorithm = None
+        self._best_score = None
+        self._split_seed = None
+
         _checks.require_dataframe(dataframe)
         if not isinstance(validation, str) or validation not in _SCORED_VALIDATIONS:
             raise ValidationError(

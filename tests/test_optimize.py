@@ -133,6 +133,28 @@ class TestOptimizeArgumentValidation:
                 early_stopping_rounds=0,
             )
 
+    @pytest.mark.parametrize("metric", ["", 0])
+    def test_falsy_metric_is_not_read_as_the_default(self, regression_df, metric):
+        with pytest.raises(ValidationError, match="Invalid metric"):
+            optimize.run(
+                regressors.random_forest(seed=42),
+                regression_df,
+                label_col="target",
+                param_space={"max_depth": [3, 5]},
+                metric=metric,
+                max_evals=2,
+            )
+
+    def test_empty_dataframe_raises(self, regression_df):
+        with pytest.raises(ValidationError, match="no rows"):
+            optimize.run(
+                regressors.random_forest(seed=42),
+                regression_df.limit(0),
+                label_col="target",
+                param_space={"max_depth": [3, 5]},
+                max_evals=2,
+            )
+
     def test_invalid_metric_raises(self, regression_df):
         model = regressors.random_forest(seed=42)
         with pytest.raises(ValidationError, match="Invalid metric"):
