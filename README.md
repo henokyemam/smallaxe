@@ -272,7 +272,7 @@ viz.precision_recall_curve(probabilities, label_col="churn", n_bins=500)
 
 `confusion_matrix` works for binary and multiclass labels (at most 50 classes); the
 curves are for binary 0/1 labels and accept the `predict_proba` vector or a numeric
-column holding the positive-class score. Their legend carries the exact
+column (of any numeric type) holding the positive-class score. Their legend carries the exact
 `smallaxe.metrics.auc_roc` / `auc_pr`, not the binned approximation.
 
 Regression, on the output of `predict`:
@@ -296,7 +296,8 @@ viz.model_comparison(
 `model_comparison` sorts best first by the metric's direction (`rmse`, `mse`, `mae`,
 `mape` and `log_loss` are minimised, the others maximised), highlights the best bar and
 names the models whose score is undefined. Rows with a null or NaN label, prediction or
-score are left out of every chart.
+score are left out of every chart. The regression charts also leave out rows with an
+infinite value (they cannot be binned) and say how many in the subtitle.
 
 ## Upgrading to 1.0
 

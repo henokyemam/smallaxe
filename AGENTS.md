@@ -131,7 +131,11 @@ aggregate: one `groupBy(label, prediction).count()` for `confusion_matrix` (at m
 rows), a global aggregate and then one `groupBy` over value bins for `residuals` (at most
 `n_bins` rows) and `actual_vs_predicted` (at most `n_bins * n_bins`). Every collect goes
 through `smallaxe/viz/_frames.py`; never call `collect()` / `toPandas()` on row-level
-data. The curves' area is the exact `smallaxe.metrics.auc_roc` / `auc_pr`.
+data, and name the user's columns with `_frames.column(name)` (quoted, so `a.y` is one
+column, not struct access). The curves' area is the exact `smallaxe.metrics.auc_roc` /
+`auc_pr`, computed on the frame `_scored` projects to `label` / `score` (a numeric score
+cast to double, which Spark's evaluator requires). The regression charts bin only finite
+values (`_frames.finite`) and note the rows left out.
 `feature_importances` reads `Model.feature_importances` (a Pipeline's model step), and
 `model_comparison` reads `AutomatedTraining.comparison` or a mapping of scores, ordered
 with `optimize.py`'s `_higher_is_better` (the one orientation rule). plotly is imported

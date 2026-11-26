@@ -263,7 +263,8 @@ deprecated in 0.11"), naming its replacement. In 1.0 a removed name raises
   Every chart aggregates in Spark and collects only the aggregated rows, bounded by its
   bins or classes, never by the row count; each returns a `plotly.graph_objects.Figure`
   (it never calls `show()`) and takes `title=` to replace its default title. Rows with a
-  null or NaN value in a column a chart reads are left out and not counted.
+  null or NaN value in a column a chart reads are left out and not counted. Column names
+  holding a dot or a backtick are read as that one column, not as struct access.
   - `confusion_matrix(dataframe, label_col, prediction_col="predict_label", *,
     normalize=False, title=None)`: one `groupBy(label, prediction).count()`, binary or
     multiclass. Actual classes on y, predicted on x, ascending; every class in either
@@ -272,8 +273,8 @@ deprecated in 0.11"), naming its replacement. In 1.0 a removed name raises
     classes raises `ValidationError` (a continuous label passed by mistake).
   - `roc_curve(dataframe, label_col, probability_col="probability", *, n_bins=200,
     title=None)` and `precision_recall_curve(...)` (same arguments): binary 0/1 labels;
-    the score is element 1 of `predict_proba`'s vector (length 2) or a numeric column in
-    [0, 1]. One `groupBy` over `n_bins` equal-width score bins (an int in [10, 10000]),
+    the score is element 1 of `predict_proba`'s vector (length 2) or a numeric column of
+    any numeric type (float, int, decimal: cast to double for the exact area) in [0, 1]. One `groupBy` over `n_bins` equal-width score bins (an int in [10, 10000]),
     accumulated on the driver from the highest bin down; ROC runs from (0, 0) to (1, 1)
     with a chance diagonal, PR starts at recall 0 with the first point's precision (as
     Spark's curve does) and shows the positive-rate baseline. The legend and title carry
@@ -284,10 +285,13 @@ deprecated in 0.11"), naming its replacement. In 1.0 a removed name raises
     title=None)`: a histogram of `label - prediction` in `n_bins` (an int in [1, 10000])
     equal-width bins between the smallest and largest residual (one bar when they are
     equal), with a line at 0 and the mean and standard deviation in the subtitle.
+    Rows whose residual is infinite or undefined (an infinite label or prediction) are
+    left out and counted in the subtitle; a range too wide to bin in double precision
+    raises `ValidationError`.
   - `actual_vs_predicted(dataframe, label_col, prediction_col="predict_label", *,
     n_bins=50, title=None)`: a 2-D density heatmap, actual on x and predicted on y, in
     `n_bins` x `n_bins` (an int in [5, 500]) equal-width cells over the joint range, with
-    the y = x line.
+    the y = x line. Rows with an infinite value are left out and counted in the subtitle.
   - `feature_importances(model, *, top_n=20, title=None)`: horizontal bars of a fitted
     model's `feature_importances` (or a fitted Pipeline's model step), largest at the
     top, the `top_n` largest. An unfitted model raises `ModelNotFittedError`; an
