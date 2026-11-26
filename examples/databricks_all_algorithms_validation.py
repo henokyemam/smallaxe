@@ -1,9 +1,9 @@
 # Databricks notebook source
 # MAGIC %md
-# MAGIC # smallaxe — all-algorithm validation on real mixed-type data
+# MAGIC # smallaxe: all-algorithm validation on real mixed-type data
 # MAGIC
-# MAGIC Exercises every algorithm (Random Forest, XGBoost, LightGBM, CatBoost) on real datasets that contain **both
-# MAGIC numeric and categorical** features:
+# MAGIC Exercises every algorithm (Random Forest, XGBoost, LightGBM, CatBoost) on real datasets that contain both
+# MAGIC numeric and categorical features:
 # MAGIC
 # MAGIC | Task | Dataset | Rows | Numeric | Categorical | Missing values |
 # MAGIC |---|---|---|---|---|---|
@@ -12,30 +12,36 @@
 # MAGIC | Binary (2nd) | Adult Census Income (Kaggle `uciml`) | 32,561 | 6 | 8 | `workclass`, `occupation`, `native_country` (categorical) |
 # MAGIC | Multiclass (7) | Covertype, 60k sample, one-hot groups collapsed to categoricals | 60,000 | 10 | 2 (4 + 40 levels) | none |
 # MAGIC
-# MAGIC Checks per algorithm: full `Pipeline` (Imputer → Scaler → Encoder → model), row preservation,
+# MAGIC Checks per algorithm: full `Pipeline` (Imputer, Scaler, Encoder, model), row preservation,
 # MAGIC smallaxe metrics cross-checked against scikit-learn, `train_test` / `kfold` validation,
 # MAGIC `predict_proba`, `feature_importances`, save/load round-trip, `search.optimize`, label encoding,
-# MAGIC plus probes for known gaps (pipeline persistence, native categoricals, null-row dropping, unseen categories).
+# MAGIC preprocessing and pipeline save/load on `dbfs:/`, the 1.0 API, `AutomatedTraining` and `smallaxe.viz`,
+# MAGIC plus checks of behaviour that was once a gap (pipeline persistence, CatBoost without an Encoder,
+# MAGIC rows with nulls, unlisted columns, unseen categories, the caller's cache).
 # MAGIC
-# MAGIC **Runtime requirement:** DBR 16.4 LTS **Scala 2.12** (Spark 3.5.2) with Maven libraries
-# MAGIC `com.microsoft.azure:synapseml-lightgbm_2.12:1.1.3` and `ai.catboost:catboost-spark_3.5_2.12:1.2.10`.
-# MAGIC SynapseML has no Scala 2.13 build for Spark 3, and smallaxe supports LightGBM on Spark 3.x only
-# MAGIC (its Spark 4 builds are not validated), so this is the only LTS runtime that can host all four
+# MAGIC Validated runtimes, each on a cluster with 2 fixed m5d.8xlarge workers. Install the Maven libraries
+# MAGIC of your runtime on the cluster before running the notebook:
+# MAGIC
+# MAGIC | Runtime | LightGBM Maven library | CatBoost Maven library | Validation |
+# MAGIC |---|---|---|---|
+# MAGIC | DBR 16.4 LTS (Spark 3.5.2, Scala 2.12, Python 3.12.3) | `com.microsoft.azure:synapseml-lightgbm_2.12:1.1.3` | `ai.catboost:catboost-spark_3.5_2.12:1.2.10` | 2026-11-26, the 1.0 API (commit e41b8eb): 122 of 122 checks passed for the four algorithms on regression, binary and multiclass, including Pipeline save/load on `dbfs:/` |
+# MAGIC | DBR 17.3 LTS (Spark 4.0.0, Scala 2.13.16, Python 3.12.3) | `com.microsoft.azure:synapseml-lightgbm_2.13:1.1.3-spark4.0`, from the repository `https://mmlspark.azureedge.net/maven` | `ai.catboost:catboost-spark_4.0_2.13:1.2.10` | 2026-11-26, commit a7c8ce7, xgboost 3.4.1: all 124 library checks passed for the four algorithms, including AutomatedTraining ranking all four on binary and regression |
+# MAGIC
+# MAGIC SynapseML has no Scala 2.13 build for Spark 3, so on Spark 3 only a Scala 2.12 runtime can host all four
 # MAGIC algorithms at once.
 # MAGIC
-# MAGIC **Install:** the next cell installs smallaxe from `main` (it contains the SynapseML/CatBoost
-# MAGIC compatibility fix); switch to `smallaxe` from PyPI once a release after 0.8.0 is published. The
-# MAGIC `synapseml` pip version must match the `synapseml-lightgbm` jar version.
+# MAGIC Install: the next cell installs smallaxe from the repository's default branch (`main`), with xgboost,
+# MAGIC hyperopt, the `synapseml` Python package and plotly. The `synapseml` pip version must match the
+# MAGIC `synapseml-lightgbm` jar version.
 # MAGIC
-# MAGIC **Cluster must be fixed-size** (no autoscaling): CatBoost-Spark training fails when executors join or leave mid-fit.
+# MAGIC Use a fixed-size cluster (no autoscaling): the validation runs used one, and autoscaling is not validated.
 # MAGIC
 # MAGIC Result statuses: PASS, FAIL, SKIP (dependency missing), BLOCKED (a prerequisite check failed), and GAP
-# MAGIC (a known library gap listed in `Goals.md`; the probe passes once the gap is fixed). Validated on
-# MAGIC 2026-09-30 (16.4 LTS Scala 2.12, 2 fixed m5d.8xlarge workers): 62 PASS / 21 GAP / 1 FAIL.
+# MAGIC (a section G check failed: behaviour that was once a library gap is back).
 
 # COMMAND ----------
 
-# MAGIC %pip install --quiet "git+https://github.com/henokyemam/smallaxe.git@main" xgboost hyperopt synapseml==1.1.3
+# MAGIC %pip install --quiet "git+https://github.com/henokyemam/smallaxe.git@main" xgboost hyperopt synapseml==1.1.3 plotly
 
 # COMMAND ----------
 
@@ -66,11 +72,14 @@ from sklearn import metrics as SK
 
 import smallaxe
 from smallaxe import metrics as M
-from smallaxe.exceptions import DependencyError, ValidationError
+from smallaxe.exceptions import DependencyError, PreprocessingError, ValidationError
 from smallaxe.pipeline import Pipeline
 from smallaxe.preprocessing import Encoder, Imputer, Scaler
 from smallaxe.search import optimize
 from smallaxe.training import classifiers, regressors
+
+# Probe: optional packages already imported right after importing smallaxe.
+_PRELOADED = sorted(m for m in ("xgboost", "synapse", "catboost_spark") if m in sys.modules)
 
 SEED = 42
 smallaxe.set_seed(SEED)
@@ -849,7 +858,7 @@ for algo in ALGOS:
 
 # COMMAND ----------
 
-# MAGIC %md ## G. Known-gap probes (from code review; GAP = gap confirmed, PASS = works)
+# MAGIC %md ## G. Behaviour that was once a gap: pipeline persistence, CatBoost without an Encoder, nulls, unlisted columns, unseen categories, caching (GAP = it is back)
 
 # COMMAND ----------
 
@@ -879,8 +888,8 @@ step(
     "G_gaps",
     "random_forest",
     "binary",
-    "Pipeline(save/load) with Encoder+model, /dbfs path",
-    lambda: pipeline_persist_probe(f"/dbfs/tmp/smallaxe_validation/{RUN_ID}/pipe_fuse"),
+    "Pipeline(save/load) with Encoder+model, dbfs:/ path",
+    lambda: pipeline_persist_probe(f"{ART}/pipe_dbfs"),
     probe=True,
 )
 
@@ -918,15 +927,18 @@ def catboost_native_categorical_probe():
             ("model", make("catboost", BIN)),
         ]
     )
-    pipe.fit(BIN.train, label_col=BIN.label, numerical_cols=BIN.num, categorical_cols=BIN.cat)
-    return f"predicted {pipe.predict(BIN.test).count()} rows with raw string categoricals"
+    try:
+        pipe.fit(BIN.train, label_col=BIN.label, numerical_cols=BIN.num, categorical_cols=BIN.cat)
+    except PreprocessingError as exc:
+        return f"PreprocessingError as designed: {str(exc)[:120]}"
+    raise AssertionError("CatBoost pipeline without an Encoder did not raise PreprocessingError")
 
 
 step(
     "G_gaps",
     "catboost",
     "binary",
-    "native categoricals (Pipeline without Encoder)",
+    "CatBoost pipeline without Encoder raises PreprocessingError",
     catboost_native_categorical_probe,
     probe=True,
 )
@@ -1072,6 +1084,258 @@ step(
     cache_side_effect_probe,
     probe=True,
 )
+
+# COMMAND ----------
+
+# MAGIC %md ## H. Lazy optional imports, XGBoost rounds, preprocessing save/load on dbfs:/, unseen categories
+
+# COMMAND ----------
+
+
+def lazy_import_probe():
+    assert _PRELOADED == [], f"imported by `import smallaxe...` alone: {_PRELOADED}"
+    return "importing smallaxe imported no optional package"
+
+
+def import_order_probe():
+    order = list(sys.modules)
+    present = {m: order.index(m) for m in ("catboost_spark", "synapse.ml.lightgbm") if m in order}
+    assert len(present) == 2, f"not both imported: {present}"
+    assert present["catboost_spark"] < present["synapse.ml.lightgbm"], present
+    return f"catboost_spark imported before synapse.ml.lightgbm: {present}"
+
+
+def xgb_rounds_probe():
+    model = make("xgboost", REG, n_estimators=7)
+    model.fit(REG.train.select(*REG.num, REG.label), label_col=REG.label)
+    rounds = model._spark_model.get_booster().num_boosted_rounds()
+    assert rounds == 7, f"asked for 7 rounds, booster has {rounds}"
+    return f"{rounds} boosted rounds"
+
+
+def same_rows(a, b):
+    return a.exceptAll(b).count() == 0 and b.exceptAll(a).count() == 0
+
+
+def prep_persist_probe(name, build, fit_kwargs):
+    step_ = build()
+    step_.fit(BIN.train, **fit_kwargs)
+    path = f"{ART}/prep_{name}"
+    step_.save(path)
+    files = [f.name for f in dbutils.fs.ls(path)]
+    assert "metadata.json" in files, files
+    loaded = type(step_).load(path)
+    before, after = step_.transform(BIN.test), loaded.transform(BIN.test)
+    assert before.columns == after.columns, "column mismatch after load"
+    assert after.count() == BIN.n_test
+    assert same_rows(before, after), "transform differs after load"
+    return f"saved to {path} ({files}), identical transform on {BIN.n_test} rows"
+
+
+step("H_imports_prep", "-", "-", "import smallaxe imports no optional package", lazy_import_probe)
+step("H_imports_prep", "-", "-", "JVM packages imported catboost first", import_order_probe)
+step("H_imports_prep", "xgboost", "simple_regression", "n_estimators=7 trains 7 rounds", xgb_rounds_probe)
+step(
+    "H_imports_prep", "-", "binary", "Imputer save/load on dbfs:/",
+    lambda: prep_persist_probe(
+        "imputer",
+        lambda: Imputer(numerical_strategy="median", categorical_strategy="most_frequent"),
+        dict(numerical_cols=BIN.num, categorical_cols=BIN.cat),
+    ),
+)
+step(
+    "H_imports_prep", "-", "binary", "Scaler save/load on dbfs:/",
+    lambda: prep_persist_probe(
+        "scaler", lambda: Scaler(method="standard"), dict(numerical_cols=BIN.num)
+    ),
+)
+for _method in ("onehot", "label"):
+    step(
+        "H_imports_prep", "-", "binary", f"Encoder({_method}) save/load on dbfs:/",
+        lambda _method=_method: prep_persist_probe(
+            f"encoder_{_method}",
+            lambda: Encoder(method=_method, handle_rare="keep"),
+            dict(categorical_cols=BIN.cat),
+        ),
+    )
+
+
+def unseen_probe(method):
+    col = BIN.cat[0]
+    enc = Encoder(method=method, handle_rare="keep").fit(BIN.train, categorical_cols=[col])
+    novel = BIN.test.limit(50).withColumn(col, F.lit("__never_seen_value__"))
+    out = enc.transform(novel)
+    assert out.count() == 50, "rows dropped"
+    if method == "label":
+        assert out.filter(F.col(col).isNull()).count() == 0, "unseen category became null"
+        return f"unseen -> index {out.select(col).distinct().collect()}"
+    hits = out.agg(F.sum(f"{col}_UNKNOWN")).first()[0]
+    assert hits == 50.0, f"{col}_UNKNOWN sum {hits}"
+    return f"{col}_UNKNOWN = 1.0 on all 50 rows"
+
+
+for _method in ("onehot", "label"):
+    step(
+        "H_imports_prep", "-", "binary", f"Encoder({_method}) unseen category",
+        lambda _method=_method: unseen_probe(_method),
+    )
+
+# COMMAND ----------
+
+# MAGIC %md ## I. Versioned artifacts: pipeline save/load on dbfs:/ for every algorithm, model header, evaluate
+
+# COMMAND ----------
+
+
+def pipeline_roundtrip_probe(algo, ds):
+    if (algo, ds.key) not in PIPES:
+        raise Blocked(f"section A {algo}/{ds.key} pipeline failed")
+    pipe = PIPES[(algo, ds.key)]
+    path = f"{ART}/pipelines/{algo}_{ds.key}"
+    pipe.save(path)
+    meta = json.loads(dbutils.fs.head(f"{path}/metadata.json", 1024 * 1024))
+    assert meta["kind"] == "pipeline" and isinstance(meta["format_version"], int), meta
+    names = [f.name for f in dbutils.fs.ls(path)]
+    assert not any(n.endswith(".pkl") for n in names), names
+    loaded = smallaxe.load(path)
+    assert type(loaded) is Pipeline
+    cols = ["predict_label"]
+    before, after = pipe.predict(ds.test).select(*cols), loaded.predict(ds.test).select(*cols)
+    assert after.count() == ds.n_test, "row count changed"
+    assert same_rows(before, after), "predictions differ after load"
+    a, b = pipe.evaluate(ds.test), loaded.evaluate(ds.test)
+    assert set(a) == set(b)
+    for k in a:
+        assert (a[k] is None and b[k] is None) or close(a[k], b[k], 1e-9), (k, a[k], b[k])
+    key = "r2" if ds.task == "simple_regression" else "accuracy"
+    return {"path": path, "files": names, key: round(a[key], 5)}
+
+
+for algo in ALGOS:
+    for ds in [REG, BIN, MULTI]:
+        step(
+            "I_artifacts", algo, ds.key, "Pipeline save -> smallaxe.load on dbfs:/, identical predict + evaluate",
+            lambda algo=algo, ds=ds: pipeline_roundtrip_probe(algo, ds),
+        )
+
+
+def model_header_probe(algo, ds):
+    path = f"{ART}/models/{algo}_{ds.key}"
+    meta = json.loads(dbutils.fs.head(f"{path}/metadata.json", 1024 * 1024))
+    assert meta["kind"] == "model" and meta["format_version"] == 1, {k: meta.get(k) for k in ("kind", "format_version")}
+    loaded = smallaxe.load_model(path)
+    scores = loaded.evaluate(ds.test_p)
+    return {
+        "smallaxe_version": meta["smallaxe_version"],
+        "algorithm_package_version": meta["metadata"].get("algorithm_package_version"),
+        "n_metrics": len(scores),
+    }
+
+
+for algo in ALGOS:
+    step(
+        "I_artifacts", algo, "binary", "model artifact header + smallaxe.load_model + evaluate",
+        lambda algo=algo: model_header_probe(algo, BIN),
+    )
+
+# COMMAND ----------
+
+# MAGIC %md ## J. The 1.0 API: removed names are gone, new spellings work on every algorithm
+
+# COMMAND ----------
+
+
+def removed_names_probe():
+    import smallaxe.training as T
+
+    gone = [n for n in ("Regressors", "Classifiers", "XGBoostRegressor", "BaseModel") if hasattr(T, n)]
+    assert not gone, f"still exported: {gone}"
+    assert not hasattr(smallaxe, "set_cache_strategy") and not hasattr(smallaxe, "set_spark_session")
+    m = regressors.random_forest()
+    assert not hasattr(m, "set_param")
+    try:
+        m.fit(df=REG.train_p, label_col=REG.label)
+    except TypeError:
+        pass
+    else:
+        raise AssertionError("fit(df=...) was accepted")
+    return "deprecated names removed; df= rejected"
+
+
+def new_spelling_probe(algo):
+    m = make(algo, BIN).set_params(n_estimators=20)
+    assert m.get_param("n_estimators") == 20
+    m.fit(dataframe=BIN.train_p, label_col=BIN.label, feature_cols=BIN.feats)
+    scores = m.evaluate(dataframe=BIN.test_p)
+    n = m.predict(dataframe=BIN.test_p).count()
+    assert n == BIN.n_test
+    return {"auc_roc": round(scores["auc_roc"], 4), "algorithms": classifiers.algorithms()}
+
+
+def pipeline_validation_probe(algo):
+    pipe = Pipeline(prep_steps() + [("model", make(algo, BIN))])
+    pipe.fit(
+        BIN.train, label_col=BIN.label, numerical_cols=BIN.num, categorical_cols=BIN.cat,
+        validation="train_test", test_size=0.2,
+    )
+    s = pipe.validation_scores
+    assert s and s["validation_type"] == "train_test", s
+    return {"auc_roc": round(s["auc_roc"], 4)}
+
+
+step("J_api", "-", "-", "removed names are gone", removed_names_probe)
+for algo in ALGOS:
+    step("J_api", algo, "binary", "set_params + dataframe= on fit/evaluate/predict",
+         lambda algo=algo: new_spelling_probe(algo))
+    step("J_api", algo, "binary", "Pipeline.fit(validation='train_test') -> validation_scores",
+         lambda algo=algo: pipeline_validation_probe(algo))
+
+# COMMAND ----------
+
+# MAGIC %md ## K. AutomatedTraining and smallaxe.viz on every algorithm
+
+# COMMAND ----------
+
+
+def auto_probe(task, ds, metric):
+    from smallaxe.auto import AutomatedTraining
+
+    fixed = {a: {"n_estimators": 20} for a in ALGOS}
+    auto = AutomatedTraining(task, metric=metric, params=fixed, seed=7)
+    auto.fit(ds.train_p, ds.label, feature_cols=ds.feats)
+    table = auto.comparison
+    status = dict(zip(table["algorithm"], table["status"]))
+    assert all(v == "ok" for v in status.values()), table[["algorithm", "status", "error"]].to_dict("records")
+    assert auto.predict(ds.test_p).count() == ds.n_test
+    return {"best": auto.best_algorithm, "scores": {r["algorithm"]: round(r[metric], 4) for _, r in table.iterrows()}}
+
+
+def viz_probe(algo):
+    from smallaxe import viz
+
+    m = fitted(algo, BIN)
+    scored = m.predict(BIN.test_p)
+    if "probability" not in scored.columns:
+        scored = m.predict_proba(scored)
+    figs = [
+        viz.confusion_matrix(scored, BIN.label),
+        viz.roc_curve(scored, BIN.label),
+        viz.precision_recall_curve(scored, BIN.label),
+        viz.feature_importances(m),
+    ]
+    r = fitted(algo, REG)
+    pred = r.predict(REG.test_p)
+    figs += [viz.residuals(pred, REG.label), viz.actual_vs_predicted(pred, REG.label)]
+    return {"figures": len(figs), "json_bytes": sum(len(f.to_json()) for f in figs)}
+
+
+step("K_auto_viz", "-", "binary", "AutomatedTraining trains and ranks all four algorithms",
+     lambda: auto_probe("binary", BIN, "auc_roc"))
+step("K_auto_viz", "-", "regression", "AutomatedTraining trains and ranks all four algorithms",
+     lambda: auto_probe("simple_regression", REG, "rmse"))
+for algo in ALGOS:
+    step("K_auto_viz", algo, "binary+regression", "six viz charts build and serialise",
+         lambda algo=algo: viz_probe(algo))
 
 # COMMAND ----------
 
