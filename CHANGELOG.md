@@ -230,6 +230,14 @@ deprecated in 0.11"), naming its replacement. In 1.0 a removed name raises
   signature changed. mypy 2 checks Python 3.10 and later only, so the configured target
   is 3.10; the code stays Python 3.8-compatible and is tested there.
 
+### Fixed
+
+- **Fitting a model on a DataFrame with no rows raises `ValidationError`.** `Model.fit`,
+  `optimize.run` and `AutomatedTraining.fit` used to pass the empty
+  data to the estimator, which failed with its own error (XGBoost: `IndexError`).
+- **`optimize.run(metric="")` raises `ValidationError`.** A falsy metric that is not
+  `None` (`""`, `0`) was read as "use the default metric".
+
 ### Added
 
 - **`smallaxe.auto.AutomatedTraining`**: one call that trains every installed algorithm

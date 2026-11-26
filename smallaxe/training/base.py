@@ -126,8 +126,8 @@ def _check_training_data(
         counts null and NaN per feature column.
 
     Raises:
-        ValidationError: On null labels, or on missing or infinite features the
-            model cannot accept.
+        ValidationError: On a DataFrame with no rows, on null labels, or on missing or
+            infinite features the model cannot accept.
     """
     types = {field.name: field.dataType for field in dataframe.schema.fields}
 
@@ -148,6 +148,8 @@ def _check_training_data(
     row = dataframe.select(*aggregates).first()
     assert row is not None  # an aggregate without GROUP BY always yields one row
     n_samples = int(row["__n__"])
+    if n_samples == 0:
+        raise ValidationError("The training DataFrame has no rows.")
     missing_counts = {col: int(row[f"__missing__{col}"] or 0) for col in feature_cols}
 
     if row["__label_null__"]:
