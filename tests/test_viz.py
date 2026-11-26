@@ -19,7 +19,6 @@ from pathlib import Path
 import plotly.graph_objects as go
 import pytest
 from pyspark.ml.linalg import Vectors
-from pyspark.sql import DataFrame
 from pyspark.sql import functions as F
 from pyspark.sql.types import DoubleType, StructField, StructType
 
@@ -209,7 +208,10 @@ def test_no_chart_collects_more_rows_than_its_bins(
 ):
     """Every collect a chart runs returns a bounded number of rows; none uses toPandas."""
     collected = []
-    original = DataFrame.collect
+    # The concrete class: on Spark 4 a classic DataFrame is a subclass of
+    # pyspark.sql.DataFrame with its own collect and toPandas.
+    frame_class = type(scored_df)
+    original = frame_class.collect
 
     def recording_collect(self):
         rows = original(self)
@@ -219,8 +221,8 @@ def test_no_chart_collects_more_rows_than_its_bins(
     def no_to_pandas(self):
         raise AssertionError("a chart called toPandas()")
 
-    monkeypatch.setattr(DataFrame, "collect", recording_collect)
-    monkeypatch.setattr(DataFrame, "toPandas", no_to_pandas)
+    monkeypatch.setattr(frame_class, "collect", recording_collect)
+    monkeypatch.setattr(frame_class, "toPandas", no_to_pandas)
 
     viz.roc_curve(scored_df, "label", "score", n_bins=10)
     viz.precision_recall_curve(scored_df, "label", "score", n_bins=10)
