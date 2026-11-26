@@ -68,7 +68,9 @@ mypy smallaxe
 
 ## Pitfalls
 
-- Tests require Java (11; CI also uses 8 and 17) installed for Spark to run
+- Tests require Java installed for Spark to run: 11 for Spark 3 (CI also uses 8 and 17), 17 or later for Spark 4 (CI uses 17 and 25)
+- smallaxe needs a classic Spark session; on Spark Connect, save and load raise `ConfigurationError` (the check is in `smallaxe/_fs.py`, the one place that reaches the JVM)
+- Spark 4 turns ANSI SQL mode on by default; smallaxe's results must be the same with it on or off and it never sets the option (`tests/test_ansi_mode.py`)
 - The `spark_session` fixture uses `local[2]` — don't assume distributed behavior in tests
 - Feature columns are auto-inferred from numeric columns if not explicitly passed — be aware of this when debugging unexpected behavior
 - CatBoost and LightGBM have additional native library dependencies beyond the Python packages

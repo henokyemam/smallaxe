@@ -187,7 +187,8 @@ class TestArtifactLayout:
         assert "metadata.json" in files
         assert "steps/0_imputer/metadata.json" in files
         assert "steps/1_scaler/metadata.json" in files
-        assert "steps/1_scaler/spark_model/metadata/part-00000" in files
+        # Spark 3 names the ML metadata file part-00000; Spark 4 adds a suffix.
+        assert [f for f in files if f.startswith("steps/1_scaler/spark_model/metadata/part-00000")]
         assert "steps/2_encoder/metadata.json" in files
         assert "steps/3_model/metadata.json" in files
         metadata = _read_json(path / "metadata.json")

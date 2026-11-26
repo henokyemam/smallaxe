@@ -13,7 +13,8 @@ from pyspark.sql import DataFrame
 from pyspark.sql import functions as F
 
 from smallaxe import _checks
-from smallaxe.metrics._checks import require_numeric, require_rows
+from smallaxe._sql import quoted
+from smallaxe.metrics._checks import exact_integers, require_numeric, require_rows, widened
 from smallaxe.metrics._checks import validate_columns as _validate_columns
 
 __all__ = ["mse", "rmse", "mae", "r2", "mape"]
@@ -185,11 +186,26 @@ def mape(
     require_numeric(dataframe, "mape", label_col, prediction_col)
     require_rows(dataframe, "mape")
 
-    label = F.col(label_col)
+    # Spark 3's default arithmetic, made independent of ANSI mode. Integer columns as
+    # exact decimals: ``label - prediction`` and ``abs(label)`` cannot overflow (ANSI
+    # mode raises; without it the value wraps). Any other columns through try_subtract /
+    # try_divide, which give Spark 3's default result (null on a decimal overflow) where
+    # ANSI mode's operators raise. Zero labels are filtered out first, so the division
+    # never sees a zero denominator.
+    integers = exact_integers(dataframe, label_col, prediction_col)
+    if integers is not None:
+        label, prediction = integers
+        error = F.abs(label - prediction).cast("double") / F.abs(label).cast("double")
+    else:
+        # An integer beside a float column is subtracted as a float, as Spark 3's
+        # default mode does (widened); the denominator keeps the label's own type.
+        label_sql, prediction_sql = widened(dataframe, label_col, prediction_col)
+        error = F.expr(
+            f"try_divide(abs(try_subtract({label_sql}, {prediction_sql})), "
+            f"abs({quoted(label_col)}))"
+        )
     result = (
-        dataframe.filter(label != 0)
-        .select(F.avg(F.abs(label - F.col(prediction_col)) / F.abs(label)).alias("mape"))
-        .first()
+        dataframe.filter(F.col(quoted(label_col)) != 0).select(F.avg(error).alias("mape")).first()
     )
     assert result is not None  # an aggregate without GROUP BY always yields one row
 

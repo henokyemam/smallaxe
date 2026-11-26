@@ -3,6 +3,8 @@
 ``catboost_spark`` only becomes importable once the ``ai.catboost:catboost-spark``
 JVM package is on the Spark classpath, so availability is re-probed on every call.
 Training fails if executors join or leave mid-fit, so use a fixed-size cluster.
+Validated on Spark 3.5 (``catboost-spark_3.5_2.12``) and Spark 4.0
+(``catboost-spark_4.0_2.13``); ``catboost-spark_4.1_2.13`` is not validated with smallaxe.
 """
 
 import collections

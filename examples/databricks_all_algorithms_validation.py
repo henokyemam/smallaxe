@@ -19,8 +19,9 @@
 # MAGIC
 # MAGIC **Runtime requirement:** DBR 16.4 LTS **Scala 2.12** (Spark 3.5.2) with Maven libraries
 # MAGIC `com.microsoft.azure:synapseml-lightgbm_2.12:1.1.3` and `ai.catboost:catboost-spark_3.5_2.12:1.2.10`.
-# MAGIC SynapseML has no Scala 2.13 build, and smallaxe pins `pyspark<4.0`, so this is the only LTS
-# MAGIC runtime that can host all four algorithms at once.
+# MAGIC SynapseML has no Scala 2.13 build for Spark 3, and smallaxe supports LightGBM on Spark 3.x only
+# MAGIC (its Spark 4 builds are not validated), so this is the only LTS runtime that can host all four
+# MAGIC algorithms at once.
 # MAGIC
 # MAGIC **Install:** the next cell installs smallaxe from `main` (it contains the SynapseML/CatBoost
 # MAGIC compatibility fix); switch to `smallaxe` from PyPI once a release after 0.8.0 is published. The

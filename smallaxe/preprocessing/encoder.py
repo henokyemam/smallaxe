@@ -261,7 +261,12 @@ class Encoder:
             map_args.append(F.lit(int(idx)))
 
         if map_args:
-            lookup = F.create_map(*map_args)[source.cast("string")]
+            # Look a key up only when the map holds it: with ANSI mode on, Spark 3.3 raises
+            # on a missing key (later releases return null), so an unseen category would
+            # fail. The guard gives null, then the fallback index, in every mode.
+            categories = F.create_map(*map_args)
+            key = source.cast("string")
+            lookup = F.when(F.array_contains(F.map_keys(categories), key), categories[key])
         else:
             lookup = F.lit(None).cast("int")
 

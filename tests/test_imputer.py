@@ -3,7 +3,6 @@
 from decimal import Decimal
 
 import pytest
-from pyspark.sql import DataFrame
 from pyspark.sql import functions as F
 
 from smallaxe.exceptions import (
@@ -421,7 +420,8 @@ class TestImputerNonStringCategorical:
         def broken_first(self):
             raise RuntimeError("gateway down")
 
-        monkeypatch.setattr(DataFrame, "first", broken_first)
+        # The concrete class: on Spark 4 a classic DataFrame subclasses pyspark.sql.DataFrame.
+        monkeypatch.setattr(type(df_int_category), "first", broken_first)
         with pytest.raises(RuntimeError, match="gateway down"):
             Imputer(categorical_strategy="3").fit(df_int_category, categorical_cols=["code"])
 

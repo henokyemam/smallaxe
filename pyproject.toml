@@ -33,14 +33,20 @@ classifiers = [
 # modules it imports, on each supported Python. Each has a ">=" floor: the test-lowest
 # CI job installs every floor exactly (.github/scripts/floor_pins.py).
 dependencies = [
-    "pyspark>=3.3,<4.0",
+    # Spark 3.3 to 3.5 and 4.0 to 4.3, each tested in CI (.github/workflows/ci.yml): the
+    # upper bound is one past the newest minor with CI legs. Spark 4 needs Python 3.9+
+    # (4.1 and 4.2: 3.10+, 4.3: 3.11+) and Java 17+, and pip resolves an older PySpark on
+    # older Pythons. smallaxe needs a classic (JVM) session, the default of this package.
+    "pyspark>=3.3,<4.4",
     # smallaxe catches py4j's Py4JJavaError; PySpark 3.3.0 pins py4j 0.10.9.5.
     "py4j>=0.10.9.5",
     # Imported by smallaxe.search and by pyspark.ml. 1.17.3: the first release with
     # Python 3.8 wheels, and it has numpy.random.default_rng.
     "numpy>=1.17.3",
     # Imported by smallaxe.auto (the comparison table), and by pyspark.ml.functions
-    # (vector_to_array) from PySpark 3.4.
+    # (vector_to_array) from PySpark 3.4. The floor is Spark 3's; Spark 4 documents
+    # pandas >=2.0,<3 (4.0) and >=2.2,<3 (4.1 to 4.3) for its pandas features, which
+    # smallaxe does not use; CI installs pandas<3 on its Spark 4 legs and pandas 3 on one.
     "pandas>=1.0.0",
     # hyperopt 0.3.0 needs Python 3.10, so 0.2.7 is the newest release before it. 0.2.x
     # imports pkg_resources, which setuptools 82 removed; 0.3.0 does not.
@@ -49,11 +55,16 @@ dependencies = [
     # pkg_resources for hyperopt 0.2.7. 56.0.0: the setuptools Python 3.8 bundles.
     "setuptools>=56.0.0,<82; python_version < '3.10'",
     # PySpark 3.x imports distutils, which Python 3.12 removed; setuptools provides it.
+    # PySpark 4 does not (it ships pyspark.loose_version); a marker cannot name the
+    # PySpark version, so Spark 4 installs on 3.12 get setuptools too, unused.
     "setuptools>=68; python_version >= '3.12'",
 ]
 
 [project.optional-dependencies]
 xgboost = [
+    # The floor serves Spark 3.3 (xgboost 3.1 and later need PySpark 3.4). On Spark 4 use
+    # xgboost 3.3 or later, the first to declare PySpark 4 (pyspark>=4.0, Python 3.12+);
+    # an extra cannot depend on the installed PySpark, so the README says so instead.
     "xgboost>=1.7.0",
     # xgboost.spark imports scikit-learn and pandas (xgboost's own pandas floor is 1.2)
     # and runs its pandas UDFs through pyarrow.
@@ -62,10 +73,16 @@ xgboost = [
     "pyarrow>=4.0",
 ]
 lightgbm = [
+    # SynapseML's JVM package is installed separately (spark.jars.packages). Validated on
+    # Spark 3.5 (synapseml-lightgbm_2.12) and Spark 4.0 (synapseml-lightgbm_2.13:
+    # <version>-spark4.0); the -spark4.1 build is not validated with smallaxe.
     "lightgbm>=3.3.0",
     "synapseml>=1.0.0",
 ]
 catboost = [
+    # catboost-spark's JVM package is installed separately: ai.catboost:catboost-spark_<spark
+    # minor>_<scala>. Validated on Spark 3.5 (catboost-spark_3.5_2.12) and Spark 4.0
+    # (catboost-spark_4.0_2.13); catboost-spark_4.1_2.13 is not validated with smallaxe.
     "catboost>=1.1.0",
 ]
 # Visualization: smallaxe.viz imports plotly lazily, when a chart is drawn. The charts

@@ -14,6 +14,7 @@ from pyspark.sql.types import (
 )
 
 from smallaxe import _artifact, _checks, _fs
+from smallaxe._sql import integral_from_string
 from smallaxe.exceptions import (
     ColumnNotFoundError,
     ModelNotFittedError,
@@ -43,10 +44,36 @@ def _present(col: str) -> Column:
     return F.when(F.isnan(F.col(col)), None).otherwise(F.col(col))
 
 
+# A fill for an exact numeric column must keep its value when cast to the column's type;
+# comparing both as this decimal catches truncation ("1.5" -> 1) and rounding.
+_EXACT = DecimalType(38, 18)
+
+
+def _typed_fill(data_type: DataType) -> Column:
+    """The string column ``fill`` cast to ``data_type`` as Spark 3's default cast does.
+
+    The same value in and out of ANSI mode, null where the cast fails: an integer
+    column's fill goes through :func:`smallaxe._sql.integral_from_string` (ANSI mode's
+    cast rejects ``"7.0"``, which the default one reads as 7), any other type through
+    ``try_cast`` (a SQL function from Spark 3.2), which reads the strings the default
+    cast reads and is null for the others where ANSI mode's cast raises.
+    """
+    if isinstance(data_type, IntegralType):
+        return integral_from_string(F.col("fill"), data_type)
+    return F.expr(f"try_cast(fill AS {data_type.simpleString()})")
+
+
 def _fill_literal(fill: str, data_type: DataType) -> Column:
-    """The categorical fill value as a literal of the column's own type."""
+    """The categorical fill value as a literal of the column's own type.
+
+    ``fit`` checked that the cast succeeds and keeps the value (``_check_categorical_fill``),
+    so neither cast raises in either ANSI mode, and both give the value Spark 3's default
+    cast gives.
+    """
     if isinstance(data_type, StringType):
         return F.lit(fill)
+    if isinstance(data_type, IntegralType):
+        return integral_from_string(F.lit(fill), data_type)
     return F.lit(fill).cast(data_type)
 
 
@@ -55,11 +82,6 @@ def _categorical_value(col: str, data_type: DataType) -> Column:
     if isinstance(data_type, (FloatType, DoubleType)):
         return F.when(F.isnan(column_ref(col)), None).otherwise(column_ref(col))
     return column_ref(col)
-
-
-# A fill for an exact numeric column must keep its value when cast to the column's type;
-# comparing both as this decimal catches truncation ("1.5" -> 1) and rounding.
-_EXACT = DecimalType(38, 18)
 
 
 class Imputer:
@@ -290,22 +312,27 @@ class Imputer:
         """
         if isinstance(data_type, StringType):
             return
-        typed = _fill_literal(fill, data_type)
         exact = isinstance(data_type, (IntegralType, DecimalType))
         try:
+            fills = dataframe.sparkSession.range(1).select(F.lit(fill).alias("fill"))
             row = _checks.one_row(
-                dataframe.sparkSession.range(1).select(
-                    typed.isNotNull().alias("cast_ok"),
+                fills.select(
+                    _typed_fill(data_type).alias("typed"),
+                    F.expr(f"try_cast(fill AS {_EXACT.simpleString()})").alias("exact_fill"),
+                ).selectExpr(
+                    "typed IS NOT NULL AS cast_ok",
+                    # ``=``, not ``<=>``: a fill too wide for ``_EXACT`` (null) is rejected.
                     (
-                        (typed.cast(_EXACT) == F.lit(fill).cast(_EXACT)).alias("exact")
+                        f"try_cast(typed AS {_EXACT.simpleString()}) = exact_fill"
                         if exact
-                        else F.lit(True).alias("exact")
-                    ),
+                        else "true"
+                    )
+                    + " AS exact",
                 )
             )
             valid = bool(row["cast_ok"]) and bool(row["exact"])
-        except _fs.jvm_error_types():  # an invalid cast fails under ANSI mode, or for
-            valid = False  # complex types at analysis
+        except _fs.jvm_error_types():  # a cast to a complex type fails at analysis
+            valid = False
         if not valid:
             raise ValidationError(
                 f"Cannot impute categorical column '{col}' of type "

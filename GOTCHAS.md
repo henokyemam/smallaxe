@@ -310,6 +310,49 @@ numeric and boolean columns gives no warning. A search gives at most one warning
 **Open.** Decide whether v1 requires explicit `feature_cols` (or a strict mode) when the
 DataFrame has non-numeric columns.
 
+## 8. Spark 4: ANSI mode, classic sessions only, and which algorithms run
+
+**Status (1.0, unreleased):** implemented on `v1/spark4`. The ANSI part is checked
+locally on Spark 3.5 with the option on and off; the Spark 4 CI legs have not run yet.
+
+Spark 4 changes three things a user can trip over:
+
+- **ANSI SQL mode is on by default** (`spark.sql.ansi.enabled`). An invalid cast, a
+  division by zero, an integer overflow, a boolean compared with a number, or (Spark 3.3)
+  a missing map key raises instead of giving null. Before the fix, binary `accuracy` /
+  `precision` / `recall` on a boolean label failed at analysis, on a string label holding
+  a non-number at run time; `mape` on integer columns near the integer limits raised;
+  `Imputer(categorical_strategy="7.0")` on an integer column raised. ANSI mode also
+  widens an integer and a float to double (Spark 3's default mode: float), which changes
+  `mape` and `accuracy` on such a pair without raising. Fix: every such expression
+  spells out Spark 3's default cast (`smallaxe._sql.integral_from_string`, and
+  `comparable`, `is_one`, `exact_integers`, `widened` in `smallaxe.metrics._checks`;
+  `try_cast` / `try_subtract` / `try_divide` where the default mode gives null; a
+  guarded map lookup), so the result in either mode is the Spark 3 default one, and
+  smallaxe never sets the option.
+- **Spark Connect.** Spark 4 can make Connect the default (`spark.api.mode=connect`, or
+  the `pyspark-connect` package). smallaxe's artifact IO needs the JVM. Fix: on a
+  Connect session, `save` and `load` raise `ConfigurationError("smallaxe needs a classic
+  Spark session; Spark Connect is not supported")` from `smallaxe._fs` instead of an
+  `AttributeError` from `spark._jvm`.
+- **Algorithms.** Random Forest is built in. XGBoost needs xgboost 3.3 or later on
+  Spark 4 (the `smallaxe[xgboost]` floor, 1.7.0, is for Spark 3.3; pip picks 3.3 or later
+  on Python 3.12, an older xgboost on 3.10 and 3.11). LightGBM and CatBoost are validated
+  on Spark 4.0 (Databricks Runtime 17.3 LTS, Scala 2.13) with
+  `synapseml-lightgbm_2.13:1.1.3-spark4.0` and `catboost-spark_4.0_2.13:1.2.10`. Their
+  Spark 4.1 builds are not validated with smallaxe, and neither publishes one for Spark
+  4.2 or 4.3; nothing blocks them in code.
+
+**Breaking.** No. Without ANSI mode every result is the one smallaxe 0.x gave on
+Spark 3, except where integer arithmetic overflowed: `mape` on integer columns and
+`log_loss` on an integer label no longer wrap around near the integer limits.
+`tests/test_ansi_mode.py` pins the edge cases and, on Spark 3, compares them with
+Spark's own implicit casts and operators.
+
+**Done when.** `tests/test_ansi_mode.py` gives identical results with ANSI mode on and
+off; the full suite passes with `spark.sql.ansi.enabled=true` set for the session;
+`tests/test_classic_session.py` passes; and the Spark 4 CI legs are green.
+
 ## Already tracked in `Goals.md`
 
 Do not make separate fixes for these. They are recorded here so that the list of
@@ -320,4 +363,4 @@ gotchas is complete.
 | `Pipeline.save` / `load` use local `os` paths, and pipelines with an `Encoder` or a model step cannot be saved and loaded again | Step 2 (pipeline persistence) |
 | LightGBM and CatBoost need JVM packages, and CatBoost fails on autoscaling clusters | Step 8: warn when CatBoost trains on an autoscaling cluster |
 | `smallaxe/viz/` was empty before 1.0 | Step 10: done; `smallaxe.viz` holds the seven charts from 1.0 (`smallaxe/auto/` holds `AutomatedTraining`). |
-| `_fs._spark()` calls `spark._jvm`, which Spark Connect and serverless sessions do not have | Step 8 (Databricks ergonomics) |
+| `_fs._spark()` calls `spark._jvm`, which Spark Connect and serverless sessions do not have | Step 8 (Databricks ergonomics); from 1.0 a Connect session raises `ConfigurationError` (item 8 above), and Connect support itself is still open |

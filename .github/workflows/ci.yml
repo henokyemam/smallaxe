@@ -52,8 +52,14 @@ jobs:
   # are validated, so that one combination is tested here as well.
   # Java: Spark 3.3-3.5 run on Java 8, 11 and 17. Java 11 runs everywhere; Java 8 runs
   # with the oldest Spark line and Java 17 with the newest.
+  # Spark 4 (the include entries below) needs Java 17 or later: 4.0 and 4.1 run on Java
+  # 17 and 21, 4.2 and 4.3 on 17, 21 and 25 (the "Downloading" section of each release's
+  # documentation). Python, per the PySpark classifiers, within smallaxe's 3.8-3.12:
+  # 4.0 supports 3.9-3.13, 4.1 and 4.2 3.10-3.14, 4.3 3.11-3.14. Spark 4.0 and the newest
+  # minor, 4.3, run on every such Python; 4.1 and 4.2 on the newest one; and 4.3 once more
+  # on the newest Java it supports. pyproject.toml's pyspark bound is one past 4.3.
   test:
-    name: test (py${{ matrix.python-version }}, spark ${{ matrix.spark-version }}, java ${{ matrix.java-version }})
+    name: test (py${{ matrix.python-version }}, spark ${{ matrix.spark-version }}, java ${{ matrix.java-version }}${{ matrix.pandas-version && format(', pandas {0}', matrix.pandas-version) || '' }})
     # ubuntu-latest (26.04) has no Python 3.8 or 3.9 build, so those legs use 22.04.
     runs-on: ${{ (matrix.python-version == '3.8' || matrix.python-version == '3.9') && 'ubuntu-22.04' || 'ubuntu-latest' }}
     strategy:
@@ -75,6 +81,39 @@ jobs:
           - python-version: "3.12"
             spark-version: "3.5"
             java-version: "17"
+          - python-version: "3.9"
+            spark-version: "4.0"
+            java-version: "17"
+          - python-version: "3.10"
+            spark-version: "4.0"
+            java-version: "17"
+          - python-version: "3.11"
+            spark-version: "4.0"
+            java-version: "17"
+          - python-version: "3.12"
+            spark-version: "4.0"
+            java-version: "17"
+          - python-version: "3.12"
+            spark-version: "4.1"
+            java-version: "17"
+          - python-version: "3.12"
+            spark-version: "4.2"
+            java-version: "17"
+          - python-version: "3.11"
+            spark-version: "4.3"
+            java-version: "17"
+          - python-version: "3.12"
+            spark-version: "4.3"
+            java-version: "17"
+          - python-version: "3.12"
+            spark-version: "4.3"
+            java-version: "25"
+          # What a plain "pip install smallaxe" resolves on Python 3.11+: pandas 3, which
+          # Spark 4 does not document as supported but smallaxe's users get.
+          - python-version: "3.12"
+            spark-version: "4.3"
+            java-version: "17"
+            pandas-version: "3"
 
     steps:
       - uses: actions/checkout@v4
@@ -91,10 +130,16 @@ jobs:
           java-version: ${{ matrix.java-version }}
 
       - name: Install dependencies
-        # "~=3.3.0" installs the latest 3.3.x patch release.
+        # "~=3.3.0" installs the latest 3.3.x patch release. Spark 4.0-4.3 document pandas
+        # >=2,<3 (their installation pages; 4.2 and 4.3 warn on pandas 3), and pip would
+        # pick pandas 3 on Python 3.11+, so the Spark 4 legs stay below it, except the one
+        # leg that sets pandas-version to test exactly that.
         run: |
           python -m pip install --upgrade pip
-          pip install -e ".[dev]" "pyspark~=${{ matrix.spark-version }}.0"
+          constraint=""
+          case "${{ matrix.spark-version }}" in 4.*) constraint="pandas<3" ;; esac
+          if [ -n "${{ matrix.pandas-version }}" ]; then constraint="pandas~=${{ matrix.pandas-version }}.0"; fi
+          pip install -e ".[dev]" "pyspark~=${{ matrix.spark-version }}.0" $constraint
           pip list
 
       - name: Run tests
@@ -146,32 +191,46 @@ jobs:
 
   # Optional-algorithm job: XGBoost is the one boosted algorithm that runs on a plain
   # Linux runner (LightGBM and CatBoost need JVM packages and are validated on Databricks).
+  # The Spark 4 leg runs the newest included minor on Python 3.12, where pip resolves an
+  # xgboost (3.3 or later) that declares PySpark 4 support.
   test-xgboost:
-    name: test-xgboost (py3.10, spark ${{ matrix.spark-version }}, java 11)
+    name: test-xgboost (py${{ matrix.python-version }}, spark ${{ matrix.spark-version }}, java ${{ matrix.java-version }})
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        spark-version: ["3.3", "3.5"]
+        include:
+          - python-version: "3.10"
+            spark-version: "3.3"
+            java-version: "11"
+          - python-version: "3.10"
+            spark-version: "3.5"
+            java-version: "11"
+          - python-version: "3.12"
+            spark-version: "4.3"
+            java-version: "17"
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Python 3.10
+      - name: Set up Python ${{ matrix.python-version }}
         uses: actions/setup-python@v5
         with:
-          python-version: "3.10"
+          python-version: ${{ matrix.python-version }}
 
-      - name: Set up Java 11
+      - name: Set up Java ${{ matrix.java-version }}
         uses: actions/setup-java@v4
         with:
           distribution: "temurin"
-          java-version: "11"
+          java-version: ${{ matrix.java-version }}
 
       - name: Install dependencies
+        # As in the test job, the Spark 4 leg stays below pandas 3.
         run: |
           python -m pip install --upgrade pip
-          pip install -e ".[dev,xgboost]" "pyspark~=${{ matrix.spark-version }}.0"
+          constraint=""
+          case "${{ matrix.spark-version }}" in 4.*) constraint="pandas<3" ;; esac
+          pip install -e ".[dev,xgboost]" "pyspark~=${{ matrix.spark-version }}.0" $constraint
           pip list
 
       - name: Run tests

@@ -72,7 +72,8 @@ def random_forest(**params: Any) -> Regressor:
 def xgboost(**params: Any) -> Regressor:
     """Create an unfitted XGBoost regressor.
 
-    Needs the xgboost package: ``pip install smallaxe[xgboost]``.
+    Needs the xgboost package: ``pip install smallaxe[xgboost]``. On Spark 4 use xgboost
+    3.3 or later, the first release that declares PySpark 4 support.
 
     Args:
         **params: Parameter values by name; every parameter left out keeps its default.
@@ -109,7 +110,8 @@ def lightgbm(**params: Any) -> Regressor:
     """Create an unfitted LightGBM regressor.
 
     Needs SynapseML's LightGBM: ``pip install smallaxe[lightgbm]`` and the SynapseML Spark
-    package on the session's classpath.
+    package on the session's classpath. Validated on Spark 3.5 and on Spark 4.0 (SynapseML's
+    ``-spark4.0`` build).
 
     Args:
         **params: Parameter values by name; every parameter left out keeps its default.

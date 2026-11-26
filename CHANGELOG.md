@@ -122,6 +122,57 @@ deprecated in 0.11"), naming its replacement. In 1.0 a removed name raises
   of `smallaxe.training.mixins` stay in their modules' `__all__`, but the README's
   stability policy leaves them out of the public API: their members are public as
   members of `Model`, `Regressor` and `Classifier`.
+- **Results no longer depend on Spark's ANSI SQL mode** (`spark.sql.ansi.enabled`, on
+  by default from Spark 4). With ANSI mode on, an implicit cast that fails, an
+  arithmetic overflow, a boolean compared with a number, or (on Spark 3.3) a missing
+  map key raises where it gave null before, the string-to-integer cast no longer reads
+  a fraction (`"7.0"`), and an integer meets a float in double instead of float.
+  smallaxe never sets the option. Its results in either mode are the ones Spark 3's
+  default mode (ANSI off) gives, with each implicit cast spelled out
+  (`smallaxe._sql.integral_from_string` reads a string as an integer the way the
+  default cast does; `try_cast`, `try_subtract` and `try_divide` give null where the
+  default mode does). Without ANSI mode the results are unchanged, except where integer
+  arithmetic overflowed (below). `tests/test_ansi_mode.py` runs the metric,
+  preprocessing, visualization, split and dataset edge cases (zero denominators,
+  unseen categories, constant and all-null columns, nulls, NaN, infinities, strings and
+  booleans compared with numbers, float and decimal arithmetic, fills that round) with
+  the option on and off and requires identical results, pins the values, and on Spark 3
+  compares them with Spark's own implicit casts and operators; the whole suite also
+  passes with it on (Spark 3.5). Fixed under ANSI mode:
+  - `accuracy`, and `precision` / `recall` / `f1_score` with `average='binary'`, on a
+    boolean column (an analysis error under ANSI mode), a string column holding a value
+    that does not parse (a cast error), or an integer column compared with a float one
+    (compared in double). As in Spark 3's default mode, a boolean compared with a
+    number counts as 0 / 1; a string compared with an integer column is read as that
+    integer type (`"7.9"` is 7), with a float or double column as that type, with a
+    decimal column as a double, with a boolean column as a boolean (`"yes"`, `"1"`);
+    the positive class 1 reads a string as an integer (`"1.5"` is positive, `"1e0"` is
+    not); a string that does not parse never matches.
+  - `mape` and `log_loss`: integer columns are computed in `decimal(20,0)`, so
+    `label - prediction`, `abs(label)` and `1 - label` no longer overflow (ANSI mode
+    raised; without it the value wrapped around, giving a wrong score for values near
+    the integer limits; this is the one change without ANSI mode). Float and decimal
+    columns keep Spark's own arithmetic (an integer beside a float is a float), and a
+    decimal ratio that overflows is skipped as before instead of raising.
+  - `Imputer` with a categorical fill on an integer column spelled with a fraction
+    (`categorical_strategy="7.0"`): ANSI mode's string-to-integer cast rejects it, so
+    `fit` raised `ValidationError` and `transform` a Spark error. The fill is now read
+    the way Spark 3's default cast reads it, and checked with `try_cast` rather than a
+    cast that raises; the accepted fills, their values and the rejected fills are the
+    ones Spark 3's default mode gives (a fill that rounds, `"7.9999999999999999999"`,
+    or is too wide for the check, is still rejected).
+  - `Encoder.transform` with a category not seen at fit, on Spark 3.3 with ANSI mode on
+    (a missing map key raised there): the lookup is guarded, so the category maps to the
+    `__OTHER__` / `__UNKNOWN__` index in every mode.
+- **A Spark Connect session raises `ConfigurationError`.** smallaxe needs a classic
+  (JVM, py4j) Spark session: every `save` and `load` reads and writes through the
+  Hadoop FileSystem on the JVM (`smallaxe._fs`). With a Spark Connect session active
+  (`SparkSession.builder.remote(...)`, `spark.api.mode=connect`, or `pyspark-connect`
+  installed on Spark 4), those calls now raise `ConfigurationError("smallaxe needs a
+  classic Spark session; Spark Connect is not supported")` instead of an
+  `AttributeError` from `spark._jvm`. The check reads the session's class module, so it
+  never imports `pyspark.sql.connect`; a classic session is unaffected. Spark Connect
+  is out of scope for 1.0.
 - **`fit`, `set_params` and `clone` return the model's own type.** They were typed as
   the base class; now `regressors.xgboost().fit(...)` is typed as a `Regressor`, so
   chained calls type-check. Runtime behaviour is unchanged.
@@ -240,6 +291,31 @@ deprecated in 0.11"), naming its replacement. In 1.0 a removed name raises
 
 ### Added
 
+- **Spark 4.x support: PySpark 4.0, 4.1, 4.2 and 4.3.** smallaxe now requires
+  `pyspark>=3.3,<4.4` (was `<4.0`); the bound is one past the newest minor CI tests.
+  CI adds legs on Java 17 for PySpark 4.0 on Python 3.9, 3.10, 3.11 and 3.12, 4.1 and
+  4.2 on Python 3.12, and 4.3 on Python 3.11 and 3.12, plus 4.3 / Python 3.12 on Java
+  25, and runs XGBoost on 4.3 / Python 3.12; the Spark 4 legs install pandas below 3,
+  as Spark 4 documents, except one 4.3 / Python 3.12 leg that installs pandas 3, which a
+  plain `pip install` resolves on Python 3.11 and later. Spark 4 needs Java 17 or later and Python 3.9 or later (4.1 and
+  4.2: 3.10; 4.3: 3.11). Limits:
+  - **Classic sessions only.** Spark Connect is not supported; a Connect session raises
+    `ConfigurationError` (see "Changed").
+  - **XGBoost** needs xgboost 3.3 or later on Spark 4, the first release that declares
+    PySpark 4 support (Python 3.12+). The `smallaxe[xgboost]` floor stays 1.7.0, for
+    Spark 3.3: an extra cannot depend on the installed PySpark.
+  - **LightGBM and CatBoost** are validated on Spark 4.0 only (Databricks Runtime 17.3
+    LTS, Scala 2.13), with `synapseml-lightgbm_2.13:1.1.3-spark4.0` and
+    `catboost-spark_4.0_2.13:1.2.10`. Their Spark 4.1 builds are not validated, and
+    neither publishes one for Spark 4.2 or 4.3.
+  - Python 3.13 and 3.14, which PySpark 4 supports, are not declared (smallaxe stays
+    `<3.13`).
+
+  The PySpark APIs smallaxe imports exist unchanged in PySpark 4.3, PySpark 4 no longer
+  imports `distutils` (the `setuptools` requirement on Python 3.12 is for PySpark 3.5),
+  and results no longer depend on ANSI SQL mode, which Spark 4 turns on (see
+  "Changed"). The ANSI part is tested locally on Spark 3.5; the Spark 4 legs are new in
+  CI.
 - **`smallaxe.auto.AutomatedTraining`**: one call that trains every installed algorithm
   on the same data and the same validation rows, compares them on one metric and keeps
   the best fitted model. `AutomatedTraining(task, algorithms=None, metric=None,

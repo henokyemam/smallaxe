@@ -171,3 +171,41 @@ class TestVizExtra:
         assert str(dev["plotly"].specifier) == str(viz.specifier) == ">=5.0.0"
         # No marker: plotly 5.0.0 supports Python 3.6+, so every supported Python gets it.
         assert dev["plotly"].marker is None
+
+
+def _ci_spark_minors() -> List[str]:
+    """Every Spark minor a CI job installs: the values on ci.yml's ``spark-version:`` lines.
+
+    The workflow is read as text (PyYAML is not a dependency); a line is either a list,
+    ``spark-version: ["3.3", "3.4"]``, or one include entry's value, ``spark-version: "4.0"``.
+    """
+    text = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+    found = set()
+    for line in text.splitlines():
+        key, _, value = line.strip().partition(":")
+        if key == "spark-version":
+            found.update(re.findall(r'"(\d+\.\d+)"', value))
+    return sorted(found, key=Version)
+
+
+class TestSparkSupport:
+    """The pyspark requirement claims exactly the Spark minors CI tests."""
+
+    def _pyspark(self) -> Requirement:
+        (pyspark,) = [r for r in _dependencies() if r.name == "pyspark"]
+        return pyspark
+
+    def test_ci_tests_spark_3_and_4(self):
+        assert _ci_spark_minors() == ["3.3", "3.4", "3.5", "4.0", "4.1", "4.2", "4.3"]
+
+    def test_every_ci_minor_is_allowed(self):
+        for minor in _ci_spark_minors():
+            assert self._pyspark().specifier.contains(f"{minor}.0"), minor
+
+    def test_the_upper_bound_is_one_past_the_newest_ci_minor(self):
+        newest = Version(_ci_spark_minors()[-1])
+        next_minor = f"{newest.major}.{newest.minor + 1}"
+        specifier = self._pyspark().specifier
+        assert {str(spec) for spec in specifier} == {">=3.3", f"<{next_minor}"}
+        assert not specifier.contains(f"{next_minor}.0")
+        assert not specifier.contains("5.0.0")
