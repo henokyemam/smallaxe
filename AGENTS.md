@@ -15,7 +15,8 @@ smallaxe/
 │   ├── _config.py             # Internal config state
 │   ├── _fs.py                 # Hadoop FileSystem IO (local, dbfs:/, s3://, hdfs://)
 │   ├── _warn.py               # caller_stacklevel(): warnings point at the user's line
-│   ├── auto/                  # AutomatedTraining (planned; empty)
+│   ├── auto/                  # AutomatedTraining: every algorithm on one split, best kept
+│   │   └── _automated.py
 │   ├── datasets/              # Sample data loading utilities
 │   │   └── _data.py
 │   ├── exceptions/            # Custom exception hierarchy
@@ -101,6 +102,20 @@ The public API is frozen at 1.0 and follows semantic versioning (README, "Stabil
 
 The `Pipeline` class chains preprocessing steps and a model into a single `fit()`/`predict()` flow, accepting `numerical_cols` and `categorical_cols` parameters. The model is fitted on exactly `numerical_cols` plus the Encoder's `output_cols` (the Pipeline owns its feature columns); whether a model needs an Encoder comes from its algorithm record's `accepts_raw_categoricals`. `Pipeline.fit` passes the model's validation options (`validation`, `test_size`, `n_folds`, `fold_key`, `refit`, `cache_strategy`, keyword-only) to the model step, and `Pipeline.validation_scores` reports them; preprocessing is fitted on every row first, so its statistics see the validation rows. `Pipeline.save` writes each step's own artifact under `steps/` and a versioned `metadata.json` (kind `pipeline`) through `smallaxe._fs`; no pickle. `smallaxe.load(path)` loads any artifact by its kind.
 
+### AutomatedTraining
+
+`smallaxe.auto.AutomatedTraining` (in `smallaxe/auto/_automated.py`) is built only on the
+public API: the factories, `Model.fit` / `validation_scores` / `predict` / `evaluate`, and
+`optimize.run` for algorithms given a `param_spaces` entry. It adds no training logic and
+no artifact kind. It reuses, rather than copies: `optimize.py`'s `_resolve_metric`,
+`_higher_is_better`, `_lookup_metric` and `_score_key` (metric check, orientation, score
+extraction), `_resolve_split_seed` with the models' private `_split_seed_fallback` (one
+split seed per run, which `optimize.run` also honours), `Model._validate_fit_params` /
+`_validate_columns` / `_apply_cache_strategy` (the checks and caching rule of `fit`, once
+per run), and the record's `available()` probe. It supports `simple_regression` and
+`binary`; failures are caught as `SmallaxeError` or `_fs.jvm_error_types()`, never a bare
+`except`.
+
 ## Development
 
 ### Prerequisites
@@ -122,13 +137,13 @@ pip install -e ".[dev,all]"
 pytest
 ```
 
-Tests use a session-scoped `SparkSession` fixture (`local[2]` mode) defined in `tests/conftest.py`. `tests/test_algorithm.py` checks every algorithm's translation against fake estimators (no JVM packages needed); `tests/test_model_contract.py` runs the fit/predict/validate/save/load contract per (algorithm, task) wherever the package is installed; `tests/test_legacy_artifacts.py` loads models saved by 0.8.1, 0.9.0 and 0.10.0; `tests/test_public_api.py` pins the public surface; `tests/test_removed.py` checks that every 0.x spelling is gone; `tests/test_user_errors.py` probes bad inputs for raw Python errors. Per-algorithm files hold only behaviour unique to that algorithm.
+Tests use a session-scoped `SparkSession` fixture (`local[2]` mode) defined in `tests/conftest.py`. `tests/test_algorithm.py` checks every algorithm's translation against fake estimators (no JVM packages needed); `tests/test_model_contract.py` runs the fit/predict/validate/save/load contract per (algorithm, task) wherever the package is installed; `tests/test_legacy_artifacts.py` loads models saved by 0.8.1, 0.9.0 and 0.10.0; `tests/test_public_api.py` pins the public surface; `tests/test_removed.py` checks that every 0.x spelling is gone; `tests/test_user_errors.py` probes bad inputs for raw Python errors; `tests/test_auto.py` covers AutomatedTraining (real Random Forest / XGBoost runs, and fake fits for ranking, failures and skips). Per-algorithm files hold only behaviour unique to that algorithm.
 
 ### Code Style
 
 - Formatter: `black` (line-length 100)
 - Linter: `ruff` (line-length 100, target py38)
-- Type checker: `mypy smallaxe`, strict settings in `pyproject.toml` (untyped defs disallowed, `warn_return_any`, `warn_unused_ignores`; missing imports ignored only for hyperopt, py4j and catboost_spark). The package ships `py.typed`, and CI blocks on it. A `# type: ignore` needs an error code and a reason.
+- Type checker: `mypy smallaxe`, strict settings in `pyproject.toml` (untyped defs disallowed, `warn_return_any`, `warn_unused_ignores`; missing imports ignored only for hyperopt, py4j, pandas and catboost_spark). The package ships `py.typed`, and CI blocks on it. A `# type: ignore` needs an error code and a reason.
 
 ### Key Conventions
 
@@ -137,7 +152,7 @@ Tests use a session-scoped `SparkSession` fixture (`local[2]` mode) defined in `
 - Feature columns are auto-inferred from numeric and boolean columns if not specified; other columns are reported in one `UserWarning` and in `metadata["ignored_cols"]`
 - Validation strategies: `'none'`, `'train_test'`, `'kfold'`
 - Cache strategies (per `fit` call): `None` (default: cache only when fit reads the data more than once), `'none'`, `'memory'`, `'disk'`.
-- Task types: `'simple_regression'`, `'binary'`, `'multiclass'`
+- Task types: `'simple_regression'`, `'binary'`, `'multiclass'` (`AutomatedTraining`: the first two)
 - Optional deps are extras: `smallaxe[xgboost]`, `smallaxe[lightgbm]`, `smallaxe[catboost]`, `smallaxe[viz]` (plotly, for the planned `smallaxe.viz`), `smallaxe[all]`. Hard dependencies are exactly what smallaxe imports at runtime (pyspark, py4j, numpy, pandas, hyperopt; setuptools where PySpark needs `distutils` (3.12) or hyperopt 0.2.7 needs `pkg_resources` (3.8, 3.9)), each with a `>=` floor that the test-lowest CI job installs (`.github/scripts/floor_pins.py`); `tests/test_packaging.py` checks the set per Python and that `requirements-dev.txt` matches
 - In the test suite a `DeprecationWarning` attributed to a smallaxe module is an error (`filterwarnings` in `pyproject.toml`)
 

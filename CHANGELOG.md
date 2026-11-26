@@ -195,8 +195,8 @@ deprecated in 0.11"), naming its replacement. In 1.0 a removed name raises
   `Invalid value '' for setting 'verbosity'. Allowed values: [...]` instead of the
   generic default message; the value is shown with `repr`.
 - **The verbosity levels are documented as they behave.** `'quiet'` hides
-  `optimize.run`'s progress bar; `'normal'` (default) and `'verbose'` show it and do
-  nothing else differently today. The docstrings no longer promise detailed logging.
+  `optimize.run`'s progress bar (and `AutomatedTraining`'s progress lines, see "Added");
+  `'normal'` (default) and `'verbose'` show them and do nothing else differently today. The docstrings no longer promise detailed logging.
 - Load errors no longer name the 0.8.x classes: `regressors.load` on a classifier says
   `Cannot load a regressor: '...' holds a 'xgboost' classifier (task 'binary')`, and
   `Regressor.load` / `Classifier.load` on the other kind say
@@ -232,6 +232,33 @@ deprecated in 0.11"), naming its replacement. In 1.0 a removed name raises
 
 ### Added
 
+- **`smallaxe.auto.AutomatedTraining`**: one call that trains every installed algorithm
+  on the same data and the same validation rows, compares them on one metric and keeps
+  the best fitted model. `AutomatedTraining(task, algorithms=None, metric=None,
+  params=None, param_spaces=None, max_evals=20, seed=None)` supports
+  `"simple_regression"` and `"binary"` (`"multiclass"` raises `ValidationError`); the
+  default metric is `rmse` / `auc_roc`, as in `optimize.run`, and must be one of the
+  task's `TASK_METRICS`. `fit(dataframe, label_col, feature_cols=None,
+  exclude_cols=None, *, validation="train_test", test_size=0.2, n_folds=5,
+  fold_key=None, cache_strategy=None)` resolves one split seed for the run (`seed`, else
+  the global seed, else one random draw) and every model and search uses it, so all
+  algorithms score on exactly the same rows; `validation="none"` is rejected. Each model
+  comes from its factory with its fixed `params` and is refitted on every row; an
+  algorithm with a `param_spaces` entry is tuned with `optimize.run` (`max_evals`
+  trials). The arguments are checked once, with `Model.fit`'s checks, before anything
+  trains; `params` / `param_spaces` naming an algorithm that is not requested, a
+  parameter it does not have, or `seed` raise `ValidationError` in the constructor. An
+  algorithm whose package is not installed is skipped with one `UserWarning` naming its
+  install hint (all skipped: `DependencyError`); one that raises a smallaxe or JVM error
+  while training is reported as failed with a `UserWarning` and the run continues (all
+  failed: `ValidationError` carrying each error). After `fit`: `best_model`,
+  `best_algorithm`, `best_score`, `models`, `comparison` (a pandas DataFrame, one row per
+  algorithm, best first: `algorithm`, `status`, the metric, the task's other metrics,
+  `fit_seconds`, `params`, `error`), and `predict`, `predict_proba` (binary) and
+  `evaluate`, which use `best_model`. An undefined score (AUC on a one-class split) ranks
+  last and never wins. There is no new artifact kind: save `best_model` and
+  `comparison.to_csv(...)`. With the global verbosity above `'quiet'`, `fit` prints one
+  progress line per algorithm.
 - **`smallaxe[viz]`**, an extra holding `plotly>=5.0.0` for the planned visualizations;
   `smallaxe[all]` includes it.
 
