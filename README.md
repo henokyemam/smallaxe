@@ -732,8 +732,13 @@ Validation runs on Databricks, both on a cluster with 2 fixed m5d.8xlarge worker
   xgboost 3.4.1 (commit a7c8ce7): all 124 library checks passed for the four algorithms,
   including AutomatedTraining ranking all four on binary and regression. A separate run
   built seven charts per algorithm and `model_comparison` from an AutomatedTraining.
-- Release candidate, Databricks Runtime 16.4 LTS (Spark 3.5), commit [RC COMMIT]: [RC
-  RESULT].
+- 2026-11-26, release candidate (commit da2a4cc), Databricks Runtime 16.4 LTS (Spark
+  3.5.2), the same libraries as the first run: 122 of 128 checks passed. Random Forest,
+  XGBoost and CatBoost passed every check. One LightGBM fit failed with
+  `Connection refused` after an executor exited with code 134, which accounts for the 2
+  failed and 4 blocked checks. LightGBM-only reruns lost executors the same way on this
+  commit and on e41b8eb, so the failure is not specific to this commit. See "Worker
+  failures can be intermittent" in [GOTCHAS.md](GOTCHAS.md).
 
 ## Development
 

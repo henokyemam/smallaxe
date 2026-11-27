@@ -139,9 +139,26 @@ neither project publishes a build for Spark 4.2 or 4.3. CI does not run either a
 ### Worker failures can be intermittent
 
 CatBoost-Spark and SynapseML run native code on the executors. A fit can fail with a
-worker error, such as CatBoost's "Error while executing workers", that does not recur
-when the same fit runs again. In the validation runs, one CatBoost regression fit failed
-once with that error and then passed 20 of 20 repeats. The cause is not established.
+worker error that does not recur when the same fit runs again: CatBoost's "Error while
+executing workers", or LightGBM's `java.net.ConnectException: Connection refused`. The
+cause is not established.
+
+What the validation runs on Databricks Runtime 16.4 LTS showed:
+
+- One CatBoost regression fit failed once with "Error while executing workers" and then
+  passed 20 of 20 repeats.
+- In the release-candidate run, one LightGBM fit (binary, 3-fold) failed with
+  `Connection refused`. The Spark UI showed executors removed with "Command exited with
+  code 134" during LightGBM training. A LightGBM fit fails when a peer executor exits
+  while the workers are connecting to each other; when the exit falls elsewhere Spark
+  retries the task and the fit succeeds.
+- Three LightGBM-only reruns of the validation notebook lost
+  executors the same way: on the release candidate (3 fits failed across two runs) and on
+  the earlier commit e41b8eb (2 executors lost, no fit failed). The executor exits are
+  therefore not specific to a smallaxe version.
+- 30 three-fold LightGBM fits on a synthetic 7,000-row dataset, 15 on each of those two
+  commits, all passed, with no executor lost.
+- The run on Databricks Runtime 17.3 LTS (Spark 4.0) had no failed fit.
 
 Do: retry a fit that fails with a worker error before treating it as a bug. Use a
 fixed-size cluster: the validation runs used one, and autoscaling is not validated.

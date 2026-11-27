@@ -244,7 +244,7 @@ m5d.8xlarge workers.
 |---|---|---|---|---|
 | 2026-11-26 | DBR 16.4 LTS (Spark 3.5.2, Scala 2.12, Python 3.12.3) | `synapseml-lightgbm_2.12:1.1.3`, `catboost-spark_3.5_2.12:1.2.10` | e41b8eb (the 1.0 API) | 122 of 122 checks passed for Random Forest, XGBoost, LightGBM and CatBoost on regression, binary and multiclass, including Pipeline save and load on `dbfs:/` |
 | 2026-11-26 | DBR 17.3 LTS (Spark 4.0.0, Scala 2.13.16, Python 3.12.3) | `synapseml-lightgbm_2.13:1.1.3-spark4.0` (repository `https://mmlspark.azureedge.net/maven`), `catboost-spark_4.0_2.13:1.2.10`; xgboost 3.4.1 | a7c8ce7 | all 124 library checks passed for the four algorithms, including AutomatedTraining ranking all four on binary and regression; a separate run built seven charts per algorithm and `model_comparison` from an AutomatedTraining |
-| [RC DATE] | DBR 16.4 LTS (Spark 3.5) | as above | [RC COMMIT] (release candidate) | [RC RESULT] |
+| 2026-11-26 | DBR 16.4 LTS (Spark 3.5.2, Scala 2.12, Python 3.12.3) | as the first row | da2a4cc (release candidate; the same files as main at 97d4cd2) | 122 of 128 checks passed. Random Forest, XGBoost and CatBoost passed every check, as did AutomatedTraining and the charts. One LightGBM fit (binary, 3-fold) failed with `java.net.ConnectException: Connection refused` after an executor exited with code 134; that fit accounts for the 2 failed and 4 blocked checks. LightGBM-only reruns lost executors the same way on this commit and on e41b8eb, so the failure is not specific to this commit; see "Worker failures can be intermittent" in `GOTCHAS.md` |
 
 In one earlier run a CatBoost regression fit failed once with "Error while executing
 workers" and then passed 20 of 20 repeats. `GOTCHAS.md` treats CatBoost-Spark worker
@@ -289,7 +289,7 @@ problems. Their state at 1.0:
 - CI runs core tests on supported Python/Spark versions and optional algorithm tests in
   separate dependency-enabled jobs.
 
-Status (1.0, before the release-candidate run):
+Status (1.0):
 
 1. Random Forest in under 20 lines: met. The README Quick Start is 19 lines and trains,
    evaluates (`validation_scores` on a holdout), saves, loads and predicts.
@@ -321,8 +321,8 @@ Status (1.0, before the release-candidate run):
    they need JVM packages; the Databricks notebook stands in for one, and
    `tests/test_algorithm.py` checks their translation with fake estimators.
 
-Release-candidate run on Databricks (DBR 16.4 LTS, Spark 3.5) for [RC COMMIT]:
-[RC RESULT].
+Release-candidate run on Databricks (DBR 16.4 LTS, Spark 3.5) for da2a4cc, on
+2026-11-26: 122 of 128 checks passed. Random Forest, XGBoost and CatBoost passed every check, as did AutomatedTraining and the charts. One LightGBM fit (binary, 3-fold) failed with `java.net.ConnectException: Connection refused` after an executor exited with code 134; that fit accounts for the 2 failed and 4 blocked checks. LightGBM-only reruns lost executors the same way on this commit and on e41b8eb, so the failure is not specific to this commit; see "Worker failures can be intermittent" in `GOTCHAS.md`.
 
 ## Later Goals
 
