@@ -34,10 +34,13 @@ Spark, so it scales with the cluster.
 pip install smallaxe
 ```
 
-smallaxe runs on PySpark 3.3 to 3.5 and 4.0 to 4.3, on a classic Spark session. Spark 4
+smallaxe supports PySpark 3.3 to 3.5 and 4.0 to 4.3, on a classic Spark session. Spark 4
 needs Java 17 or later. pip installs the newest PySpark your Python supports; pin it to
-stay on Spark 3 (`pip install smallaxe "pyspark~=3.5.0"`). The exact tested combinations
-are in the [compatibility matrix](#compatibility-matrix).
+stay on Spark 3 (`pip install smallaxe "pyspark~=3.5.0"`).
+
+The supported Python, PySpark and Java combinations are the ones CI tests, listed in the
+[compatibility matrix](#compatibility-matrix). pip also installs some that CI does not
+test, such as PySpark 4.1 on Python 3.10.
 
 Optional algorithms and charts are extras:
 
@@ -566,9 +569,9 @@ working and emits a `DeprecationWarning` naming its replacement for at least one
 release, and it is removed only in the next major release. `tests/test_public_api.py`
 pins the public surface, so an accidental change fails CI.
 
-The supported Python, PySpark and Java versions are exactly the ones CI tests, listed in
-the [compatibility matrix](#compatibility-matrix). Dropping one is announced in the
-CHANGELOG and happens only in a minor or major release.
+The supported Python, PySpark and Java combinations are the ones CI tests, listed in the
+[compatibility matrix](#compatibility-matrix). Dropping one is announced in the CHANGELOG
+and happens only in a minor or major release.
 
 ## End-to-End Examples
 
@@ -632,10 +635,13 @@ install command.
 | OS | Linux | Linux |
 
 The `test` job in `.github/workflows/ci.yml` runs the whole suite on Linux for each row
-below, 24 legs in all. The pairs are the ones PySpark itself supports, per the Python
-classifiers of each PySpark release, within smallaxe's Python 3.8 to 3.12. One more pair
-is tested: Python 3.12 with PySpark 3.5 and Java 17. No PySpark 3.x release declares
-Python 3.12; it is tested because Databricks Runtime 16.4 LTS ships it.
+below, 24 legs in all. For PySpark 3.3, 3.4, 3.5, 4.0 and 4.3, the legs cover every
+Python that the PySpark release declares in its classifiers, within smallaxe's Python 3.8
+to 3.12. For PySpark 4.1 and 4.2 they cover only Python 3.12, although those releases
+declare 3.10 and 3.11 too.
+
+One more pair is tested: Python 3.12 with PySpark 3.5 and Java 17. No PySpark 3.x release
+declares Python 3.12; it is tested because Databricks Runtime 16.4 LTS ships it.
 
 | PySpark | Python | Java | `test` legs |
 |---------|--------|------|-------------|
@@ -658,8 +664,7 @@ Notes on the matrix:
 
 - PySpark 4.0 needs Python 3.9 or later, 4.1 and 4.2 need Python 3.10, and 4.3 needs
   Python 3.11. All of them need Java 17 or later. pip installs an older PySpark on an
-  older Python. On PySpark 4.1 and 4.2 only Python 3.12 is tested; PySpark supports 3.10
-  and 3.11 there too.
+  older Python.
 - smallaxe declares Python up to 3.12, so Python 3.13 and 3.14, which PySpark 4
   supports, are not covered.
 - Spark 4.0 to 4.3 document pandas below 3. The Spark 4 legs install pandas below 3,
