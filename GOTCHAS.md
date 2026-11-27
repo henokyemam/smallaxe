@@ -59,9 +59,11 @@ Do: for a strict holdout, split first, fit the pipeline on the training rows, an
 
 A row's split or fold is a hash of its content (or of `fold_key`) and the seed, so the
 same rows and seed give the same folds whatever the partitioning. Exact duplicate rows
-land in the same fold. Spark's Random Forest training depends on the partitioning too: on
-this checkout, the same data and seed in 3 and in 4 partitions gave different
-predictions, and the same partitioning gave identical ones.
+land in the same fold.
+
+Spark's Random Forest training also depends on the partitioning. The same data and seed
+in 3 and in 4 partitions can give different predictions; the same data, seed and
+partitioning give identical ones.
 
 Do: to reproduce a model exactly, keep the data, the seed and the partitioning. Use
 `fold_key` to keep all rows of one entity (a customer, a session) in one fold.

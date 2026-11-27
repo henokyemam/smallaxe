@@ -72,7 +72,7 @@ from smallaxe.datasets import load_sample_regression
 from smallaxe.training import regressors
 
 spark = SparkSession.builder.getOrCreate()
-smallaxe.set_seed(42)  # reproducible splits and trees
+smallaxe.set_seed(42)  # same data, seed and partitioning: same model
 houses = load_sample_regression(spark)  # 10,000 rows of synthetic house prices
 
 model = regressors.random_forest(n_estimators=50, max_depth=8)
