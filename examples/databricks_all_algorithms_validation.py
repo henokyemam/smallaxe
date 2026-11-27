@@ -50,6 +50,9 @@ dbutils.library.restartPython()
 
 # COMMAND ----------
 
+# Databricks source notebook: imports sit in later cells (E402), and the runtime
+# provides spark, dbutils and display (F821).
+# ruff: noqa: E402, F821
 import gzip
 import importlib
 import io
