@@ -467,7 +467,7 @@ warning. Check your code against both lists.
 | `algorithm.legacy_class_name` | the algorithm name and the model's `task` |
 | `algorithm.package_version` | `metadata["algorithm_package_version"]` of a fitted model |
 | `algorithm.COLUMN_ROLES` | `algorithm.get(name).cols` |
-| `algorithm.LEGACY_CLASS_NAMES` | `smallaxe.load_model()`, which reads 0.8.x artifacts |
+| `algorithm.LEGACY_CLASS_NAMES` | `smallaxe.load_model()`, which reads artifacts saved by 0.8.1 and later |
 | `HYPEROPT_AVAILABLE` (in `smallaxe.search` and `smallaxe.search.optimize`), `optimize.HYPEROPT_INSTALL_HINT` | nothing: hyperopt is a required dependency |
 | `optimize.MAXIMIZE_METRICS`, `MINIMIZE_METRICS`, `VALID_METRICS`; `MULTICLASS_AVERAGED_METRICS` in `smallaxe.metrics` and `smallaxe.metrics.classification` (not deprecated in 0.11) | `smallaxe.metrics.TASK_METRICS` (`TASK_METRICS["multiclass"]` for the multiclass names) |
 | `XGBOOST_AVAILABLE`, `LIGHTGBM_AVAILABLE`, `CATBOOST_AVAILABLE`, `smallaxe.training.catboost.is_catboost_available()` | `smallaxe.training.algorithm.get(name).available()` or `regressors.available_models()` |

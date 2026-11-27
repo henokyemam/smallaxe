@@ -21,7 +21,8 @@ deprecated in 0.11"), naming its replacement. In 1.0 a removed name raises
   `CatBoostClassifier()`: use `classifiers.random_forest(task=...)`,
   `classifiers.xgboost(task=...)`, `classifiers.lightgbm(task=...)`,
   `classifiers.catboost(task=...)`. Their `.load(path)`: use `regressors.load(path)`,
-  `classifiers.load(path)` or `smallaxe.load_model(path)`. Models they saved still load.
+  `classifiers.load(path)` or `smallaxe.load_model(path)`. Models they saved in 0.8.1 and
+  later still load.
 - `Regressors.<algorithm>(...)`, `Classifiers.<algorithm>(...)`, `Regressors.load`,
   `Classifiers.load`, `Regressors.available_models()`, `Classifiers.available_models()`:
   use the same functions of the `regressors` / `classifiers` modules.
@@ -57,7 +58,7 @@ deprecated in 0.11"), naming its replacement. In 1.0 a removed name raises
   `set_params()`. `legacy_class_name`: use the algorithm name and the model's task.
   `package_version`: read `metadata["algorithm_package_version"]` of a fitted model.
   `COLUMN_ROLES`: use `get(name).cols`. `LEGACY_CLASS_NAMES`: use
-  `smallaxe.load_model()`, which reads 0.8.x artifacts.
+  `smallaxe.load_model()`, which reads artifacts saved by 0.8.1 and later.
 - `HYPEROPT_AVAILABLE` (in `smallaxe.search` and `smallaxe.search.optimize`),
   `optimize.HYPEROPT_INSTALL_HINT`: hyperopt is a required dependency; drop the check.
 - `optimize.MAXIMIZE_METRICS`, `MINIMIZE_METRICS`, `VALID_METRICS`: use
@@ -97,8 +98,8 @@ deprecated in 0.11"), naming its replacement. In 1.0 a removed name raises
   cache-strategy and Spark-session state in `smallaxe._config`.
 - `Model.load` no longer checks a class alias's algorithm (the aliases are gone); it
   checks the kind for `Regressor.load` / `Classifier.load`, as before. Artifacts saved
-  by the eight 0.8.x classes still load: the map from their class names to algorithms
-  is a private detail of loading, used nowhere else.
+  by the eight 0.8.x classes (0.8.1 and later) still load: the map from their class
+  names to algorithms is a private detail of loading, used nowhere else.
 - The `DependencyError` path for a missing hyperopt: `smallaxe.search` imports hyperopt
   normally, so a broken install fails with hyperopt's `ImportError` on
   `import smallaxe.search`.

@@ -49,8 +49,8 @@ __all__ = [
 def load_model(path: str) -> Union["Regressor", "Classifier"]:
     """Load the model saved at ``path``, whatever its algorithm and task.
 
-    Reads artifacts written by ``model.save`` in this and every earlier smallaxe
-    release (0.8.x artifacts record the old class name, 0.9 and 0.10 ones have no
+    Reads artifacts written by ``model.save`` in this release and in smallaxe 0.8.1
+    and later (0.8.x artifacts record the old class name, 0.9 and 0.10 ones have no
     ``format_version``). The training package is imported here, so ``import smallaxe``
     stays light.
 
