@@ -211,6 +211,7 @@ Give an algorithm fixed `params`, or a hyperopt `param_spaces` entry to tune it 
 `optimize.run` (`max_evals` trials, on the same split); the others are fitted once.
 `seed` makes the whole comparison reproducible:
 
+<!-- test: needs xgboost -->
 ```python
 from hyperopt import hp
 
