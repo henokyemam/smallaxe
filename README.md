@@ -698,7 +698,8 @@ Notes on the matrix:
 
 LightGBM and CatBoost depend on JVM packages compiled for one Spark and Scala build and on
 native libraries, so they run on Linux Spark clusters, not locally on Apple Silicon. CI
-does not run them; they are validated on Databricks with
+does not run them. The Databricks runs listed below validated them with earlier versions
+of the notebook
 [`examples/databricks_all_algorithms_validation.py`](examples/databricks_all_algorithms_validation.py).
 Random Forest and XGBoost have no such constraint.
 

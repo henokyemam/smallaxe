@@ -236,8 +236,9 @@ are not.
 
 `examples/databricks_all_algorithms_validation.py` runs all four algorithms on four real
 datasets with numeric and categorical features (Diamonds for regression, Telco churn and
-Adult income for binary, a 60,000-row Covertype sample for 7-class multiclass). Both
-runs used a cluster with 2 fixed m5d.8xlarge workers.
+Adult income for binary, a 60,000-row Covertype sample for 7-class multiclass). The two
+runs below used earlier versions of the notebook, each on a cluster with 2 fixed
+m5d.8xlarge workers.
 
 | Date | Runtime | Maven libraries | Commit | Result |
 |---|---|---|---|---|
@@ -306,8 +307,8 @@ Status (1.0, before the release-candidate run):
    (`tests/test_missing_values.py`, `tests/test_user_columns.py`).
 4. Pipeline save and load with identical predictions: met.
    `tests/test_pipeline_persistence.py` checks it locally for Random Forest and XGBoost on
-   all three tasks, and the DBR 16.4 LTS run checked it on `dbfs:/` for all four
-   algorithms.
+   all three tasks. The DBR 16.4 LTS run, which covered all four algorithms, included
+   Pipeline save and load on `dbfs:/`.
 5. Actionable install instructions: met. A missing package raises `DependencyError`
    naming the install command, and `available_models()` lists the install hints
    (`tests/test_factories.py`, `tests/test_algorithm.py`).

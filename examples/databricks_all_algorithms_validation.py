@@ -19,8 +19,9 @@
 # MAGIC plus checks of behaviour that was once a gap (pipeline persistence, CatBoost without an Encoder,
 # MAGIC rows with nulls, unlisted columns, unseen categories, the caller's cache).
 # MAGIC
-# MAGIC Validated runtimes, each on a cluster with 2 fixed m5d.8xlarge workers. Install the Maven libraries
-# MAGIC of your runtime on the cluster before running the notebook:
+# MAGIC Validated runtimes, each on a cluster with 2 fixed m5d.8xlarge workers. The results below come from runs
+# MAGIC of earlier versions of this notebook. Install the Maven libraries of your runtime on the cluster before
+# MAGIC running the notebook:
 # MAGIC
 # MAGIC | Runtime | LightGBM Maven library | CatBoost Maven library | Validation |
 # MAGIC |---|---|---|---|
