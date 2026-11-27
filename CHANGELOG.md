@@ -29,9 +29,9 @@ deprecated in 0.11"), naming its replacement. In 1.0 a removed name raises
   `regressors.algorithms()` (every algorithm) and `regressors.available_models()` (which
   are installed). The `"class_name"` entry of `available_models()`: use the entry's key,
   the algorithm name.
-- `smallaxe.set_cache_strategy()` / `get_cache_strategy()` (and the
-  `smallaxe.VALID_CACHE_STRATEGIES` they checked against): pass `cache_strategy=` to
-  `fit`.
+- `smallaxe.set_cache_strategy()` / `get_cache_strategy()`: pass `cache_strategy=` to
+  `fit`. The `smallaxe.VALID_CACHE_STRATEGIES` they checked against (not deprecated in
+  0.11): the allowed values are in the `fit` docstring.
 - `smallaxe.set_spark_session()` / `get_spark_session()`: use
   `dataframe.sparkSession` or `SparkSession.getActiveSession()`.
 - `model.set_param({...})`: use `model.set_params(**params)`.
@@ -40,8 +40,8 @@ deprecated in 0.11"), naming its replacement. In 1.0 a removed name raises
   function: use `dataframe=`, or pass the DataFrame positionally.
 - `stratified=` in `Model.fit` and `optimize.run`: delete it; it had no effect.
 - `dataset_info(name)` printing by default: it only returns the dict now; pass
-  `verbose=True` to also print. `except ValueError` around it: use
-  `except ValidationError`.
+  `verbose=True` to also print. `except ValueError` around it (not deprecated in 0.11):
+  use `except ValidationError`.
 - `metrics.log_loss(dataframe, label_col, probability_col, eps)`: pass `eps=` by keyword.
 - `smallaxe.training.BaseModel` / `BaseRegressor` / `BaseClassifier`: use
   `smallaxe.training.Model` / `Regressor` / `Classifier`. The `Base*` classes remain in
@@ -70,7 +70,8 @@ deprecated in 0.11"), naming its replacement. In 1.0 a removed name raises
 - `smallaxe.preprocessing.encoder.VALID_METHODS` / `VALID_HANDLE_RARE`,
   `smallaxe.preprocessing.scaler.VALID_METHODS`: the values are listed in the class
   docstrings; an invalid one raises `ValidationError`.
-- `smallaxe.warnings` (the standard library module, re-exported): `import warnings`.
+- `smallaxe.warnings` (the standard library module, re-exported; not deprecated in
+  0.11): `import warnings`.
 - Not deprecated in 0.11: `smallaxe.preprocessing.imputer.VALID_NUMERICAL_STRATEGIES` /
   `VALID_CATEGORICAL_STRATEGIES` (listed in the `Imputer` docstring);
   `MULTICLASS_AVERAGED_METRICS` in `smallaxe.metrics` and
@@ -83,8 +84,10 @@ deprecated in 0.11"), naming its replacement. In 1.0 a removed name raises
   `LEGACY_METADATA_FILE`, `SPARK_MODEL_DIR`, `STEPS_DIR`, `STEP_KINDS`, `IMPUTER`,
   `SCALER`, `ENCODER`, `MODEL`, `PREPROCESSING_KINDS`, `DEFAULT_PREDICTION_COL`,
   `DEFAULT_PROBABILITY_COL`) of the preprocessing, pipeline and persistence modules.
-- `pipeline["name"]` for a missing step: catch `ValidationError` instead of `KeyError`.
-- Positional `fit` arguments after `n_folds`: removing `stratified` moved
+- `pipeline["name"]` for a missing step (not deprecated in 0.11): catch
+  `ValidationError` instead of `KeyError`.
+- Positional `fit` arguments after `n_folds` (not deprecated in 0.11): removing
+  `stratified` moved
   `cache_strategy`, `fold_key` and `refit` one place left; pass them by keyword.
 
 ### Removed

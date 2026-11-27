@@ -427,11 +427,17 @@ infinite value (they cannot be binned) and say how many in the subtitle.
 
 ## Upgrading to 1.0
 
-smallaxe 1.0 removes every spelling that 0.11 deprecated, and a few internal names that
-0.x exposed. The fastest path: run your code on 0.11 first and fix each
-`DeprecationWarning`. Each one names its replacement, and code without warnings on 0.11
-runs on 1.0. In 1.0 a removed name raises `ImportError` or `AttributeError`, and a
-removed argument raises `TypeError`.
+smallaxe 1.0 removes every spelling that 0.11 deprecated, and a few names that 0.x
+exposed without a warning. In 1.0 a removed name raises `ImportError` or
+`AttributeError`, and a removed argument raises `TypeError`.
+
+Start by running your code on 0.11 and fixing each `DeprecationWarning`. Each one names
+its replacement.
+
+That does not catch everything. The names marked "not deprecated in 0.11" below, and the
+private names listed after the table, gave no warning in 0.11 and are gone in 1.0. The
+changes under [Behaviour you will notice](#behaviour-you-will-notice) also gave no
+warning. Check your code against both lists.
 
 ### Renamed and removed names
 
@@ -448,10 +454,11 @@ removed argument raises `TypeError`.
 | `stratified=` on `Model.fit` and `optimize.run` | delete it; it had no effect |
 | `metrics.log_loss(dataframe, label_col, probability_col, eps)` with `eps` positional | `eps=` by keyword |
 | `dataset_info(name)` printing by default | it returns the dict and prints nothing; pass `verbose=True` to print |
-| `except ValueError` around `dataset_info` | `except ValidationError` |
-| `smallaxe.set_cache_strategy()`, `smallaxe.get_cache_strategy()`, `smallaxe.VALID_CACHE_STRATEGIES` | `cache_strategy=` on `fit` |
+| `except ValueError` around `dataset_info` (not deprecated in 0.11) | `except ValidationError` |
+| `smallaxe.set_cache_strategy()`, `smallaxe.get_cache_strategy()` | `cache_strategy=` on `fit` |
+| `smallaxe.VALID_CACHE_STRATEGIES` (not deprecated in 0.11) | `cache_strategy=` on `fit`; the allowed values are in the `fit` docstring |
 | `smallaxe.set_spark_session()`, `smallaxe.get_spark_session()` | `dataframe.sparkSession` or `SparkSession.getActiveSession()` |
-| `smallaxe.warnings` | `import warnings` |
+| `smallaxe.warnings` (not deprecated in 0.11) | `import warnings` |
 | `smallaxe.training.BaseModel`, `BaseRegressor`, `BaseClassifier` | `smallaxe.training.Model`, `Regressor`, `Classifier` |
 | `smallaxe.training.base.infer_feature_cols`, `warn_ignored_cols`, `check_training_data`, `resolve_split_seed`; `smallaxe.search.optimize.infer_feature_cols`, `warn_ignored_cols`, `check_training_data`, `resolve_split_seed` | `Model.fit` and `optimize.run` do each of these; set the seed with `smallaxe.set_seed()` or the model's `seed` |
 | `smallaxe.training.mixins.validation_mixin.hashable_columns`, `split_hash`, `resolve_split_seed` | `fit(validation=..., fold_key=...)`; `smallaxe.set_seed()` or the model's `seed` |
