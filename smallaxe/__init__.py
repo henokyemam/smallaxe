@@ -10,6 +10,8 @@ optional algorithm package; each subpackage is imported when it is first used:
 - :mod:`smallaxe.pipeline`: ``Pipeline``.
 - :mod:`smallaxe.metrics`: regression and classification metrics.
 - :mod:`smallaxe.search`: hyperparameter search (``optimize.run``).
+- :mod:`smallaxe.auto`: ``AutomatedTraining``, every installed algorithm compared on one split.
+- :mod:`smallaxe.viz`: plotly charts that aggregate in Spark (the ``viz`` extra).
 - :mod:`smallaxe.datasets`: sample datasets.
 - :mod:`smallaxe.exceptions`: the exception hierarchy.
 """
@@ -47,8 +49,8 @@ __all__ = [
 def load_model(path: str) -> Union["Regressor", "Classifier"]:
     """Load the model saved at ``path``, whatever its algorithm and task.
 
-    Reads artifacts written by ``model.save`` in this and every earlier smallaxe
-    release (0.8.x artifacts record the old class name, 0.9 and 0.10 ones have no
+    Reads artifacts written by ``model.save`` in this release and in smallaxe 0.8.1
+    and later (0.8.x artifacts record the old class name, 0.9 and 0.10 ones have no
     ``format_version``). The training package is imported here, so ``import smallaxe``
     stays light.
 

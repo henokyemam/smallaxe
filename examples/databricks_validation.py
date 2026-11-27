@@ -1,21 +1,27 @@
 # Databricks notebook source
 # MAGIC %md
-# MAGIC # smallaxe end-to-end validation (Databricks)
+# MAGIC # smallaxe end-to-end check (Databricks)
 # MAGIC
-# MAGIC Validates the full smallaxe surface on a real Spark 3.5 cluster, including the
-# MAGIC optional JVM-package algorithms. The notebook is **availability-driven**: each
-# MAGIC optional algorithm runs if its Spark package is present, otherwise it is marked
-# MAGIC SKIP (e.g. LightGBM/SynapseML has no Scala 2.13 build, so it skips on 2.13 runtimes).
+# MAGIC A short check of each algorithm on a Databricks cluster: fit, validate and predict for
+# MAGIC regression and binary classification, and a hyperparameter search. Each optional algorithm
+# MAGIC runs if its package is present and is marked SKIP otherwise (for example LightGBM on a Spark 3
+# MAGIC runtime with Scala 2.13, for which SynapseML has no build). The Maven libraries each validated
+# MAGIC runtime needs are listed in `databricks_all_algorithms_validation.py`; the `catboost_spark`
+# MAGIC Python module comes from the catboost-spark Maven library, not from PyPI.
 
 # COMMAND ----------
 
-# MAGIC %pip install --quiet "git+https://github.com/henokyemam/smallaxe.git@goals" xgboost catboost hyperopt
-# MAGIC # Note: catboost_spark python is provided by the catboost-spark Maven jar
-# MAGIC # installed on the cluster (it is not a PyPI package).
-# MAGIC dbutils.library.restartPython()
+# MAGIC %pip install --quiet "git+https://github.com/henokyemam/smallaxe.git@main" xgboost catboost hyperopt
 
 # COMMAND ----------
 
+dbutils.library.restartPython()
+
+# COMMAND ----------
+
+# Databricks source notebook: imports sit in later cells (E402), and the runtime
+# provides spark, dbutils and display (F821).
+# ruff: noqa: E402, F821
 from hyperopt import hp
 
 import smallaxe

@@ -2,42 +2,53 @@
 
 ## Overview
 
-smallaxe is a PySpark MLOps library that provides a scikit-learn-like interface for model training, evaluation, and optimization on PySpark DataFrames. It supports XGBoost, LightGBM, CatBoost, and Random Forest algorithms with built-in preprocessing pipelines, hyperparameter optimization (hyperopt), and cross-validation.
+smallaxe is a PySpark MLOps library that provides a scikit-learn-like interface for model training, evaluation, and optimization on PySpark DataFrames. It supports Random Forest, XGBoost, LightGBM and CatBoost, with preprocessing steps and pipelines that save and load as versioned artifacts, train/test and k-fold validation, hyperparameter search (hyperopt), automated training across algorithms (`smallaxe.auto`) and plotly charts (`smallaxe.viz`). It runs on PySpark 3.3 to 3.5 and 4.0 to 4.3, on a classic Spark session.
 
 ## Repository Structure
 
 ```
 smallaxe/
-├── smallaxe/                  # Main package
+├── smallaxe/                  # Main package (ships py.typed)
 │   ├── __init__.py            # Global settings (verbosity, seed) and load / load_model / load_pipeline
 │   ├── _artifact.py           # Versioned metadata.json header of every saved artifact
 │   ├── _checks.py             # Shared argument checks (a DataFrame, a list of column names)
-│   ├── _config.py             # Internal config state
+│   ├── _config.py             # Internal config state (verbosity, seed)
 │   ├── _fs.py                 # Hadoop FileSystem IO (local, dbfs:/, s3://, hdfs://); the one JVM access point (refuses Spark Connect)
 │   ├── _sql.py                # Spark 3's default (non-ANSI) string-to-integer cast, in either ANSI mode; quoted()
 │   ├── _warn.py               # caller_stacklevel(): warnings point at the user's line
 │   ├── auto/                  # AutomatedTraining: every algorithm on one split, best kept
+│   │   ├── __init__.py
 │   │   └── _automated.py
-│   ├── datasets/              # Sample data loading utilities
+│   ├── datasets/              # Sample datasets (load_sample_regression / _classification, dataset_info)
+│   │   ├── __init__.py
 │   │   └── _data.py
-│   ├── exceptions/            # Custom exception hierarchy
-│   ├── metrics/               # Evaluation metrics
-│   │   ├── classification.py  # accuracy, precision, recall, f1, auc_roc, auc_pr, log_loss
+│   ├── exceptions/            # Custom exception hierarchy (__init__.py)
+│   ├── metrics/               # Evaluation metrics; TASK_METRICS
+│   │   ├── __init__.py
+│   │   ├── _checks.py         # Column checks and ANSI-independent comparisons and casts
+│   │   ├── classification.py  # accuracy, precision, recall, f1_score, multiclass_scores, auc_roc, auc_pr, log_loss
 │   │   └── regression.py      # mse, rmse, mae, r2, mape
-│   ├── pipeline/              # Chainable Pipeline (Imputer → Scaler → Encoder → Model)
+│   ├── pipeline/              # Pipeline: preprocessing steps and an optional model, saved as one unit
+│   │   ├── __init__.py
 │   │   └── pipeline.py
-│   ├── preprocessing/         # Data transformers
-│   │   ├── encoder.py         # Categorical encoding (onehot, etc.)
+│   ├── preprocessing/         # Data transformers, each with save / load
+│   │   ├── __init__.py
+│   │   ├── _common.py         # Column naming and artifact IO shared by the steps
+│   │   ├── encoder.py         # Categorical encoding (onehot, label)
 │   │   ├── imputer.py         # Missing value imputation
-│   │   └── scaler.py          # Feature scaling
+│   │   └── scaler.py          # Feature scaling (standard, minmax, maxabs)
 │   ├── search/                # Hyperparameter optimization via hyperopt
+│   │   ├── __init__.py
+│   │   └── optimize.py        # optimize.run, SearchResult; metric rules shared with auto and viz
 │   ├── training/              # Model training classes
+│   │   ├── __init__.py
 │   │   ├── algorithm.py       # Algorithm/Param records, task names, translation rule, registry
 │   │   ├── base.py            # Model, Regressor, Classifier (on BaseModel and the mixins)
-│   │   ├── catboost.py        # CatBoost ALGORITHM record
+│   │   ├── catboost.py        # CatBoost ALGORITHM record and the SynapseML compatibility shim
 │   │   ├── classifiers.py     # classifiers.<algorithm>() / load() / algorithms() / available_models()
 │   │   ├── lightgbm.py        # LightGBM ALGORITHM record
 │   │   ├── mixins/            # Composable model behaviors
+│   │   │   ├── __init__.py
 │   │   │   ├── metadata_mixin.py
 │   │   │   ├── param_mixin.py
 │   │   │   ├── persistence_mixin.py
@@ -47,19 +58,32 @@ smallaxe/
 │   │   ├── regressors.py      # regressors.<algorithm>() / load() / algorithms() / available_models()
 │   │   └── xgboost.py         # XGBoost ALGORITHM record
 │   └── viz/                   # Plotly charts that aggregate in Spark (extra `viz`)
+│       ├── __init__.py
 │       ├── _classification.py # confusion_matrix, roc_curve, precision_recall_curve
 │       ├── _regression.py     # residuals, actual_vs_predicted
 │       ├── _models.py         # feature_importances, model_comparison
 │       ├── _frames.py         # The rows a chart counts; the one collect of an aggregate
 │       └── _style.py          # Lazy plotly import, shared layout, argument checks
-├── tests/                     # pytest test suite (session-scoped SparkSession)
-├── .github/workflows/
-│   ├── ci.yml                 # CI pipeline
-│   └── publish.yml            # Package publishing
+├── tests/                     # pytest test suite (session-scoped SparkSession in conftest.py)
+│   ├── fakes.py               # Fake estimator modules for LightGBM / CatBoost translation tests
+│   └── fixtures/              # Artifacts saved by released versions, and the scripts that wrote them
+├── examples/                  # Kaggle end-to-end scripts and two Databricks validation notebooks
+├── .github/
+│   ├── scripts/floor_pins.py  # Turns each dependency floor into an exact pin for the test-lowest job
+│   └── workflows/
+│       ├── ci.yml             # Lint, type check, test matrix, test-lowest, test-xgboost
+│       └── publish.yml        # Package publishing (runs ci.yml first)
 ├── pyproject.toml             # Build config, dependencies, tool settings
-├── requirements-dev.txt       # Dev dependencies
-├── Goals.md                   # Project roadmap
-└── TODO.md                    # Current task list
+├── requirements-dev.txt       # Dev dependencies (kept equal to the dev extra by tests/test_packaging.py)
+├── MANIFEST.in                # What the source distribution contains
+├── README.md                  # User documentation; its Python blocks run in tests/test_readme_examples.py
+├── CHANGELOG.md               # Release notes, with the 0.x to 1.0 migration list
+├── GLOSSARY.md                # Domain vocabulary used in code and docs
+├── GOTCHAS.md                 # Behaviour that can surprise users, and what to do
+├── HOWTOAI.md                 # Common tasks for AI agents working on the code
+├── CONTRIBUTING.md            # Contribution workflow
+├── Goals.md                   # Product goals and the status of the v1 acceptance criteria
+└── TODO.md                    # What is left after 1.0
 ```
 
 ## Architecture
@@ -165,15 +189,18 @@ pip install -e ".[dev,all]"
 
 ```bash
 pytest
+ruff check smallaxe tests examples     # CI lints smallaxe and tests
+black --check smallaxe tests
+mypy smallaxe
 ```
 
-Tests use a session-scoped `SparkSession` fixture (`local[2]` mode) defined in `tests/conftest.py`. `tests/test_algorithm.py` checks every algorithm's translation against fake estimators (no JVM packages needed); `tests/test_model_contract.py` runs the fit/predict/validate/save/load contract per (algorithm, task) wherever the package is installed; `tests/test_legacy_artifacts.py` loads models saved by 0.8.1, 0.9.0 and 0.10.0; `tests/test_public_api.py` pins the public surface; `tests/test_removed.py` checks that every 0.x spelling is gone; `tests/test_user_errors.py` probes bad inputs for raw Python errors; `tests/test_auto.py` covers AutomatedTraining (real Random Forest / XGBoost runs, and fake fits for ranking, failures and skips). Per-algorithm files hold only behaviour unique to that algorithm.
+Tests use a session-scoped `SparkSession` fixture (`local[2]` mode) defined in `tests/conftest.py`. `tests/test_algorithm.py` checks every algorithm's translation against fake estimators (no JVM packages needed); `tests/test_model_contract.py` runs the fit/predict/validate/save/load contract per (algorithm, task) wherever the package is installed; `tests/test_legacy_artifacts.py` loads models saved by 0.8.1, 0.9.0 and 0.10.0; `tests/test_public_api.py` pins the public surface; `tests/test_removed.py` checks that every 0.x spelling is gone; `tests/test_user_errors.py` probes bad inputs for raw Python errors; `tests/test_auto.py` covers AutomatedTraining (real Random Forest / XGBoost runs, and fake fits for ranking, failures and skips); `tests/test_viz.py` asserts on chart data and on the row counts the charts collect; `tests/test_ansi_mode.py` runs each ANSI-sensitive edge case with ANSI mode on and off; `tests/test_classic_session.py` checks that a Spark Connect session is refused; `tests/test_packaging.py` checks the dependency set, the floors and the PySpark bound against `ci.yml`; `tests/test_readme_examples.py` runs every Python block of `README.md` that has no `<!-- test: ... -->` marker. `tests/test_pipeline_persistence.py` and `tests/test_preprocessing_persistence.py` also load the 0.10 fixtures under `tests/fixtures/`. Per-algorithm files hold only behaviour unique to that algorithm.
 
 ### Code Style
 
 - Formatter: `black` (line-length 100)
 - Linter: `ruff` (line-length 100, target py38)
-- Type checker: `mypy smallaxe`, strict settings in `pyproject.toml` (untyped defs disallowed, `warn_return_any`, `warn_unused_ignores`; missing imports ignored only for hyperopt, py4j, pandas and catboost_spark). The package ships `py.typed`, and CI blocks on it. A `# type: ignore` needs an error code and a reason.
+- Type checker: `mypy smallaxe`, strict settings in `pyproject.toml` (untyped defs disallowed, `warn_return_any`, `warn_unused_ignores`; missing imports ignored only for hyperopt, py4j, pandas, catboost_spark and plotly). The package ships `py.typed`, and CI blocks on it. A `# type: ignore` needs an error code and a reason.
 
 ### Key Conventions
 

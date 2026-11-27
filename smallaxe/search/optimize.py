@@ -375,7 +375,9 @@ def run(
             because it produces no score.
         n_folds: Number of folds when ``validation='kfold'``. Default 5.
         test_size: Test proportion when ``validation='train_test'``. Default 0.2.
-        feature_cols: Feature columns. If None, inferred from numeric columns.
+        feature_cols: Feature columns. If None, every numeric and boolean column
+            except ``label_col`` and ``exclude_cols``; the columns left out are
+            reported in one ``UserWarning``.
         exclude_cols: Columns to exclude from inferred features.
         fold_key: Column whose value alone decides a row's fold or split, as in
             ``fit``. Every trial scores on the same folds either way.
